@@ -1,1 +1,1082 @@
-<h1>Hello world!</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Aaron M. Harris — Senior Product/Software Engineer & Solutions Architect</title>
+  <meta name="description" content="Aaron M. Harris — Senior Product/Software Engineer, Solutions Architect, and AI-fluent full-stack developer. Deep engineering judgment and AI fluency that make small teams ship the impossible, across simulation, XR, and the web." />
+  <meta name="author" content="Aaron M. Harris" />
+  <meta name="theme-color" content="#16181d" />
+  <link rel="canonical" href="https://aaronmichaelharris.com/" />
+
+  <!-- Favicons -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+
+  <!-- Open Graph / social share -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Aaron M. Harris" />
+  <meta property="og:title" content="Aaron M. Harris — Senior Product/Software Engineer & Solutions Architect" />
+  <meta property="og:description" content="Deep engineering judgment and AI fluency that make small teams ship the impossible — across simulation, XR, and the web." />
+  <meta property="og:url" content="https://aaronmichaelharris.com/" />
+  <meta property="og:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Aaron M. Harris — Senior Product/Software Engineer, Solutions Architect, AI-Fluent Full-Stack Developer." />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Aaron M. Harris — Senior Product/Software Engineer & Solutions Architect" />
+  <meta name="twitter:description" content="Deep engineering judgment and AI fluency that make small teams ship the impossible — across simulation, XR, and the web." />
+  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta name="twitter:creator" content="@aaronmharrisamh" />
+
+  <!-- Inter via Google Fonts (with a robust system fallback in CSS) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
+
+  <style>
+  /* ============================================================
+     DESIGN SYSTEM — soft-charcoal / azure
+     ============================================================ */
+  :root {
+    /* surfaces */
+    --bg:        #16181d;   /* soft charcoal — page floor              */
+    --bg-deep:   #101217;   /* deepest pockets                          */
+    --panel:     #1e2128;   /* lifted panel                             */
+    --panel-2:   #23262f;   /* lifted panel, hover                      */
+    --line:      rgba(255,255,255,.08);   /* hairline borders          */
+    --line-soft: rgba(255,255,255,.05);
+
+    /* text */
+    --text:      #ebeef4;   /* near-white primary                       */
+    --text-soft: #c3c9d4;
+    --muted:     #969eaa;   /* secondary / meta                         */
+    --dim:       #6b7280;   /* faintest                                 */
+
+    /* accent — azure is the only ACTIVE accent */
+    --accent:        #4aa5e8;
+    --accent-bright: #6fbcf2;
+    --accent-deep:   #2e87cf;
+    --accent-glow:   rgba(74,165,232,.35);
+    --accent-faint:  rgba(74,165,232,.10);
+
+    /* staged accents — dormant, ready when we want them */
+    --c-orange: #f0883e;
+    --c-yellow: #f2c14e;
+    --c-lime:   #b5e853;
+
+    /* type */
+    --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            Helvetica, Arial, sans-serif;
+
+    /* spacing rhythm */
+    --section-pad: clamp(4rem, 9.5vw, 8rem);
+    --gutter:      clamp(1.25rem, 5vw, 3rem);
+    --maxw:        1180px;
+
+    /* shape + motion */
+    --radius:    16px;
+    --radius-sm: 10px;
+    --ease:      cubic-bezier(.22, 1, .36, 1);   /* easeOutExpo-ish      */
+    --ease-soft: cubic-bezier(.4, 0, .2, 1);
+  }
+
+  /* ============================================================
+     RESET + BASE
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: clamp(1rem, .55vw + .9rem, 1.125rem);
+    font-feature-settings: "cv05" 1, "ss01" 1, "cv02" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* a faint, fixed astral grid behind everything for depth */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(1200px 800px at 78% -10%, rgba(74,165,232,.08), transparent 60%),
+      radial-gradient(900px 700px at -10% 110%, rgba(74,165,232,.06), transparent 55%),
+      var(--bg);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: .35;
+    background-image:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+            mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+  }
+
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: inherit; text-decoration: none; }
+
+  ::selection { background: var(--accent); color: #06121d; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  /* layout helpers */
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: var(--gutter); }
+  section { scroll-margin-top: 84px; }
+
+  .eyebrow {
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: .65rem;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 30px; height: 2px;
+    background: var(--accent);
+    display: inline-block;
+  }
+  /* centered variant — used by the Contact closing CTA */
+  .eyebrow--center { justify-content: center; }
+
+  /* ============================================================
+     SCROLL PROGRESS BAR
+     ============================================================ */
+  .progress {
+    position: fixed; top: 0; left: 0;
+    height: 3px; width: 100%;
+    transform: scaleX(0); transform-origin: 0 50%;
+    background: linear-gradient(90deg, var(--accent-deep), var(--accent-bright));
+    z-index: 1000;
+    will-change: transform;
+  }
+
+  /* ============================================================
+     HEADER / NAV
+     ============================================================ */
+  .site-header {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 900;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1.1rem var(--gutter);
+    transition: padding .4s var(--ease-soft);
+  }
+  /* Blur/background live on a pseudo-element so the header box itself carries
+     no filter — a filtered ancestor would otherwise trap the fixed mobile
+     drawer inside the (short) header box instead of the viewport. */
+  .site-header::before {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    background: rgba(18,20,25,.72);
+    backdrop-filter: saturate(140%) blur(14px);
+    -webkit-backdrop-filter: saturate(140%) blur(14px);
+    border-bottom: 1px solid transparent;
+    opacity: 0; pointer-events: none;
+    transition: opacity .4s var(--ease-soft);
+  }
+  .site-header.scrolled::before { opacity: 1; border-bottom-color: var(--line); }
+  .site-header.scrolled { padding-block: .8rem; }
+
+  .brand {
+    display: inline-flex; align-items: center; gap: .6rem;
+    font-weight: 800; letter-spacing: .04em; font-size: .95rem;
+  }
+  .brand .mark {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    display: grid; place-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: .72rem; font-weight: 900; letter-spacing: -.04em;
+    transition: transform .5s var(--ease), border-color .4s, color .4s;
+  }
+  .brand:hover .mark { transform: rotate(-6deg) scale(1.05); border-color: var(--accent); }
+  /* Desktop: name + summary on ONE line, separated by a pipe.
+     Mobile: stacked (two lines, no pipe) — see the 880px media query. */
+  .brand__name { display: flex; align-items: baseline; line-height: 1.1; }
+  .brand__title { color: var(--text); font-weight: 800; }
+  .brand__sub {
+    color: var(--muted); font-weight: 600;
+    font-size: .8rem; letter-spacing: .02em;
+  }
+  .brand__sub::before {
+    content: "|"; color: var(--line);
+    margin: 0 .6rem; font-weight: 400;
+  }
+
+  .nav { display: flex; align-items: center; gap: clamp(2rem, 4.5vw, 4.4rem); }
+  .nav a {
+    position: relative;
+    font-size: .82rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted);
+    padding: .35rem 0;
+    transition: color .3s var(--ease-soft);
+  }
+  .nav a::after {
+    content: ""; position: absolute; left: 0; bottom: -2px;
+    width: 100%; height: 2px; background: var(--accent);
+    transform: scaleX(0); transform-origin: 0 50%;
+    transition: transform .4s var(--ease);
+  }
+  .nav a:hover, .nav a.active { color: var(--text); }
+  .nav a:hover::after, .nav a.active::after { transform: scaleX(1); }
+
+  .nav__toggle { display: none; }
+
+  /* dim scrim behind the open mobile drawer */
+  .nav-overlay {
+    position: fixed; inset: 0; z-index: 880;
+    background: rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none;
+    transition: opacity .45s var(--ease-soft);
+  }
+  .nav-overlay.open { opacity: 1; pointer-events: auto; }
+  body.nav-open { overflow: hidden; }
+
+  /* ============================================================
+     BUTTONS / LINKS
+     ============================================================ */
+  .btn {
+    --b: var(--accent);
+    display: inline-flex; align-items: center; gap: .7rem;
+    font-weight: 700; font-size: .95rem; letter-spacing: .02em;
+    padding: .9rem 1.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    transition: transform .4s var(--ease), border-color .4s, background .4s, box-shadow .4s;
+    will-change: transform;
+  }
+  .btn:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    box-shadow: 0 14px 36px -16px var(--accent-glow);
+  }
+  .btn--ghost { background: transparent; }
+  .btn .arrow { transition: transform .5s var(--ease); }
+  .btn:hover .arrow { transform: translateY(3px); }
+
+  .textlink {
+    display: inline-flex; align-items: center; gap: .45rem;
+    color: var(--accent); font-weight: 600;
+    border-bottom: 1px solid transparent;
+    transition: border-color .3s, gap .3s var(--ease), color .3s;
+    width: fit-content;
+  }
+  .textlink:hover { border-bottom-color: var(--accent); gap: .75rem; color: var(--accent-bright); }
+  .textlink svg { width: 1em; height: 1em; }
+
+  /* ============================================================
+     HERO
+     ============================================================ */
+  .hero {
+    position: relative;
+    min-height: clamp(620px, 92vh, 920px);
+    display: flex; align-items: center;
+    padding-top: 6rem;
+    overflow: hidden;
+  }
+  /* drifting ambient glows */
+  .hero__glow {
+    position: absolute; inset: -20% -10% 0 -10%;
+    z-index: -1; pointer-events: none;
+  }
+  .hero__glow span {
+    position: absolute; border-radius: 50%;
+    filter: blur(70px); opacity: .55;
+    will-change: transform;
+  }
+  .hero__glow .g1 {
+    width: 46vmax; height: 46vmax; top: -16vmax; right: -8vmax;
+    background: radial-gradient(circle, rgba(74,165,232,.5), transparent 65%);
+    animation: drift1 22s var(--ease-soft) infinite alternate;
+  }
+  .hero__glow .g2 {
+    width: 34vmax; height: 34vmax; bottom: -14vmax; left: -6vmax;
+    background: radial-gradient(circle, rgba(46,135,207,.4), transparent 65%);
+    animation: drift2 26s var(--ease-soft) infinite alternate;
+  }
+  .hero__glow .g3 {
+    width: 22vmax; height: 22vmax; top: 30%; left: 40%;
+    background: radial-gradient(circle, rgba(111,188,242,.22), transparent 70%);
+    animation: drift3 30s var(--ease-soft) infinite alternate;
+  }
+  @keyframes drift1 { to { transform: translate3d(-6vmax, 5vmax, 0) scale(1.12); } }
+  @keyframes drift2 { to { transform: translate3d(7vmax, -4vmax, 0) scale(1.08); } }
+  @keyframes drift3 { to { transform: translate3d(-5vmax, -6vmax, 0) scale(1.18); } }
+
+  .hero__inner { max-width: 980px; }
+  .hero h1 {
+    font-size: clamp(2.5rem, 6.2vw, 4.6rem);
+    line-height: 1.04;
+    letter-spacing: -.025em;
+    font-weight: 800;
+    margin-top: 1.4rem;
+    text-wrap: balance;
+  }
+  .hero h1 .hl { color: var(--accent); }
+  .hero__sub {
+    font-size: clamp(1.12rem, 1.8vw, 1.5rem);
+    color: var(--text-soft);
+    font-weight: 400;
+    max-width: 46ch;
+    margin-top: 1.7rem;
+    line-height: 1.5;
+  }
+  .hero__note {
+    font-style: italic;
+    color: var(--muted);
+    margin-top: 1.1rem;
+    max-width: 44ch;
+  }
+  .hero__cta { margin-top: 2.6rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+
+  /* hero entrance animation (plays on load) */
+  .reveal-hero > * { opacity: 0; transform: translateY(26px); }
+  .loaded .reveal-hero > * {
+    animation: heroUp .9s var(--ease) forwards;
+  }
+  .loaded .reveal-hero > *:nth-child(1) { animation-delay: .05s; }
+  .loaded .reveal-hero > *:nth-child(2) { animation-delay: .16s; }
+  .loaded .reveal-hero > *:nth-child(3) { animation-delay: .28s; }
+  .loaded .reveal-hero > *:nth-child(4) { animation-delay: .40s; }
+  .loaded .reveal-hero > *:nth-child(5) { animation-delay: .52s; }
+  @keyframes heroUp { to { opacity: 1; transform: none; } }
+
+  /* ============================================================
+     SECTION HEADINGS
+     ============================================================ */
+  .section-head { max-width: 60ch; margin-bottom: clamp(2.5rem, 6vw, 4.5rem); }
+  .section-head h2 {
+    font-size: clamp(2rem, 4.4vw, 2.9rem);
+    letter-spacing: -.02em; font-weight: 800; line-height: 1.08;
+    margin-top: 1rem;
+  }
+  .section-head p {
+    color: var(--muted); margin-top: 1rem;
+    font-size: clamp(1rem, 1.4vw, 1.18rem);
+  }
+
+  /* ============================================================
+     PROJECTS
+     ============================================================ */
+  .work { padding-block: var(--section-pad); }
+
+  .project {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: clamp(1.8rem, 4vw, 4rem);
+    align-items: center;
+    padding-block: clamp(3rem, 7vw, 6rem);
+    border-top: 1px solid var(--line-soft);
+  }
+  .project:first-of-type { border-top: 0; }
+  .project--right { grid-template-columns: 1fr 1.35fr; }
+  .project--right .project__media { order: 2; }
+  .project--right .project__body  { order: 1; }
+
+  /* media column */
+  .project__media { position: relative; }
+  .figure {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    box-shadow: 0 30px 80px -40px rgba(0,0,0,.8);
+    transition: transform .6s var(--ease), box-shadow .6s var(--ease), border-color .6s;
+  }
+  .figure img {
+    width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+    transition: transform .9s var(--ease), filter .6s;
+  }
+  .project__media:hover .figure {
+    transform: translateY(-6px);
+    border-color: var(--accent);
+    box-shadow: 0 40px 90px -38px rgba(0,0,0,.85), 0 0 0 1px var(--accent-faint);
+  }
+  .project__media:hover .figure img { transform: scale(1.04); }
+  .figure::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(120deg, transparent 60%, var(--accent-faint));
+    opacity: 0; transition: opacity .6s;
+  }
+  .project__media:hover .figure::after { opacity: 1; }
+
+  /* small inset image overlapping the main figure */
+  .figure-inset {
+    position: absolute; right: -14px; bottom: -22px;
+    width: 38%; max-width: 220px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 2px solid var(--bg);
+    box-shadow: 0 20px 50px -22px rgba(0,0,0,.9);
+    transition: transform .6s var(--ease);
+  }
+  .figure-inset img { aspect-ratio: 4 / 3; object-fit: cover; width: 100%; }
+  .project__media:hover .figure-inset { transform: translateY(-4px) scale(1.03); }
+
+  /* body column */
+  .project__index {
+    font-size: .8rem; font-weight: 800; letter-spacing: .2em;
+    color: var(--accent); display: block; margin-bottom: .9rem;
+  }
+  .project__title {
+    font-size: clamp(1.6rem, 3vw, 2.15rem);
+    font-weight: 800; letter-spacing: -.02em; line-height: 1.1;
+  }
+  .project__meta {
+    font-size: .85rem; color: var(--muted); margin-top: .5rem;
+    letter-spacing: .04em;
+  }
+  .project__lead { margin-top: 1.2rem; color: var(--text-soft); }
+  .project__desc { margin-top: 1rem; color: var(--muted); font-size: .98rem; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.4rem; }
+  .stat {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 999px;
+    padding: .4rem .9rem;
+    font-size: .82rem; font-weight: 600; color: var(--text-soft);
+  }
+  .stat b { color: var(--accent); font-weight: 800; }
+
+  .specs { margin-top: 1.5rem; display: grid; gap: .55rem; }
+  .spec { display: grid; grid-template-columns: 84px 1fr; gap: 1rem; font-size: .88rem; }
+  .spec dt {
+    color: var(--dim); text-transform: uppercase; letter-spacing: .12em;
+    font-size: .72rem; font-weight: 700; padding-top: .15rem;
+  }
+  .spec dd { color: var(--text-soft); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .chip {
+    font-size: .76rem; color: var(--muted);
+    border: 1px solid var(--line-soft); border-radius: 7px;
+    padding: .22rem .6rem; background: rgba(255,255,255,.02);
+  }
+
+  .highlights { margin-top: 1.4rem; display: grid; gap: .5rem; list-style: none; }
+  .highlights li {
+    position: relative; padding-left: 1.4rem; color: var(--text-soft); font-size: .92rem;
+  }
+  .highlights li::before {
+    content: ""; position: absolute; left: 0; top: .62em;
+    width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
+    transform: rotate(45deg);
+  }
+
+  /* ============================================================
+     ABOUT
+     ============================================================ */
+  .about { padding-block: var(--section-pad); }
+  .about__grid {
+    display: grid; grid-template-columns: 300px 1fr;
+    gap: clamp(2rem, 6vw, 5rem); align-items: start;
+  }
+  .portrait {
+    position: relative; width: 240px; aspect-ratio: 1; margin-inline: auto;
+  }
+  .portrait img {
+    width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+    border: 1px solid var(--line);
+  }
+  .portrait::before {
+    content: ""; position: absolute; inset: -10px; border-radius: 50%;
+    border: 1px solid var(--accent-faint);
+    background: conic-gradient(from 200deg, transparent, var(--accent-glow), transparent 70%);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+            mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+    animation: spin 18s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .about__body p { color: var(--text-soft); }
+  .about__body p + p { margin-top: 1.1rem; }
+  .about__body .lede { font-size: clamp(1.15rem, 1.8vw, 1.4rem); color: var(--text); }
+  .about__body .place { color: var(--muted); margin-top: 1.3rem; }
+  .about__body .textlink { margin-top: 1.6rem; }
+
+  /* ============================================================
+     CONTACT / FOOTER
+     ============================================================ */
+  .contact {
+    padding-block: var(--section-pad);
+    text-align: center;
+    position: relative;
+  }
+  .contact h2 {
+    font-size: clamp(2.6rem, 8vw, 5rem);
+    font-weight: 900; letter-spacing: -.03em; line-height: 1;
+  }
+  .contact .email {
+    display: inline-block; margin-top: 1.6rem;
+    font-size: clamp(1.3rem, 3.4vw, 2.1rem);
+    font-weight: 700; color: var(--accent);
+    border-bottom: 2px solid transparent;
+    transition: border-color .3s, color .3s, transform .4s var(--ease);
+  }
+  .contact .email:hover { border-bottom-color: var(--accent); color: var(--accent-bright); transform: translateY(-2px); }
+
+  /* primary contact actions: Call + Text row, then Résumé below */
+  .contact__actions {
+    margin-top: 2.4rem;
+    display: flex; flex-direction: column; align-items: center; gap: .9rem;
+  }
+  .contact__row { display: flex; flex-wrap: wrap; justify-content: center; gap: .9rem; }
+  .contact-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .6rem;
+    min-width: 150px;
+    padding: .85rem 1.7rem; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); font-weight: 700; font-size: .95rem;
+    transition: transform .4s var(--ease), border-color .4s, color .4s, background .4s, box-shadow .4s;
+  }
+  .contact-btn:hover {
+    transform: translateY(-3px); border-color: var(--accent);
+    background: var(--panel-2); box-shadow: 0 14px 36px -20px var(--accent-glow);
+  }
+  .contact-btn svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+  .contact-btn--call { color: var(--accent); border-color: var(--accent-faint); }
+
+  /* chic, understated icon-only chips for LinkedIn / GitHub / X */
+  .social-mini {
+    margin-top: 2rem;
+    display: flex; justify-content: center; align-items: center; gap: .9rem;
+  }
+  .social-mini a {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid var(--line); background: transparent;
+    color: var(--muted);
+    transition: transform .4s var(--ease), border-color .4s, color .4s, background .4s;
+  }
+  .social-mini a:hover {
+    transform: translateY(-3px); border-color: var(--accent);
+    color: var(--accent); background: var(--panel);
+  }
+  .social-mini svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+
+  /* quiet finishing line at the very bottom */
+  .endbar {
+    margin-top: clamp(3.5rem, 8vw, 6rem);
+    padding-block: 1.5rem 1.8rem;
+    text-align: center;
+    font-size: .78rem; letter-spacing: .05em; color: var(--dim);
+  }
+
+  /* ============================================================
+     SCROLL REVEAL
+     ============================================================ */
+  .reveal { opacity: 0; transform: translateY(34px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
+  .reveal.in { opacity: 1; transform: none; }
+  .reveal.d1 { transition-delay: .08s; }
+  .reveal.d2 { transition-delay: .16s; }
+  .reveal.d3 { transition-delay: .24s; }
+
+  /* ============================================================
+     RESPONSIVE
+     ============================================================ */
+  @media (max-width: 880px) {
+    /* Header bar stays pinned ON TOP; the drawer slides in BELOW it so the
+       AARON M. HARRIS lockup is always visible. Header sits above the panel. */
+    .site-header { z-index: 960; }
+
+    .nav {
+      position: fixed; top: var(--header-h, 64px); right: 0; bottom: 0;
+      width: min(82vw, 340px);
+      flex-direction: column; align-items: stretch; justify-content: flex-start;
+      gap: .15rem; padding: 1.4rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
+      background: rgba(18,20,25,.98);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      border-left: 1px solid var(--line);
+      border-top: 1px solid var(--line);
+      box-shadow: -24px 0 60px -30px rgba(0,0,0,.8);
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform .5s var(--ease);
+      z-index: 940;
+    }
+    .nav.open { transform: translateX(0); }
+    .nav a {
+      font-size: 1.18rem; letter-spacing: .01em; text-transform: none;
+      color: var(--text-soft); padding: .7rem .2rem;
+    }
+    .nav a::after { display: none; }
+    .nav a:hover, .nav a.active { color: var(--accent); }
+
+    /* Work/About/Contact: take the open space and vertically center */
+    .nav__links {
+      flex: 1 1 auto;
+      display: flex; flex-direction: column; justify-content: center; gap: .3rem;
+    }
+
+    .nav__toggle {
+      display: inline-flex; flex-direction: column; gap: 5px;
+      width: 42px; height: 42px; align-items: center; justify-content: center;
+      margin-left: auto;   /* always pin to the right edge of the header */
+      background: rgba(35,38,47,.92); border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: 0 6px 18px -8px rgba(0,0,0,.7);
+      cursor: pointer; z-index: 970; position: relative;
+    }
+    .nav__toggle span { width: 18px; height: 2px; background: var(--text); transition: transform .35s var(--ease), opacity .25s; }
+    .nav__toggle.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav__toggle.open span:nth-child(2) { opacity: 0; }
+    .nav__toggle.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    /* mobile: stack the name over the summary (no pipe) */
+    .brand__name { flex-direction: column; align-items: flex-start; }
+    .brand__title { font-size: .92rem; }
+    .brand__sub { font-size: .68rem; margin-top: .12rem; }
+    .brand__sub::before { content: none; }
+
+    .project, .project--right { grid-template-columns: 1fr; gap: 1.8rem; }
+    .project--right .project__media { order: 0; }
+    .project--right .project__body  { order: 0; }
+
+    .about__grid { grid-template-columns: 1fr; }
+    .portrait { margin-bottom: .5rem; }
+
+    .figure-inset { width: 42%; right: -8px; bottom: -16px; }
+    .spec { grid-template-columns: 72px 1fr; gap: .7rem; }
+
+    /* keep Email / Call / TXT on a single row on phones */
+    .contact__row { flex-wrap: nowrap; gap: .55rem; width: 100%; }
+    .contact__row .contact-btn {
+      flex: 1 1 0; min-width: 0; padding: .8rem .6rem; gap: .4rem;
+      font-size: .9rem;
+    }
+  }
+
+  @media (max-width: 400px) {
+    /* tighten the lockup on very narrow phones */
+    .brand__title { font-size: .82rem; }
+    .brand__sub { font-size: .58rem; }
+    .brand .mark { width: 28px; height: 28px; }
+
+    /* shrink the contact buttons a touch more so 3 still fit */
+    .contact__row { gap: .4rem; }
+    .contact__row .contact-btn { padding: .75rem .35rem; font-size: .82rem; gap: .32rem; }
+    .contact__row .contact-btn svg { width: 16px; height: 16px; }
+  }
+  </style>
+</head>
+
+<body>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <!-- ===================== HEADER ===================== -->
+  <header class="site-header" id="header">
+    <a class="brand" href="#top" aria-label="Aaron M. Harris — home">
+      <span class="mark" aria-hidden="true">AMH</span>
+      <span class="brand__name">
+        <span class="brand__title full">AARON M. HARRIS</span>
+        <span class="brand__sub">Senior Product / Software Engineer — Portfolio</span>
+      </span>
+    </a>
+
+    <button class="nav__toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav">
+      <span></span><span></span><span></span>
+    </button>
+
+    <nav class="nav" id="nav" aria-label="Primary">
+      <div class="nav__links">
+        <a href="#work">Work</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- dim scrim behind the mobile nav drawer -->
+  <div class="nav-overlay" id="navOverlay" aria-hidden="true"></div>
+
+  <main id="top">
+
+    <!-- ===================== HERO ===================== -->
+    <section class="hero" aria-label="Introduction">
+      <div class="hero__glow" aria-hidden="true">
+        <span class="g1"></span><span class="g2"></span><span class="g3"></span>
+      </div>
+      <div class="wrap">
+        <div class="hero__inner reveal-hero">
+          <span class="eyebrow">Senior Product / Software Engineer &amp; Solutions Architect</span>
+          <h1>I help small teams ship the <span class="hl">impossible</span>.</h1>
+          <p class="hero__sub">Deep engineering judgment and AI fluency, from concept to market — across UI/UX, real-time simulation, VR/XR, and AI-augmented development.</p>
+          <p class="hero__note">Most impactful on small teams shipping work that probably shouldn't be possible at this scale.</p>
+          <div class="hero__cta">
+            <a class="btn" href="#work">View Work <span class="arrow" aria-hidden="true">↓</span></a>
+            <a class="btn btn--ghost" href="#contact">Get in Touch</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SELECTED WORK ===================== -->
+    <section class="work" id="work" aria-label="Selected work">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <span class="eyebrow">Selected Work</span>
+          <h2>Five projects, one throughline: ambitious systems shipped by small teams.</h2>
+          <p>Spanning space-domain awareness, industrial logistics, educational simulation, indie game systems, and AI-augmented tooling.</p>
+        </div>
+
+        <!-- PROJECT 1 — Forerunner 3 (image left) -->
+        <article class="project project--left">
+          <div class="project__media reveal">
+            <figure class="figure">
+              <img src="img/placeholder-forerunner.jpg" width="1600" height="900"
+                   alt="Forerunner 3 — BabylonJS 3D visualization of space-domain awareness data (placeholder)." loading="lazy" />
+            </figure>
+          </div>
+          <div class="project__body reveal d1">
+            <span class="project__index">01</span>
+            <h3 class="project__title">Forerunner 3</h3>
+            <p class="project__meta">Space Interactions · Technical Lead · 2025–2026</p>
+            <p class="project__lead">A web-based 3D visualization platform for space-domain awareness, fusing live satellite data, Google Earth tiling, and real-time FAA traffic into one navigable scene.</p>
+            <p class="project__desc">As founding technical lead, I drove a fast-tracked, AI-augmented rebuild of a legacy WebGL/JS platform into a modern BabylonJS/TypeScript application — with UI/UX and 3D mesh optimization tuned for clarity under heavy live data. The lineage runs deep: Forerunner&nbsp;2 indexed 500,000+ historical TLE records with time-traversal queries, and the orbital-debris work was presented at the 2024 Space Symposium.</p>
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Technical Lead · Founding Engineering Team</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">BabylonJS</span><span class="chip">TypeScript</span><span class="chip">REST</span><span class="chip">Google Earth tiles</span><span class="chip">FAA feeds</span></span></dd></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- PROJECT 2 — Phillips Lifestyles (image right) -->
+        <article class="project project--right">
+          <div class="project__media reveal">
+            <figure class="figure">
+              <img src="img/placeholder-phillips.jpg" width="1600" height="900"
+                   alt="Phillips Lifestyles — dual-window logistics and scheduling platform (placeholder)." loading="lazy" />
+            </figure>
+          </div>
+          <div class="project__body reveal d1">
+            <span class="project__index">02</span>
+            <h3 class="project__title">Phillips Lifestyles</h3>
+            <p class="project__meta">CTO &amp; Design Lead · 2015–2024</p>
+            <p class="project__lead">A multi-system logistics platform built from the ground up: a C# desktop client, MongoDB, custom IoT GPS hardware across an 18-vehicle fleet, and AutoHotkey RPA bridging a legacy POS.</p>
+            <p class="project__desc">I architected a unified scheduling system around a dual-window UI philosophy, letting six service techs and three-to-four maintenance techs run their days from one tool. A local-first data store kept crews productive offline, with redundant Google Calendar sync so field techs always had their schedule in hand, while custom Particle.io hardware tracked the fleet in real time and RPA bridged an aged POS that had no API.</p>
+            <div class="stats">
+              <span class="stat"><b>$1.5M</b> revenue increase</span>
+              <span class="stat"><b>~$300K/yr</b> labor saved</span>
+            </div>
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Architect · Tech Lead · Designer</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">C#</span><span class="chip">MongoDB</span><span class="chip">Google Calendar API</span><span class="chip">Particle.io IoT</span><span class="chip">AutoHotkey RPA</span></span></dd></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- PROJECT 3 — Mobile Planetarium (image left + inset) -->
+        <article class="project project--left">
+          <div class="project__media reveal">
+            <figure class="figure">
+              <img src="img/placeholder-planetarium.jpg" width="1600" height="900"
+                   alt="COGNiTiON Mobile Planetarium — dome show in progress (placeholder)." loading="lazy" />
+            </figure>
+            <figure class="figure-inset">
+              <img src="img/placeholder-planetarium-inset.jpg" width="800" height="600"
+                   alt="Custom thermal-isolated small-form-factor PC build (placeholder)." loading="lazy" />
+            </figure>
+          </div>
+          <div class="project__body reveal d1">
+            <span class="project__index">03</span>
+            <h3 class="project__title">COGNiTiON Mobile Planetarium</h3>
+            <p class="project__meta">Earth &amp; Space Lab Director · 2023–Present</p>
+            <p class="project__lead">A $50K real-time astronomical simulation rig, custom-integrated à la carte from international vendors: an Israeli dome, a Belgian fisheye lens, and a SEILER/ZEISS custom-modified projector.</p>
+            <p class="project__desc">After rejecting off-the-shelf commercial systems, I sourced components internationally — traveling to RSA Cosmos in France to inform the design — and became SEILER's first customer for a fully custom-integrated mobile platform. The build adds novel external, thermal-isolated electronics and a 5G wireless presenter interface designed so kids can take the controls without breaking the show.</p>
+            <div class="stats">
+              <span class="stat"><b>100+</b> live shows</span>
+              <span class="stat"><b>10,000+</b> attendees</span>
+            </div>
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Systems Architect · Designer · Presenter</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Space Engine</span><span class="chip">Custom SFF PC build</span><span class="chip">5G wireless presenter UI</span></span></dd></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- PROJECT 4 — Blockade Runner (image right) -->
+        <article class="project project--right">
+          <div class="project__media reveal">
+            <figure class="figure">
+              <img src="img/placeholder-blockade.jpg" width="1600" height="900"
+                   alt="Blockade Runner — voxel space-sim and ship-construction system (placeholder)." loading="lazy" />
+            </figure>
+          </div>
+          <div class="project__body reveal d1">
+            <span class="project__index">04</span>
+            <h3 class="project__title">Blockade Runner</h3>
+            <p class="project__meta">ZanMgt · Co-Founder &amp; Lead Designer · 2011–2016</p>
+            <p class="project__lead">A voxel-based space-sim with a unique ship-construction system and realistic physics — 5,000+ paying early-access customers across international markets, on a bi-weekly release cadence.</p>
+            <p class="project__desc">The heart of the game was ship construction as a genuine design problem, where every block of mass changed how a vessel handled. We shipped fortnightly in tight dialogue with the community, and the voxel work — including the <em>Liquid Cubed</em> real-time fluid-simulation experiments — still reads as distinctive in 2026. A tiny team that landed thousands of paying customers worldwide.</p>
+            <div class="stats">
+              <span class="stat"><b>5,000+</b> paying customers</span>
+              <span class="stat"><b>Bi-weekly</b> release cadence</span>
+            </div>
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Co-Founder · Lead Designer</dd></div>
+              <div class="spec"><dt>Tech</dt><dd><span class="chips"><span class="chip">Custom voxel engine</span><span class="chip">Real-time physics</span><span class="chip">Proprietary fluid sim</span></span></dd></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- PROJECT 5 — AI-Augmented Tooling (image left + inset + highlights) -->
+        <article class="project project--left">
+          <div class="project__media reveal">
+            <figure class="figure">
+              <img src="img/placeholder-aitooling.jpg" width="1600" height="900"
+                   alt="AI-augmented engineering tooling — composite of shipped internal apps (placeholder)." loading="lazy" />
+            </figure>
+            <figure class="figure-inset">
+              <img src="img/placeholder-aitooling-inset.jpg" width="800" height="600"
+                   alt="Tool composite — mascot notifier, call-stack visualizer, fisheye converter (placeholder)." loading="lazy" />
+            </figure>
+          </div>
+          <div class="project__body reveal d1">
+            <span class="project__index">05</span>
+            <h3 class="project__title">AI-Augmented Engineering Workflow</h3>
+            <p class="project__meta">HarrisXR LLC · Founder &amp; Sole Engineer · 2025–2026</p>
+            <p class="project__lead">10+ shipped Python and web tools built for internal and team use — the patterns I developed while evangelizing AI-first workflows, made tangible.</p>
+            <p class="project__desc">I work in Claude Code as my primary coding partner inside a structured plan → review → implement cycle that keeps AI velocity from turning into technical debt. The tools below are that workflow in practice — utilities spanning reverse-engineering, real-time projection math, and developer ergonomics.</p>
+            <ul class="highlights">
+              <li>Wulfram 2 call-stack visualizer</li>
+              <li>360° → 180° fisheye video converter</li>
+              <li>Mascot notification system</li>
+              <li>French voice practice via Grok</li>
+            </ul>
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Founder · Sole Engineer</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Python</span><span class="chip">AutoHotkey 2</span><span class="chip">TypeScript</span><span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Gemini</span></span></dd></div>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ===================== ABOUT ===================== -->
+    <section class="about" id="about" aria-label="About Aaron">
+      <div class="wrap">
+        <div class="section-head reveal"><span class="eyebrow">About</span></div>
+        <div class="about__grid">
+          <div class="reveal">
+            <div class="portrait">
+              <img src="aaron-portfolio-portrait-sd.jpg" width="512" height="512"
+                   alt="Portrait of Aaron M. Harris." loading="lazy" />
+            </div>
+          </div>
+          <div class="about__body reveal d1">
+            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was nine, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
+            <p>What sets me apart is deep engineering judgment paired with AI fluency. I work in Claude Code as my primary coding partner, architect systems where AI accelerates delivery without creating technical debt, and bring the same approach to the teams I lead.</p>
+            <p>The work that lights me up has people on the other end of it — watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
+            <p class="place">Currently based in Traverse City, Michigan.</p>
+            <a class="textlink" href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener">
+              Read the full bio on LinkedIn
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CONTACT ===================== -->
+    <section class="contact" id="contact" aria-label="Contact">
+      <div class="wrap">
+        <div class="reveal">
+          <!-- Contact is a deliberately centered closing CTA (eyebrow + heading
+               + email + buttons all centered). To left-align the eyebrow like
+               the Work/About sections instead, remove the "eyebrow--center" class. -->
+          <span class="eyebrow eyebrow--center">Contact</span>
+          <h2>Let's talk.</h2>
+          <a class="email" href="mailto:contact@aaronmichaelharris.com">contact@aaronmichaelharris.com</a>
+        </div>
+        <div class="contact__actions reveal d1">
+          <div class="contact__row">
+            <a class="contact-btn contact-btn--call" href="mailto:contact@aaronmichaelharris.com" aria-label="Email Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v.4l8 5 8-5V6H4zm16 2.7-7.47 4.67a1 1 0 0 1-1.06 0L4 8.7V18h16V8.7z"/></svg>
+              Email
+            </a>
+            <a class="contact-btn contact-btn--call" href="tel:+16162168641" aria-label="Call Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.25 1z"/></svg>
+              Call
+            </a>
+            <a class="contact-btn contact-btn--call" href="sms:+16162168641" aria-label="Text Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2zm3 6h10v1.6H7zm0 3.4h7V14H7z"/></svg>
+              TXT
+            </a>
+          </div>
+          <a class="contact-btn" href="Aaron_Harris_Resume.pdf" target="_blank" rel="noopener" aria-label="Download résumé (PDF)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 1.5L18.5 8H14zM8 13h8v1.6H8zm0 3.2h8V18H8zm0-6.4h4v1.6H8z"/></svg>
+            Résumé (PDF)
+          </a>
+        </div>
+
+        <div class="social-mini reveal d2">
+          <a href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener" aria-label="LinkedIn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM3 9h4v12H3zM9 9h3.8v1.7h.05c.53-1 1.83-2.06 3.77-2.06 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.4c0-1.29-.02-2.95-1.8-2.95-1.8 0-2.08 1.4-2.08 2.85V21H9z"/></svg>
+          </a>
+          <a href="https://github.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.71-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05A9.4 9.4 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          </a>
+          <a href="https://x.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="X (Twitter)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.53 3H20.5l-6.5 7.43L21.75 21h-6.02l-4.71-6.16L5.6 21H2.63l6.95-7.95L2.25 3h6.17l4.26 5.63zm-1.06 16.2h1.65L7.6 4.72H5.83z"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
+    </section>
+
+  </main>
+
+  <script>
+  (function () {
+    "use strict";
+    var doc = document;
+
+    /* mark loaded → fire hero entrance */
+    window.addEventListener("load", function () {
+      requestAnimationFrame(function () { doc.body.classList.add("loaded"); });
+    });
+    /* fallback in case 'load' already fired */
+    if (doc.readyState === "complete") doc.body.classList.add("loaded");
+
+    /* ---- header scrolled state + scroll progress bar ---- */
+    var header = doc.getElementById("header");
+    var progress = doc.getElementById("progress");
+    var ticking = false;
+    function onScroll() {
+      var y = window.scrollY || doc.documentElement.scrollTop;
+      header.classList.toggle("scrolled", y > 24);
+      var h = doc.documentElement.scrollHeight - window.innerHeight;
+      var p = h > 0 ? y / h : 0;
+      progress.style.transform = "scaleX(" + p + ")";
+      ticking = false;
+    }
+    window.addEventListener("scroll", function () {
+      if (!ticking) { window.requestAnimationFrame(onScroll); ticking = true; }
+    }, { passive: true });
+    onScroll();
+
+    /* ---- mobile nav toggle ---- */
+    var toggle = doc.getElementById("navToggle");
+    var nav = doc.getElementById("nav");
+    var overlay = doc.getElementById("navOverlay");
+
+    /* keep the drawer docked just below the (variable-height) header */
+    function setHeaderH() {
+      doc.documentElement.style.setProperty("--header-h", header.offsetHeight + "px");
+    }
+    setHeaderH();
+    window.addEventListener("resize", setHeaderH);
+    window.addEventListener("load", setHeaderH);
+
+    function setNav(open) {
+      if (open) setHeaderH();
+      nav.classList.toggle("open", open);
+      toggle.classList.toggle("open", open);
+      overlay.classList.toggle("open", open);
+      doc.body.classList.toggle("nav-open", open);
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    function closeNav() { setNav(false); }
+    toggle.addEventListener("click", function () {
+      setNav(!nav.classList.contains("open"));
+    });
+    overlay.addEventListener("click", closeNav);
+
+    nav.addEventListener("click", function (e) {
+      var a = e.target.closest("a");
+      if (!a) return;
+      var href = a.getAttribute("href");
+
+      /* ---- INSTANT JUMP for in-page drawer links (no smooth scroll) ----
+         To restore smooth scrolling from the drawer, delete this `if` block;
+         the `else` branch below already closes the drawer and lets the browser
+         scroll smoothly via the CSS `scroll-behavior: smooth` default. */
+      if (href && href.charAt(0) === "#") {
+        e.preventDefault();
+        var target = href.length > 1 ? doc.querySelector(href) : doc.body;
+        closeNav();                 // releases the body scroll-lock immediately
+        if (target) {
+          var html = doc.documentElement;
+          var prev = html.style.scrollBehavior;
+          html.style.scrollBehavior = "auto";   // force instant for this jump
+          target.scrollIntoView();
+          html.style.scrollBehavior = prev;      // restore page default
+          history.replaceState(null, "", href);
+        }
+        return;
+      }
+
+      /* external / tel / sms / résumé links: just close the drawer */
+      closeNav();
+    });
+
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape") closeNav(); });
+
+    /* ---- scroll reveal ---- */
+    var reveals = doc.querySelectorAll(".reveal");
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+      reveals.forEach(function (el) { io.observe(el); });
+    } else {
+      reveals.forEach(function (el) { el.classList.add("in"); });
+    }
+
+    /* ---- active nav link via section observation ---- */
+    var navLinks = Array.prototype.slice.call(nav.querySelectorAll("a"));
+    var sections = navLinks
+      .map(function (a) { return doc.querySelector(a.getAttribute("href")); })
+      .filter(Boolean);
+    if ("IntersectionObserver" in window && sections.length) {
+      var spy = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            navLinks.forEach(function (a) {
+              a.classList.toggle("active", a.getAttribute("href") === "#" + en.target.id);
+            });
+          }
+        });
+      }, { threshold: 0.5, rootMargin: "-20% 0px -55% 0px" });
+      sections.forEach(function (s) { spy.observe(s); });
+    }
+  })();
+  </script>
+</body>
+</html>
