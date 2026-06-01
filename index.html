@@ -231,17 +231,17 @@
     margin: 0 .6rem; font-weight: 400;
   }
 
-  .nav { display: flex; align-items: center; gap: clamp(2rem, 4.5vw, 4.4rem); }
+  .nav { display: flex; align-items: center; gap: clamp(2rem, 4vw, 4rem); }
   .nav a {
     position: relative;
     font-size: .82rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
     color: var(--muted);
-    padding: .35rem 0;
+    padding: .35rem .5rem;
     transition: color .3s var(--ease-soft);
   }
   .nav a::after {
-    content: ""; position: absolute; left: 0; bottom: -2px;
-    width: 100%; height: 2px; background: var(--accent);
+    content: ""; position: absolute; left: .5rem; bottom: -2px;
+    width: calc(100% - 1rem); height: 2px; background: var(--accent);
     transform: scaleX(0); transform-origin: 0 50%;
     transition: transform .4s var(--ease);
   }
@@ -701,7 +701,7 @@
       <span class="mark" aria-hidden="true">AMH</span>
       <span class="brand__name">
         <span class="brand__title full">AARON M. HARRIS</span>
-        <span class="brand__sub">Senior Product / Software Engineer — Portfolio</span>
+        <span class="brand__sub">Senior Product / Software Engineer</span>
       </span>
     </a>
 
@@ -897,7 +897,7 @@
             </div>
           </div>
           <div class="about__body reveal d1">
-            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was nine, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
+            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was in 5th grade, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
             <p>What sets me apart is deep engineering judgment paired with AI fluency. I work in Claude Code as my primary coding partner, architect systems where AI accelerates delivery without creating technical debt, and bring the same approach to the teams I lead.</p>
             <p>The work that lights me up has people on the other end of it — watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
             <p class="place">Currently based in Traverse City, Michigan.</p>
