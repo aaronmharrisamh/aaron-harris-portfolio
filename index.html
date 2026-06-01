@@ -1,5 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- data-portrait-bg="N" selects the background behind BOTH portrait circles
+     (header + About). This is the single source of truth. Shipped value: 1
+     (Azure Spotlight) — the only option currently defined in the CSS. The
+     dormant debug dropdown rewrites this attribute live; see the .portrait-bg
+     styles and the DEBUG block below. -->
+<html lang="en" data-portrait-bg="1">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -233,11 +238,13 @@
 
   /* brand portrait — inline circle (the chosen header mark) */
   .brand-portrait {
+    position: relative;
     flex: none; width: 38px; height: 38px; border-radius: 50%;
     border: 1px solid var(--line); overflow: hidden;
     transition: transform .5s var(--ease), border-color .4s;
   }
   .brand-portrait img {
+    position: relative; z-index: 1;
     width: 100%; height: 100%; object-fit: cover; display: block;
   }
   .brand:hover .brand-portrait { transform: scale(1.05); border-color: var(--accent); }
@@ -519,6 +526,7 @@
     position: relative; width: 240px; aspect-ratio: 1; margin-inline: auto;
   }
   .portrait img {
+    position: relative; z-index: 1;
     width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
     border: 1px solid var(--line);
   }
@@ -607,6 +615,73 @@
   }
 
   /* ============================================================
+     PORTRAIT BACKGROUNDS  (behind the transparent-PNG portraits)
+     ------------------------------------------------------------
+     The portraits are transparent cutouts; .portrait-bg is the fill
+     painted behind each one (header circle + About circle). The active
+     fill is selected by [data-portrait-bg="N"] on <html> (set at the top
+     of this file). Shipped design: 1 — Azure Spotlight.
+
+     The debug dropdown that auditions alternatives still lives in the
+     code but is dormant (DEBUG_PORTRAIT_BG = false in the script). To run
+     more tests later, re-enable that flag and add more
+     [data-portrait-bg="N"] blocks here + matching <option>s in #bgDebug.
+     ============================================================ */
+  .portrait-bg {
+    position: absolute; inset: 0; z-index: 0;
+    border-radius: 50%; overflow: hidden;
+    pointer-events: none;
+    background: var(--panel);            /* fallback if no option matches */
+  }
+  .portrait-bg::before,
+  .portrait-bg::after {
+    content: ""; position: absolute; inset: 0;
+    border-radius: inherit;
+  }
+
+  /* 1 — Azure Spotlight: soft top-down glow that gently breathes */
+  [data-portrait-bg="1"] .portrait-bg {
+    background: radial-gradient(115% 115% at 50% 22%, var(--accent-glow), var(--panel) 68%);
+  }
+  [data-portrait-bg="1"] .portrait-bg::before {
+    background: radial-gradient(58% 55% at 50% 28%, rgba(111,188,242,.5), transparent 70%);
+    animation: pbgPulse 6s var(--ease-soft) infinite alternate;
+  }
+
+  @keyframes pbgPulse { from { opacity: .5; transform: scale(.96); } to { opacity: 1; transform: scale(1.06); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .portrait-bg, .portrait-bg::before, .portrait-bg::after { animation: none !important; }
+  }
+
+  /* ------------------------------------------------------------
+     DEBUG ONLY — portrait-background switcher dropdown.
+     Dormant in the shipped page (DEBUG_PORTRAIT_BG = false). Kept here
+     with the #bgDebug markup and the script's DEBUG_PORTRAIT_BG section
+     so future audition tests are a one-flag flip. Delete all three if you
+     ever want it gone for good.
+     ------------------------------------------------------------ */
+  .bg-debug { display: inline-flex; align-items: center; gap: .45rem; }
+  .bg-debug[hidden] { display: none; }   /* keep `hidden` authoritative over display */
+  .bg-debug__label {
+    font-size: .68rem; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .bg-debug__select {
+    font: inherit; font-size: .78rem; font-weight: 600; line-height: 1.2;
+    color: var(--text-soft); background-color: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: .38rem 1.7rem .38rem .65rem;
+    cursor: pointer;
+    -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23969eaa' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right .55rem center; background-size: .7rem;
+    transition: border-color .3s, color .3s;
+  }
+  .bg-debug__select:hover { border-color: var(--accent); color: var(--text); }
+  .bg-debug__select option { background: var(--panel); color: var(--text); }
+
+  /* ============================================================
      SCROLL REVEAL
      ============================================================ */
   .reveal { opacity: 0; transform: translateY(34px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
@@ -651,6 +726,14 @@
       flex: 1 1 auto;
       display: flex; flex-direction: column; justify-content: center; gap: .3rem;
     }
+
+    /* DEBUG dropdown sits at the bottom of the drawer on phones */
+    .bg-debug {
+      width: 100%; gap: .6rem;
+      margin-top: .4rem; padding-top: 1.1rem;
+      border-top: 1px solid var(--line-soft);
+    }
+    .bg-debug__select { flex: 1 1 auto; padding-block: .6rem; font-size: .9rem; }
 
     .nav__toggle {
       display: inline-flex; flex-direction: column; gap: 5px;
@@ -714,7 +797,8 @@
            these two spans is rendered (and see .brand .mark in the CSS). -->
       <!-- <span class="mark" aria-hidden="true">AMH</span> -->
       <span class="brand-portrait" aria-hidden="true">
-        <img src="aaron-portfolio-portrait-sd.jpg" width="512" height="512" alt="" />
+        <span class="portrait-bg" aria-hidden="true"></span>
+        <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512" alt="" />
       </span>
       <span class="brand__name">
         <span class="brand__title full">AARON M. HARRIS</span>
@@ -731,6 +815,19 @@
         <a href="#work">Work</a>
         <a href="#about">About</a>
         <a href="#contact">Contact</a>
+      </div>
+
+      <!-- DEBUG ONLY: portrait-background switcher. Dormant — the script keeps
+           it hidden while DEBUG_PORTRAIT_BG is false. Kept in the code for
+           future tests: flip that flag back to true, then add more
+           [data-portrait-bg="N"] CSS blocks and matching <option>s below.
+           Lives inside .nav so it sits beside the links on desktop and drops
+           into the drawer on mobile. -->
+      <div class="bg-debug" id="bgDebug" hidden>
+        <label class="bg-debug__label" for="bgDebugSelect">BG</label>
+        <select class="bg-debug__select" id="bgDebugSelect" aria-label="Portrait background (debug)">
+          <option value="1">1 · Azure Spotlight</option>
+        </select>
       </div>
     </nav>
   </header>
@@ -884,7 +981,7 @@
             <span class="project__index">05</span>
             <h3 class="project__title">AI-Augmented Engineering Workflow</h3>
             <p class="project__meta">HarrisXR LLC · Founder &amp; Sole Engineer · 2025–Present</p>
-            <p class="project__lead">10+ shipped Python and web tools built for internal and team use: the patterns I developed while evangelizing AI-first workflows, made tangible.</p>
+            <p class="project__lead">10+ Python and web tools for internal and team use, several reaching real-world use — including a paid client deliverable: the patterns I developed while evangelizing AI-first workflows, made tangible.</p>
             <p class="project__desc">I work in Claude Code as my primary coding partner inside a structured plan → review → implement cycle that keeps AI velocity from turning into technical debt. The tools below are that workflow in practice: utilities spanning reverse-engineering, real-time projection math, and developer ergonomics.</p>
             <ul class="highlights">
               <li>Wulfram 2 call-stack visualizer</li>
@@ -909,12 +1006,13 @@
         <div class="about__grid">
           <div class="reveal">
             <div class="portrait">
-              <img src="aaron-portfolio-portrait-sd.jpg" width="512" height="512"
+              <span class="portrait-bg" aria-hidden="true"></span>
+              <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512"
                    alt="Portrait of Aaron M. Harris." loading="lazy" />
             </div>
           </div>
           <div class="about__body reveal d1">
-            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was in 5th grade, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
+            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was nine, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
             <p>What sets me apart is deep engineering judgment paired with AI fluency. I work in Claude Code as my primary coding partner, architect systems where AI accelerates delivery without creating technical debt, and bring the same approach to the teams I lead.</p>
             <p>I tend to start as a contributor and end up running the project: translating fluently between engineers and clients, owning the architecture, and guiding a team through the kind of problem that supposedly has no way through.</p>
             <p>The work that lights me up has people on the other end of it: watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
@@ -1063,6 +1161,43 @@
     });
 
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape") closeNav(); });
+
+    /* ============================================================
+       DEBUG ONLY — portrait-background switcher
+       ------------------------------------------------------------
+       Flip DEBUG_PORTRAIT_BG to false to hide the dropdown and ship the
+       single design baked into <html data-portrait-bg="N">. The whole
+       block is self-contained — delete it (with the #bgDebug markup and
+       .bg-debug CSS) once you've committed to a background.
+       ============================================================ */
+    var DEBUG_PORTRAIT_BG = false;           // ← flip to true to re-open the audition dropdown
+    var BG_COUNT = 8;
+    var BG_STORE_KEY = "amh:portraitBg";
+    var root = doc.documentElement;
+
+    function applyPortraitBg(n) {
+      n = parseInt(n, 10);
+      if (!(n >= 1 && n <= BG_COUNT)) n = parseInt(root.getAttribute("data-portrait-bg"), 10) || 1;
+      root.setAttribute("data-portrait-bg", n);
+      return n;
+    }
+
+    if (DEBUG_PORTRAIT_BG) {
+      var bgDebug = doc.getElementById("bgDebug");
+      var bgSelect = doc.getElementById("bgDebugSelect");
+      if (bgDebug && bgSelect) {
+        var stored = null;
+        try { stored = localStorage.getItem(BG_STORE_KEY); } catch (e) {}
+        var current = applyPortraitBg(stored != null ? stored : root.getAttribute("data-portrait-bg"));
+        bgSelect.value = String(current);
+        bgDebug.hidden = false;
+        bgSelect.addEventListener("change", function () {
+          var n = applyPortraitBg(bgSelect.value);
+          bgSelect.value = String(n);
+          try { localStorage.setItem(BG_STORE_KEY, String(n)); } catch (e) {}
+        });
+      }
+    }
 
     /* ---- scroll reveal ---- */
     var reveals = doc.querySelectorAll(".reveal");
