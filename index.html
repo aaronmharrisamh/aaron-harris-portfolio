@@ -231,6 +231,17 @@
     margin: 0 .6rem; font-weight: 400;
   }
 
+  /* brand portrait — inline circle (the chosen header mark) */
+  .brand-portrait {
+    flex: none; width: 38px; height: 38px; border-radius: 50%;
+    border: 1px solid var(--line); overflow: hidden;
+    transition: transform .5s var(--ease), border-color .4s;
+  }
+  .brand-portrait img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  .brand:hover .brand-portrait { transform: scale(1.05); border-color: var(--accent); }
+
   .nav { display: flex; align-items: center; gap: clamp(2rem, 4vw, 4rem); }
   .nav a {
     position: relative;
@@ -698,7 +709,13 @@
   <!-- ===================== HEADER ===================== -->
   <header class="site-header" id="header">
     <a class="brand" href="#top" aria-label="Aaron M. Harris — home">
-      <span class="mark" aria-hidden="true">AMH</span>
+      <!-- AMH monogram mark kept for reuse elsewhere; the inline-circle portrait
+           is the active header mark. To revert to the monogram, swap which of
+           these two spans is rendered (and see .brand .mark in the CSS). -->
+      <!-- <span class="mark" aria-hidden="true">AMH</span> -->
+      <span class="brand-portrait" aria-hidden="true">
+        <img src="aaron-portfolio-portrait-sd.jpg" width="512" height="512" alt="" />
+      </span>
       <span class="brand__name">
         <span class="brand__title full">AARON M. HARRIS</span>
         <span class="brand__sub">Senior Product / Software Engineer</span>
@@ -731,7 +748,7 @@
       <div class="wrap">
         <div class="hero__inner reveal-hero">
           <span class="eyebrow">Senior Product / Software Engineer &amp; Solutions Architect</span>
-          <h1>I help small teams ship the <span class="hl">impossible</span>.</h1>
+          <h1>I help small teams <span class="hl">ship the impossible</span>.</h1>
           <p class="hero__sub">Deep engineering judgment and AI fluency, from concept to market — across UI/UX, real-time simulation, VR/XR, and AI-augmented development.</p>
           <p class="hero__note">Most impactful on small teams shipping work that probably shouldn't be possible at this scale.</p>
           <div class="hero__cta">
