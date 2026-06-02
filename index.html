@@ -239,7 +239,7 @@
   /* brand portrait — inline circle (the chosen header mark) */
   .brand-portrait {
     position: relative;
-    flex: none; width: 38px; height: 38px; border-radius: 50%;
+    flex: none; width: 48px; height: 48px; border-radius: 50%;
     border: 1px solid var(--line); overflow: hidden;
     transition: transform .5s var(--ease), border-color .4s;
   }
@@ -323,8 +323,10 @@
     padding-top: 6rem;
     overflow: hidden;
   }
-  /* drifting ambient glows */
+  /* drifting ambient glows — LEGACY V1, disabled in V2 (see .hero__stage).
+     To restore: remove `display:none` here and set `.hero__stage{display:none}`. */
   .hero__glow {
+    display: none;
     position: absolute; inset: -20% -10% 0 -10%;
     z-index: -1; pointer-events: none;
   }
@@ -352,10 +354,49 @@
   @keyframes drift2 { to { transform: translate3d(7vmax, -4vmax, 0) scale(1.08); } }
   @keyframes drift3 { to { transform: translate3d(-5vmax, -6vmax, 0) scale(1.18); } }
 
+  /* V2 backdrop — concentrated blue halo + concentric rings, centered on the
+     figure. --fx/--fy are the focal point; overridden for mobile below. */
+  .hero__stage {
+    position: absolute; inset: 0;
+    z-index: -1; pointer-events: none;
+    --fx: 78%; --fy: 44%;
+  }
+  .hero__halo {
+    position: absolute; left: var(--fx); top: var(--fy);
+    transform: translate(-50%, -50%);
+    width: clamp(540px, 54vw, 920px); height: clamp(540px, 54vw, 920px);
+    border-radius: 50%;
+    background: radial-gradient(circle,
+        rgba(74,165,232,.55) 0%,
+        rgba(56,150,220,.34) 28%,
+        rgba(40,120,200,.13) 52%,
+        transparent 70%);
+    filter: blur(16px);
+    animation: haloPulse 9s var(--ease-soft) infinite alternate;
+  }
+  @keyframes haloPulse {
+    from { transform: translate(-50%, -50%) scale(1);    opacity: .9; }
+    to   { transform: translate(-50%, -50%) scale(1.07); opacity: 1; }
+  }
+  .hero__rings {
+    position: absolute; left: var(--fx); top: var(--fy);
+    width: 0; height: 0;
+  }
+  .hero__rings i {
+    position: absolute; left: 0; top: 0;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 1px solid rgba(120,190,240,.22);
+  }
+  .hero__rings i:nth-child(1) { width: 360px;  height: 360px;  opacity: 1;   }
+  .hero__rings i:nth-child(2) { width: 580px;  height: 580px;  opacity: .7;  }
+  .hero__rings i:nth-child(3) { width: 820px;  height: 820px;  opacity: .48; }
+  .hero__rings i:nth-child(4) { width: 1080px; height: 1080px; opacity: .3;  }
+
   .hero__inner { max-width: 980px; }
   .hero h1 {
-    font-size: clamp(2.5rem, 6.2vw, 4.6rem);
-    line-height: 1.04;
+    font-size: clamp(2.5rem, 4.8vw, 3.6rem);
+    line-height: 1.07;
     letter-spacing: -.025em;
     font-weight: 800;
     margin-top: 1.4rem;
@@ -378,6 +419,50 @@
   }
   .hero__cta { margin-top: 2.6rem; display: flex; gap: 1rem; flex-wrap: wrap; }
 
+  /* keep the hero text above the portrait + glows */
+  .hero .wrap { position: relative; z-index: 2; }
+
+  /* full-color portrait — desktop: contained right-of-center figure, head near
+     the top, torso fading off the bottom (framed by the halo). */
+  .hero__portrait {
+    position: absolute;
+    bottom: 0;
+    /* on wide screens align the figure to the content column's right edge so it
+       stays tied to the text instead of drifting to the viewport edge */
+    right: max(16px, calc(50vw - var(--maxw) / 2 + 8px));
+    height: clamp(430px, 66vh, 760px);
+    width: auto;
+    z-index: 1;            /* above stage (-1)/sparks (0), below text (2) */
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 86%, transparent 100%);
+            mask-image: linear-gradient(to bottom, #000 86%, transparent 100%);
+  }
+  /* desktop: text keeps plenty of horizontal room while clearing the figure */
+  @media (min-width: 881px) {
+    .hero__inner { max-width: min(600px, 46vw); }
+  }
+
+  /* twinkling "+" accents */
+  .hero__sparks { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+  .hero__sparks span {
+    position: absolute;
+    width: 14px; height: 14px;
+    color: var(--accent);
+    opacity: .35;
+    animation: twinkle 5s var(--ease-soft) infinite alternate;
+  }
+  .hero__sparks span::before,
+  .hero__sparks span::after {
+    content: ""; position: absolute; background: currentColor; border-radius: 1px;
+  }
+  .hero__sparks span::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
+  .hero__sparks span::after  { top: 50%; left: 0; height: 1.5px; width: 100%; transform: translateY(-50%); }
+  .hero__sparks span:nth-child(2) { animation-delay: 1.4s; opacity: .22; transform: scale(.7); }
+  .hero__sparks span:nth-child(3) { animation-delay: 2.6s; opacity: .28; }
+  .hero__sparks span:nth-child(4) { animation-delay: .8s;  opacity: .18; transform: scale(1.3); }
+  .hero__sparks span:nth-child(5) { animation-delay: 3.4s; opacity: .3; transform: scale(.6); }
+  @keyframes twinkle { from { opacity: .12; } to { opacity: .42; } }
+
   /* hero entrance animation (plays on load) */
   .reveal-hero > * { opacity: 0; transform: translateY(26px); }
   .loaded .reveal-hero > * {
@@ -389,6 +474,10 @@
   .loaded .reveal-hero > *:nth-child(4) { animation-delay: .40s; }
   .loaded .reveal-hero > *:nth-child(5) { animation-delay: .52s; }
   @keyframes heroUp { to { opacity: 1; transform: none; } }
+
+  /* portrait rises in alongside the text */
+  .hero__portrait { opacity: 0; transform: translateY(34px); }
+  .loaded .hero__portrait { animation: heroUp 1s var(--ease) .35s forwards; }
 
   /* ============================================================
      SECTION HEADINGS
@@ -652,6 +741,8 @@
 
   @media (prefers-reduced-motion: reduce) {
     .portrait-bg, .portrait-bg::before, .portrait-bg::after { animation: none !important; }
+    .hero__sparks span, .hero__halo { animation: none !important; }
+    .hero__halo { transform: translate(-50%, -50%) !important; }
   }
 
   /* ------------------------------------------------------------
@@ -754,6 +845,43 @@
     .brand__sub { font-size: .68rem; margin-top: .12rem; }
     .brand__sub::before { content: none; }
 
+    /* ===== MOBILE HERO (V2): portrait on top, text stacked below ========= */
+    /* plain block stacking (not flex) so the text column sizes to the viewport
+       cleanly — img block on top, .wrap block below. */
+    .hero {
+      display: block;
+      min-height: auto;
+      padding-top: 5.5rem;
+      padding-bottom: 3rem;
+    }
+    .hero__sub, .hero__note { max-width: 100%; }
+    /* portrait flows at the top, centered; soft bottom fade into the text */
+    .hero__portrait {
+      position: static;
+      display: block;
+      height: auto;
+      width: min(72%, 300px);
+      right: auto; bottom: auto;
+      margin: 0 auto -0.25rem;
+      -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent 100%);
+              mask-image: linear-gradient(to bottom, #000 88%, transparent 100%);
+    }
+    /* let the long eyebrow wrap to two lines like the mockup */
+    .hero .eyebrow {
+      display: block; line-height: 1.6;
+      font-size: .72rem; letter-spacing: .16em;
+    }
+    .hero .eyebrow::before {
+      display: inline-block; vertical-align: middle; margin-right: .5rem;
+    }
+    /* re-center the halo + rings on the top portrait, scaled down for phones */
+    .hero__stage { --fx: 50%; --fy: clamp(150px, 42vw, 250px); }
+    .hero__rings i:nth-child(1) { width: 230px; height: 230px; }
+    .hero__rings i:nth-child(2) { width: 360px; height: 360px; }
+    .hero__rings i:nth-child(3) { width: 520px; height: 520px; }
+    .hero__rings i:nth-child(4) { width: 700px; height: 700px; }
+    /* ===== /MOBILE HERO (V2) ============================================= */
+
     .project, .project--right { grid-template-columns: 1fr; gap: 1.8rem; }
     .project--right .project__media { order: 0; }
     .project--right .project__body  { order: 0; }
@@ -839,9 +967,36 @@
 
     <!-- ===================== HERO ===================== -->
     <section class="hero" aria-label="Introduction">
+      <!-- ===== LEGACY V1 AMBIENT GLOW (disabled) =============================
+           The original drifting glows. Disabled in V2 in favor of .hero__halo.
+           To bring them back: remove `display:none` on `.hero__glow`, and hide
+           `.hero__stage` (the V2 halo + rings). -->
       <div class="hero__glow" aria-hidden="true">
         <span class="g1"></span><span class="g2"></span><span class="g3"></span>
       </div>
+      <!-- ===== /LEGACY V1 AMBIENT GLOW ====================================== -->
+
+      <!-- V2 backdrop: a concentrated blue halo + several concentric rings,
+           centered behind the figure (right on desktop, top on mobile). -->
+      <div class="hero__stage" aria-hidden="true">
+        <span class="hero__halo"></span>
+        <span class="hero__rings">
+          <i></i><i></i><i></i><i></i>
+        </span>
+      </div>
+
+      <!-- twinkling "+" accents scattered behind the content -->
+      <div class="hero__sparks" aria-hidden="true">
+        <span style="top:14%; left:52%"></span>
+        <span style="top:74%; left:40%"></span>
+        <span style="top:30%; left:88%"></span>
+        <span style="top:58%; left:64%"></span>
+        <span style="top:20%; left:71%"></span>
+      </div>
+
+      <!-- full-color portrait: right-of-center on desktop, on top on mobile -->
+      <img class="hero__portrait" src="aaron-portfolio-portrait-tall-transparent.png"
+           width="691" height="798" alt="" aria-hidden="true" />
       <div class="wrap">
         <div class="hero__inner reveal-hero">
           <span class="eyebrow">Technical Lead &amp; Solutions Architect</span>
