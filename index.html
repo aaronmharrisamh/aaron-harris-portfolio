@@ -354,17 +354,19 @@
   @keyframes drift2 { to { transform: translate3d(7vmax, -4vmax, 0) scale(1.08); } }
   @keyframes drift3 { to { transform: translate3d(-5vmax, -6vmax, 0) scale(1.18); } }
 
-  /* V2 backdrop — concentrated blue halo + concentric rings, centered on the
-     figure. --fx/--fy are the focal point; overridden for mobile below. */
+  /* V2 backdrop — concentrated blue halo (rings disabled, see below).
+     Position/size are tunable via --halo-x / --halo-y / --halo-size so the
+     temporary alignment panel can dial them in. Mobile overrides below. */
   .hero__stage {
     position: absolute; inset: 0;
     z-index: -1; pointer-events: none;
-    --fx: 78%; --fy: 44%;
+    --halo-x: 74%; --halo-y: 50%;
+    --halo-size: 634px;
   }
   .hero__halo {
-    position: absolute; left: var(--fx); top: var(--fy);
+    position: absolute; left: var(--halo-x); top: var(--halo-y);
     transform: translate(-50%, -50%);
-    width: clamp(540px, 54vw, 920px); height: clamp(540px, 54vw, 920px);
+    width: var(--halo-size); height: var(--halo-size);
     border-radius: 50%;
     background: radial-gradient(circle,
         rgba(74,165,232,.55) 0%,
@@ -378,20 +380,25 @@
     from { transform: translate(-50%, -50%) scale(1);    opacity: .9; }
     to   { transform: translate(-50%, -50%) scale(1.07); opacity: 1; }
   }
+  /* ===== CONCENTRIC RINGS — soft, faint "steps" ========================
+     Tiered concentric rings, kept very faint and slightly blurred so they
+     read as gentle steps rather than bright 1px outlines. */
   .hero__rings {
-    position: absolute; left: var(--fx); top: var(--fy);
+    position: absolute; left: var(--halo-x); top: var(--halo-y);
     width: 0; height: 0;
+    filter: blur(.6px);
   }
   .hero__rings i {
     position: absolute; left: 0; top: 0;
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    border: 1px solid rgba(120,190,240,.22);
+    border: 1px solid rgba(130,195,240,.12);
   }
   .hero__rings i:nth-child(1) { width: 360px;  height: 360px;  opacity: 1;   }
-  .hero__rings i:nth-child(2) { width: 580px;  height: 580px;  opacity: .7;  }
-  .hero__rings i:nth-child(3) { width: 820px;  height: 820px;  opacity: .48; }
-  .hero__rings i:nth-child(4) { width: 1080px; height: 1080px; opacity: .3;  }
+  .hero__rings i:nth-child(2) { width: 580px;  height: 580px;  opacity: .72; }
+  .hero__rings i:nth-child(3) { width: 820px;  height: 820px;  opacity: .5;  }
+  .hero__rings i:nth-child(4) { width: 1080px; height: 1080px; opacity: .32; }
+  /* ===== /CONCENTRIC RINGS ============================================= */
 
   .hero__inner { max-width: 980px; }
   .hero h1 {
@@ -442,26 +449,26 @@
     .hero__inner { max-width: min(600px, 46vw); }
   }
 
-  /* twinkling "+" accents */
+  /* twinkling "+" accents — thin & subtle */
   .hero__sparks { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
   .hero__sparks span {
     position: absolute;
-    width: 14px; height: 14px;
+    width: 11px; height: 11px;
     color: var(--accent);
-    opacity: .35;
-    animation: twinkle 5s var(--ease-soft) infinite alternate;
+    opacity: .2;
+    animation: twinkle 6s var(--ease-soft) infinite alternate;
   }
   .hero__sparks span::before,
   .hero__sparks span::after {
-    content: ""; position: absolute; background: currentColor; border-radius: 1px;
+    content: ""; position: absolute; background: currentColor;
   }
-  .hero__sparks span::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
-  .hero__sparks span::after  { top: 50%; left: 0; height: 1.5px; width: 100%; transform: translateY(-50%); }
-  .hero__sparks span:nth-child(2) { animation-delay: 1.4s; opacity: .22; transform: scale(.7); }
-  .hero__sparks span:nth-child(3) { animation-delay: 2.6s; opacity: .28; }
-  .hero__sparks span:nth-child(4) { animation-delay: .8s;  opacity: .18; transform: scale(1.3); }
-  .hero__sparks span:nth-child(5) { animation-delay: 3.4s; opacity: .3; transform: scale(.6); }
-  @keyframes twinkle { from { opacity: .12; } to { opacity: .42; } }
+  .hero__sparks span::before { left: 50%; top: 0; width: .75px; height: 100%; transform: translateX(-50%); }
+  .hero__sparks span::after  { top: 50%; left: 0; height: .75px; width: 100%; transform: translateY(-50%); }
+  .hero__sparks span:nth-child(2) { animation-delay: 1.4s; opacity: .13; transform: scale(.7); }
+  .hero__sparks span:nth-child(3) { animation-delay: 2.6s; opacity: .16; }
+  .hero__sparks span:nth-child(4) { animation-delay: .8s;  opacity: .1;  transform: scale(1.25); }
+  .hero__sparks span:nth-child(5) { animation-delay: 3.4s; opacity: .18; transform: scale(.6); }
+  @keyframes twinkle { from { opacity: .06; } to { opacity: .24; } }
 
   /* hero entrance animation (plays on load) */
   .reveal-hero > * { opacity: 0; transform: translateY(26px); }
@@ -853,29 +860,45 @@
       min-height: auto;
       padding-top: 5.5rem;
       padding-bottom: 3rem;
+      /* portrait size, shared so the overlap can be a clean % of its height.
+         (aspect ratio of the source image: 798 / 691 ≈ 1.155) */
+      --fig-w: min(82vw, 360px);
+      --fig-h: calc(var(--fig-w) * 1.155);
     }
     .hero__sub, .hero__note { max-width: 100%; }
-    /* portrait flows at the top, centered; soft bottom fade into the text */
+    /* portrait flows at the top, centered; bottom taper (~54%) so the text
+       can rise into the faded lower portion (merged composition) */
     .hero__portrait {
       position: static;
       display: block;
       height: auto;
-      width: min(72%, 300px);
+      width: var(--fig-w);
       right: auto; bottom: auto;
-      margin: 0 auto -0.25rem;
-      -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent 100%);
-              mask-image: linear-gradient(to bottom, #000 88%, transparent 100%);
+      margin: 0 auto;
+      -webkit-mask-image: linear-gradient(to bottom, #000 46%, transparent 100%);
+              mask-image: linear-gradient(to bottom, #000 46%, transparent 100%);
     }
-    /* let the long eyebrow wrap to two lines like the mockup */
+    /* pull the text up ~37.5% of the portrait height so the eyebrow/headline
+       rise toward the portrait's lower neck/chest */
+    .hero .wrap {
+      position: relative; z-index: 2;
+      margin-top: calc(var(--fig-h) * -0.375);
+    }
+    /* let the long eyebrow wrap to two lines like the mockup; subtle shadow
+       keeps it legible where it overlaps the portrait */
     .hero .eyebrow {
       display: block; line-height: 1.6;
       font-size: .72rem; letter-spacing: .16em;
+      text-shadow: 0 1px 7px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.5);
     }
     .hero .eyebrow::before {
       display: inline-block; vertical-align: middle; margin-right: .5rem;
     }
-    /* re-center the halo + rings on the top portrait, scaled down for phones */
-    .hero__stage { --fx: 50%; --fy: clamp(150px, 42vw, 250px); }
+    /* re-center the halo on the top portrait, scaled down for phones */
+    .hero__stage {
+      --halo-x: 50%; --halo-y: 24%;
+      --halo-size: clamp(460px, 104vw, 680px);
+    }
     .hero__rings i:nth-child(1) { width: 230px; height: 230px; }
     .hero__rings i:nth-child(2) { width: 360px; height: 360px; }
     .hero__rings i:nth-child(3) { width: 520px; height: 520px; }
