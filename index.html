@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<!-- data-portrait-bg="N" selects the background behind BOTH portrait circles
-     (header + About). This is the single source of truth. Shipped value: 1
-     (Azure Spotlight) — the only option currently defined in the CSS. The
-     dormant debug dropdown rewrites this attribute live; see the .portrait-bg
-     styles and the DEBUG block below. -->
+<!-- <html> data-attributes (single source of truth):
+     • data-portrait-bg="N" — background behind BOTH portrait cutouts (header +
+       About). Shipped value: 1 (Azure Spotlight), the only option defined in
+       the CSS. Static now — its old debug dropdown has been removed.
+     The desktop hero (two-column layout, height, portrait size) is now locked
+     into the base styles; its temporary A/B dropdown harness has been removed. -->
 <html lang="en" data-portrait-bg="1">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <title>Aaron M. Harris — Technical Lead & Solutions Architect</title>
-  <meta name="description" content="Aaron M. Harris — Technical Lead & Solutions Architect, AI-fluent and 15 years shipping product. I help small teams ship the impossible, across simulation, XR, and the web." />
+  <meta name="description" content="Aaron M. Harris — Technical Lead & Solutions Architect, AI-fluent and 15 years shipping product. I help teams ship the impossible, across simulation, XR, and the web." />
   <meta name="author" content="Aaron M. Harris" />
   <meta name="theme-color" content="#16181d" />
   <link rel="canonical" href="https://aaronmichaelharris.com/" />
@@ -450,7 +451,8 @@
   .hero .wrap { position: relative; z-index: 2; }
 
   /* full-color portrait — desktop: contained right-of-center figure, head near
-     the top, torso fading off the bottom (framed by the halo). */
+     the top, torso fading off the bottom (framed by the halo). The fade is
+     baked into the PNG, so this image carries no CSS mask. */
   .hero__portrait {
     position: absolute;
     bottom: 0;
@@ -461,12 +463,79 @@
     width: auto;
     z-index: 1;            /* above stage (-1)/sparks (0), below text (2) */
     pointer-events: none;
-    -webkit-mask-image: linear-gradient(to bottom, #000 86%, transparent 100%);
-            mask-image: linear-gradient(to bottom, #000 86%, transparent 100%);
   }
-  /* desktop: text keeps plenty of horizontal room while clearing the figure */
+  /* ============================================================
+     DESKTOP HERO (V3) — true two-column layout (≥881px)
+     ------------------------------------------------------------
+     Eyebrow sits in its own full-width row; below it a two-column grid holds
+     the text (left, ~66%) and the portrait (right, ~34%). The portrait lives
+     in its OWN column and is TOP-ALIGNED with the headline, so it can never
+     cross behind the words. Mobile (≤880px) keeps the stacked/overlapping
+     layout untouched.
+     ============================================================ */
   @media (min-width: 881px) {
-    .hero__inner { max-width: min(600px, 46vw); }
+    /* shared on .hero so BOTH the grid (.wrap) and the backdrop (.hero__stage,
+       a sibling of .wrap) can read the column gap — the halo math below needs
+       it to locate the portrait column's center. */
+    .hero { --hero-col-gap: clamp(2rem, 4vw, 4rem); }
+
+    /* the hero content box becomes the two-column grid */
+    .hero .wrap {
+      display: grid;
+      grid-template-columns: 2fr 1fr;          /* ≈ 66% text / 34% portrait */
+      column-gap: var(--hero-col-gap);
+      align-items: start;                       /* top-sync both columns */
+    }
+    /* eyebrow: its own full-width row above the two columns */
+    .hero .wrap > .eyebrow { grid-column: 1 / -1; }
+    /* text block: left column, full column width (drop the old narrow cap) */
+    .hero .wrap > .hero__inner { grid-column: 1; max-width: none; }
+
+    /* portrait: right column, SAME row as the text block. It scales to fill the
+       row at its natural proportions — height-driven with width:auto, so the
+       whole image is shown with NO cropping. It's sized to 67% of the column
+       (row) height (i.e. ~33% smaller than fully filling it), top-anchored so
+       the head still lines up with the headline. justify-self:start anchors it
+       to the column's LEFT edge, so it can never cross into the text; at this
+       size it sits within the column at typical widths. min-height:0 stops the
+       intrinsic height from inflating the grid row. */
+    .hero .wrap > .hero__portrait {
+      grid-column: 2;
+      grid-row: 2;                  /* row 1 is the eyebrow; row 2 is the text */
+      position: static;
+      align-self: start;            /* top-aligned with the headline */
+      justify-self: start;          /* anchor left — never cross into the text */
+      bottom: auto; right: auto;
+      width: auto;                  /* keep proportions → no crop */
+      height: 67%;                  /* ~33% smaller than fully filling the column */
+      min-width: 0;
+      min-height: 0;
+      max-width: none;
+      /* No CSS mask — the fade is baked into the PNG. */
+    }
+
+    /* halo: centered EXACTLY on the portrait column's center X, tracked at
+       every desktop width (no tuned %). It stays a full-bleed background plate
+       behind BOTH columns (.hero__stage, z-index:-1) — never inside either one.
+
+       Geometry (all in viewport px):
+         • content box .wrap = min(100vw, --maxw), centered, with --gutter padding
+         • inside that: grid is [2fr | gap | 1fr]; the portrait sits in the 1fr
+         • so the portrait column's center, measured from the viewport's left:
+             half the empty margin either side of .wrap   → (100vw - wrapW)/2
+           + the wrap's left padding                       → + --gutter
+           + 5/6 of the track span (col1 + half of col2)   → + (tracks)*5/6
+           + the column gap                                → + --hero-col-gap
+           where wrapW   = min(100vw, --maxw)
+                 tracks  = wrapW - 2*--gutter - --hero-col-gap */
+    .hero__stage {
+      --halo-x: calc(
+        (100vw - min(100vw, var(--maxw))) / 2
+        + var(--gutter)
+        + (min(100vw, var(--maxw)) - 2 * var(--gutter) - var(--hero-col-gap)) * 5 / 6
+        + var(--hero-col-gap)
+      );
+    }
   }
 
   /* twinkling "+" accents — thin & subtle */
@@ -501,6 +570,11 @@
   .loaded .reveal-hero > *:nth-child(4) { animation-delay: .40s; }
   .loaded .reveal-hero > *:nth-child(5) { animation-delay: .52s; }
   @keyframes heroUp { to { opacity: 1; transform: none; } }
+
+  /* eyebrow now sits in its own row above the columns (outside .reveal-hero),
+     so it gets its own matching entrance, slightly ahead of the headline. */
+  .hero .wrap > .eyebrow { opacity: 0; transform: translateY(26px); }
+  .loaded .hero .wrap > .eyebrow { animation: heroUp .9s var(--ease) .02s forwards; }
 
   /* portrait rises in alongside the text */
   .hero__portrait { opacity: 0; transform: translateY(34px); }
@@ -736,12 +810,9 @@
      The portraits are transparent cutouts; .portrait-bg is the fill
      painted behind each one (header circle + About circle). The active
      fill is selected by [data-portrait-bg="N"] on <html> (set at the top
-     of this file). Shipped design: 1 — Azure Spotlight.
-
-     The debug dropdown that auditions alternatives still lives in the
-     code but is dormant (DEBUG_PORTRAIT_BG = false in the script). To run
-     more tests later, re-enable that flag and add more
-     [data-portrait-bg="N"] blocks here + matching <option>s in #bgDebug.
+     of this file). Shipped design: 1 — Azure Spotlight, and it's now static:
+     the audition dropdown that used to switch it has been removed. To run more
+     tests later, add more [data-portrait-bg="N"] blocks here and a switcher.
      ============================================================ */
   .portrait-bg {
     position: absolute; inset: 0; z-index: 0;
@@ -771,33 +842,6 @@
     .hero__sparks span, .hero__halo { animation: none !important; }
     .hero__halo { transform: translate(-50%, -50%) !important; }
   }
-
-  /* ------------------------------------------------------------
-     DEBUG ONLY — portrait-background switcher dropdown.
-     Dormant in the shipped page (DEBUG_PORTRAIT_BG = false). Kept here
-     with the #bgDebug markup and the script's DEBUG_PORTRAIT_BG section
-     so future audition tests are a one-flag flip. Delete all three if you
-     ever want it gone for good.
-     ------------------------------------------------------------ */
-  .bg-debug { display: inline-flex; align-items: center; gap: .45rem; }
-  .bg-debug[hidden] { display: none; }   /* keep `hidden` authoritative over display */
-  .bg-debug__label {
-    font-size: .68rem; font-weight: 700; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--dim);
-  }
-  .bg-debug__select {
-    font: inherit; font-size: .78rem; font-weight: 600; line-height: 1.2;
-    color: var(--text-soft); background-color: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px;
-    padding: .38rem 1.7rem .38rem .65rem;
-    cursor: pointer;
-    -webkit-appearance: none; -moz-appearance: none; appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23969eaa' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right .55rem center; background-size: .7rem;
-    transition: border-color .3s, color .3s;
-  }
-  .bg-debug__select:hover { border-color: var(--accent); color: var(--text); }
-  .bg-debug__select option { background: var(--panel); color: var(--text); }
 
   /* ============================================================
      SCROLL REVEAL
@@ -845,14 +889,6 @@
       display: flex; flex-direction: column; justify-content: center; gap: .3rem;
     }
 
-    /* DEBUG dropdown sits at the bottom of the drawer on phones */
-    .bg-debug {
-      width: 100%; gap: .6rem;
-      margin-top: .4rem; padding-top: 1.1rem;
-      border-top: 1px solid var(--line-soft);
-    }
-    .bg-debug__select { flex: 1 1 auto; padding-block: .6rem; font-size: .9rem; }
-
     .nav__toggle {
       display: inline-flex; flex-direction: column; gap: 5px;
       width: 42px; height: 42px; align-items: center; justify-content: center;
@@ -884,13 +920,16 @@
       padding-top: 5.5rem;
       padding-bottom: 3rem;
       /* portrait size, shared so the overlap can be a clean % of its height.
-         (aspect ratio of the source image: 798 / 691 ≈ 1.155) */
-      --fig-w: min(82vw, 360px);
-      --fig-h: calc(var(--fig-w) * 1.155);
+         (aspect ratio of the source image: 598 / 616 ≈ 0.971)
+         The *0.8 makes the mobile portrait ~20% smaller; --fig-h and the
+         eyebrow overlap below both derive from --fig-w, so they scale with it. */
+      --fig-w: calc(min(82vw, 360px) * 0.8);
+      --fig-h: calc(var(--fig-w) * 0.971);
     }
     .hero__sub, .hero__note { max-width: 100%; }
-    /* portrait flows at the top, centered; bottom taper (~54%) so the text
-       can rise into the faded lower portion (merged composition) */
+    /* portrait flows at the top, centered; the fade is baked into the PNG, so
+       the text can still rise into the faded lower portion (merged composition)
+       with no CSS mask. */
     .hero__portrait {
       position: static;
       display: block;
@@ -898,15 +937,15 @@
       width: var(--fig-w);
       right: auto; bottom: auto;
       margin: 0 auto;
-      -webkit-mask-image: linear-gradient(to bottom, #000 46%, transparent 100%);
-              mask-image: linear-gradient(to bottom, #000 46%, transparent 100%);
     }
-    /* pull the text up ~37.5% of the portrait height so the eyebrow/headline
-       rise toward the portrait's lower neck/chest */
-    .hero .wrap {
-      position: relative; z-index: 2;
-      margin-top: calc(var(--fig-h) * -0.375);
-    }
+    /* The portrait now lives INSIDE .wrap as the first child, so we can't pull
+       the whole .wrap up (that would drag the portrait too). Instead pull the
+       eyebrow up — and with it everything that follows in flow (the text) —
+       ~37.5% of the portrait height, so the eyebrow/headline rise toward the
+       portrait's lower neck/chest. Same visual result as before. The text
+       paints over the portrait naturally (it comes later in the DOM). */
+    .hero .wrap { position: relative; z-index: 2; }
+    .hero .wrap > .eyebrow { margin-top: calc(var(--fig-h) * -0.375); }
     /* let the long eyebrow wrap to two lines like the mockup; subtle shadow
        keeps it legible where it overlaps the portrait */
     .hero .eyebrow {
@@ -917,15 +956,18 @@
     .hero .eyebrow::before {
       display: inline-block; vertical-align: middle; margin-right: .5rem;
     }
-    /* re-center the halo on the top portrait, scaled down for phones */
+    /* re-center the halo on the top portrait, scaled down for phones. The blue
+       circle (halo + concentric rings) is ~20% smaller here to match the now
+       ~20%-smaller portrait — the *0.8 / reduced ring sizes keep the whole
+       circular motif in proportion with the figure. */
     .hero__stage {
       --halo-x: 50%; --halo-y: 24%;
-      --halo-size: clamp(460px, 104vw, 680px);
+      --halo-size: calc(clamp(460px, 104vw, 680px) * 0.8);
     }
-    .hero__rings i:nth-child(1) { width: 230px; height: 230px; }
-    .hero__rings i:nth-child(2) { width: 360px; height: 360px; }
-    .hero__rings i:nth-child(3) { width: 520px; height: 520px; }
-    .hero__rings i:nth-child(4) { width: 700px; height: 700px; }
+    .hero__rings i:nth-child(1) { width: 184px; height: 184px; }
+    .hero__rings i:nth-child(2) { width: 288px; height: 288px; }
+    .hero__rings i:nth-child(3) { width: 416px; height: 416px; }
+    .hero__rings i:nth-child(4) { width: 560px; height: 560px; }
     /* ===== /MOBILE HERO (V2) ============================================= */
 
     .project, .project--right { grid-template-columns: 1fr; gap: 1.8rem; }
@@ -992,19 +1034,6 @@
         <a href="#about">About</a>
         <a href="#contact">Contact</a>
       </div>
-
-      <!-- DEBUG ONLY: portrait-background switcher. Dormant — the script keeps
-           it hidden while DEBUG_PORTRAIT_BG is false. Kept in the code for
-           future tests: flip that flag back to true, then add more
-           [data-portrait-bg="N"] CSS blocks and matching <option>s below.
-           Lives inside .nav so it sits beside the links on desktop and drops
-           into the drawer on mobile. -->
-      <div class="bg-debug" id="bgDebug" hidden>
-        <label class="bg-debug__label" for="bgDebugSelect">BG</label>
-        <select class="bg-debug__select" id="bgDebugSelect" aria-label="Portrait background (debug)">
-          <option value="1">1 · Azure Spotlight</option>
-        </select>
-      </div>
     </nav>
   </header>
 
@@ -1042,15 +1071,21 @@
         <span style="top:20%; left:71%"></span>
       </div>
 
-      <!-- full-color portrait: right-of-center on desktop, on top on mobile -->
-      <img class="hero__portrait" src="aaron-portfolio-portrait-tall-transparent.png"
-           width="691" height="798" alt="" aria-hidden="true" />
       <div class="wrap">
+        <!-- full-color portrait. Lives inside .wrap as the FIRST child so on
+             MOBILE (block flow) it stacks on top, exactly as before. On DESKTOP
+             the two-column grid (see `.hero .wrap` rules) reorders it into the
+             right column, top-aligned with the headline — it can never cross
+             behind the text. The eyebrow sits in its own full-width row above
+             the columns. The fade at the bottom is baked into the PNG, so
+             there's no CSS mask on this image. -->
+        <img class="hero__portrait" src="aaron-portfolio-portrait-wfade-transparent.png"
+             width="616" height="598" alt="" aria-hidden="true" />
+        <span class="eyebrow">Technical Lead &amp; Solutions Architect</span>
         <div class="hero__inner reveal-hero">
-          <span class="eyebrow">Technical Lead &amp; Solutions Architect</span>
-          <h1>I help small teams <span class="hl">ship the impossible</span>.</h1>
+          <h1>I work with ambitious teams to <span class="hl">ship the impossible</span>.</h1>
           <p class="hero__sub">Deep engineering judgment, design sensibility, and AI fluency across UI/UX, real-time simulation, VR/XR, and AI-augmented development, from concept to market.</p>
-          <p class="hero__note">Most impactful on small teams shipping work that probably shouldn't be possible at this scale.</p>
+          <p class="hero__note">I do my best work on lean, senior teams. Small enough to move fast, good enough to ship what shouldn't be possible at this scale.</p>
           <div class="hero__cta">
             <a class="btn" href="#work">View Work <span class="arrow" aria-hidden="true">↓</span></a>
             <a class="btn btn--ghost" href="#contact">Get in Touch</a>
@@ -1064,7 +1099,7 @@
       <div class="wrap">
         <div class="section-head reveal">
           <span class="eyebrow">Selected Work</span>
-          <h2>Five projects, one throughline: ambitious systems shipped by small teams.</h2>
+          <h2>Five projects, one throughline: ambitious systems shipped by small, senior teams.</h2>
           <p>Spanning space-domain awareness, industrial logistics, educational simulation, indie game systems, and AI-augmented tooling.</p>
         </div>
 
@@ -1215,7 +1250,7 @@
             </div>
           </div>
           <div class="about__body reveal d1">
-            <p class="lede">I'm Aaron M. Harris. I've been writing software since I was nine, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
+            <p class="lede">I'm Aaron Harris. I've been writing software since I was nine, shipping production work since 2011, and I currently lead technical work on the Forerunner platform at Space Interactions.</p>
             <p>What sets me apart is deep engineering judgment paired with AI fluency. I work in Claude Code as my primary coding partner, architect systems where AI accelerates delivery without creating technical debt, and bring the same approach to the teams I lead.</p>
             <p>I tend to start as a contributor and end up running the project: translating fluently between engineers and clients, owning the architecture, and guiding a team through the kind of problem that supposedly has no way through.</p>
             <p>The work that lights me up has people on the other end of it: watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
@@ -1396,43 +1431,6 @@
     });
 
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape") closeNav(); });
-
-    /* ============================================================
-       DEBUG ONLY — portrait-background switcher
-       ------------------------------------------------------------
-       Flip DEBUG_PORTRAIT_BG to false to hide the dropdown and ship the
-       single design baked into <html data-portrait-bg="N">. The whole
-       block is self-contained — delete it (with the #bgDebug markup and
-       .bg-debug CSS) once you've committed to a background.
-       ============================================================ */
-    var DEBUG_PORTRAIT_BG = false;           // ← flip to true to re-open the audition dropdown
-    var BG_COUNT = 8;
-    var BG_STORE_KEY = "amh:portraitBg";
-    var root = doc.documentElement;
-
-    function applyPortraitBg(n) {
-      n = parseInt(n, 10);
-      if (!(n >= 1 && n <= BG_COUNT)) n = parseInt(root.getAttribute("data-portrait-bg"), 10) || 1;
-      root.setAttribute("data-portrait-bg", n);
-      return n;
-    }
-
-    if (DEBUG_PORTRAIT_BG) {
-      var bgDebug = doc.getElementById("bgDebug");
-      var bgSelect = doc.getElementById("bgDebugSelect");
-      if (bgDebug && bgSelect) {
-        var stored = null;
-        try { stored = localStorage.getItem(BG_STORE_KEY); } catch (e) {}
-        var current = applyPortraitBg(stored != null ? stored : root.getAttribute("data-portrait-bg"));
-        bgSelect.value = String(current);
-        bgDebug.hidden = false;
-        bgSelect.addEventListener("change", function () {
-          var n = applyPortraitBg(bgSelect.value);
-          bgSelect.value = String(n);
-          try { localStorage.setItem(BG_STORE_KEY, String(n)); } catch (e) {}
-        });
-      }
-    }
 
     /* ---- scroll reveal ---- */
     var reveals = doc.querySelectorAll(".reveal");
