@@ -477,7 +477,18 @@
     /* shared on .hero so BOTH the grid (.wrap) and the backdrop (.hero__stage,
        a sibling of .wrap) can read the column gap — the halo math below needs
        it to locate the portrait column's center. */
-    .hero { --hero-col-gap: clamp(2rem, 4vw, 4rem); }
+    .hero {
+      --hero-col-gap: clamp(2rem, 4vw, 4rem);
+      /* HEIGHT POLICY (desktop): the old `min-height: clamp(620px, 92vh, 920px)`
+         reserved up to 920px and, with `align-items:center`, floated the content
+         in the middle — dumping a big empty band below the CTA buttons on tall
+         windows. Now the hero is content-driven: a modest min-height floor plus
+         TOP alignment, so the height tracks the text column and the next section
+         follows right after it. The portrait (below) is taken out of row sizing
+         so it can't re-inflate this. */
+      min-height: clamp(480px, 62vh, 620px);
+      align-items: start;
+    }
 
     /* the hero content box becomes the two-column grid */
     .hero .wrap {
@@ -502,15 +513,29 @@
     .hero .wrap > .hero__portrait {
       grid-column: 2;
       grid-row: 2;                  /* row 1 is the eyebrow; row 2 is the text */
-      position: static;
+      /* ABSOLUTE inside the grid: because `.hero .wrap` is `position:relative`,
+         an absolutely-positioned grid item is laid out against its GRID AREA
+         (column 2 / row 2) — but it NO LONGER contributes to track sizing. So a
+         tall portrait can't stretch row 2 anymore; the row (and therefore the
+         hero height) now tracks the left text column. The figure still lives in
+         the right column and stays top-synced with the headline. */
+      position: absolute;
       align-self: start;            /* top-aligned with the headline */
       justify-self: start;          /* anchor left — never cross into the text */
-      bottom: auto; right: auto;
-      width: auto;                  /* keep proportions → no crop */
-      height: 67%;                  /* ~33% smaller than fully filling the column */
+      top: 0; bottom: auto; right: auto; left: 0;
+      /* Aspect ratio is driven by height alone: `width:auto` lets the browser
+         derive width from the image's intrinsic 616×598, so it NEVER distorts.
+         Do NOT cap the width here — `max-width` on an <img> with a fixed height
+         squishes the picture horizontally instead of scaling it down. */
+      width: auto;
+      /* Height is now a fixed-ish clamp (not a % of the row, which no longer
+         grows). Tuned to fit the slimmer hero: head near the headline, torso
+         fade landing around the CTA row. Overflow on `.hero` clips any spill. */
+      height: clamp(420px, 52vh, 560px);
       min-width: 0;
       min-height: 0;
-      max-width: none;
+      max-width: none;              /* let the true aspect ratio win — see above */
+      object-fit: contain;          /* belt-and-suspenders: never stretch */
       /* No CSS mask — the fade is baked into the PNG. */
     }
 
@@ -927,6 +952,15 @@
       --fig-h: calc(var(--fig-w) * 0.971);
     }
     .hero__sub, .hero__note { max-width: 100%; }
+    /* keep all three hero CTAs (View Work / About / Get in Touch) on ONE row on
+       phones — same approach as the contact row below: nowrap + equal-width
+       flex items that can shrink (min-width:0), with trimmed padding/text. */
+    .hero__cta { flex-wrap: nowrap; gap: .55rem; width: 100%; }
+    .hero__cta .btn {
+      flex: 1 1 0; min-width: 0; justify-content: center;
+      padding: .8rem .6rem; gap: .4rem;
+      font-size: .9rem; white-space: nowrap;
+    }
     /* portrait flows at the top, centered; the fade is baked into the PNG, so
        the text can still rise into the faded lower portion (merged composition)
        with no CSS mask. */
@@ -1000,6 +1034,11 @@
     .contact__row { gap: .4rem; }
     .contact__row .contact-btn { padding: .75rem .35rem; font-size: .82rem; gap: .32rem; }
     .contact__row .contact-btn svg { width: 16px; height: 16px; }
+
+    /* same tightening for the hero CTAs on very narrow phones */
+    .hero__cta { gap: .4rem; }
+    .hero__cta .btn { padding: .72rem .4rem; font-size: .8rem; gap: .3rem; }
+    .hero__cta .btn .arrow { display: none; }
   }
   </style>
 </head>
@@ -1093,6 +1132,7 @@
           <!-- /Hero note -->
           <div class="hero__cta">
             <a class="btn" href="#work">View Work <span class="arrow" aria-hidden="true">↓</span></a>
+            <a class="btn btn--ghost" href="#about">About</a>
             <a class="btn btn--ghost" href="#contact">Get in Touch</a>
           </div>
         </div>
@@ -1104,7 +1144,7 @@
       <div class="wrap">
         <div class="section-head reveal">
           <span class="eyebrow">Selected Work</span>
-          <h2>Ambitious systems shipped by small, senior teams.</h2>
+          <h2>Innovative systems shipped by leading agile teams.</h2>
           <p>Spanning space-domain awareness, industrial logistics, educational simulation, indie game systems, and AI-augmented tooling.</p>
         </div>
 
@@ -1333,14 +1373,17 @@
 
     /* ---- header scrolled state + scroll progress bar ----
        The header switches to its `scrolled` look (black bar + portrait + compact
-       name) once ~50% of the hero portrait has scrolled out of view. We prefer
-       an IntersectionObserver (cheap, no per-frame math); a getBoundingClientRect
-       check in onScroll covers browsers without it. */
+       name) once enough of the hero portrait has scrolled up under the header.
+       We measure that coverage VERTICALLY only (see portraitShownRatio): the
+       desktop portrait is scaled to its true aspect ratio and intentionally
+       bleeds off the right edge, so an IntersectionObserver's 2D area ratio would
+       read below 100% even at the very top and wrongly flip the header dark
+       before any scrolling. The progress bar already runs every scroll, so doing
+       this in the same rAF-throttled handler costs nothing extra. */
     var header = doc.getElementById("header");
     var progress = doc.getElementById("progress");
     var heroPortrait = doc.querySelector(".hero__portrait");
     var ticking = false;
-    var portraitIO = null;
 
     function setScrolled(on) { header.classList.toggle("scrolled", on); }
 
@@ -1349,35 +1392,33 @@
        to leave. Mobile triggers when ~25% has scrolled away. */
     function revealThreshold() { return window.innerWidth > 880 ? 0.9 : 0.75; }
 
-    if (heroPortrait && "IntersectionObserver" in window) {
-      var hh = Math.round(header.offsetHeight || 56);
-      portraitIO = new IntersectionObserver(function (entries) {
-        setScrolled(entries[entries.length - 1].intersectionRatio < revealThreshold());
-      }, { threshold: [0, 0.25, 0.5, 0.75, 0.9, 1], rootMargin: "-" + hh + "px 0px 0px 0px" });
-      portraitIO.observe(heroPortrait);
+    /* Fraction of the portrait still visible below the header, VERTICAL only —
+       immune to the portrait bleeding off the right edge. null if no portrait. */
+    function portraitShownRatio() {
+      if (!heroPortrait) return null;
+      var r = heroPortrait.getBoundingClientRect();
+      if (r.height <= 0) return null;
+      var top = header.offsetHeight || 56;
+      var shown = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, top);
+      return shown / r.height;
     }
 
     function onScroll() {
       var y = window.scrollY || doc.documentElement.scrollTop;
-      if (!portraitIO) {
-        // fallback: how much of the hero portrait still shows below the header
-        if (heroPortrait) {
-          var r = heroPortrait.getBoundingClientRect();
-          var top = header.offsetHeight || 56;
-          var shown = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, top);
-          setScrolled(r.height > 0 ? (shown / r.height) < revealThreshold() : y > 24);
-        } else {
-          setScrolled(y > 24);
-        }
-      }
+      var ratio = portraitShownRatio();
+      setScrolled(ratio === null ? y > 24 : ratio < revealThreshold());
       var h = doc.documentElement.scrollHeight - window.innerHeight;
       var p = h > 0 ? y / h : 0;
       progress.style.transform = "scaleX(" + p + ")";
       ticking = false;
     }
-    window.addEventListener("scroll", function () {
+    function requestTick() {
       if (!ticking) { window.requestAnimationFrame(onScroll); ticking = true; }
-    }, { passive: true });
+    }
+    window.addEventListener("scroll", requestTick, { passive: true });
+    /* re-evaluate on resize: the desktop/mobile threshold and the portrait's
+       geometry both change with viewport width (IO used to handle this for us). */
+    window.addEventListener("resize", requestTick, { passive: true });
     onScroll();
 
     /* ---- mobile nav toggle ---- */
