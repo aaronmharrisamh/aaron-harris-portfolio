@@ -502,14 +502,13 @@
     /* text block: left column, full column width (drop the old narrow cap) */
     .hero .wrap > .hero__inner { grid-column: 1; max-width: none; }
 
-    /* portrait: right column, SAME row as the text block. It scales to fill the
-       row at its natural proportions — height-driven with width:auto, so the
-       whole image is shown with NO cropping. It's sized to 67% of the column
-       (row) height (i.e. ~33% smaller than fully filling it), top-anchored so
-       the head still lines up with the headline. justify-self:start anchors it
-       to the column's LEFT edge, so it can never cross into the text; at this
-       size it sits within the column at typical widths. min-height:0 stops the
-       intrinsic height from inflating the grid row. */
+    /* portrait: right column, SAME row as the text block. It's height-driven
+       with width:auto, so the whole image is shown with NO cropping. Its size is
+       governed by the max-height clamp below (top-anchored so the head lines up
+       with the headline). justify-self:start anchors it to the column's LEFT
+       edge, so it can never cross into the text; at this size it sits within the
+       column at typical widths. min-height:0 stops the intrinsic height from
+       inflating the grid row. */
     .hero .wrap > .hero__portrait {
       grid-column: 2;
       grid-row: 2;                  /* row 1 is the eyebrow; row 2 is the text */
@@ -529,7 +528,9 @@
              image to fit BOTH caps while preserving its 616×598 aspect ratio
              (no distortion — that only happens if you pin one dimension and cap
              the other).
-           • max-height keeps the wide-screen size we already tuned.
+           • max-height sets the wide-screen size — the whole clamp was scaled
+             down 25% from the original 420/52vh/560 so the portrait reads as a
+             figure rather than overwhelming the headline.
            • max-width = the horizontal room from the portrait's LEFT anchor
              (column-2's left edge) to the viewport's right edge, minus a small
              gap — so the figure can never run off the right edge and get the
@@ -551,7 +552,7 @@
       );
       width: auto;
       height: auto;
-      max-height: clamp(420px, 52vh, 560px);
+      max-height: clamp(315px, 39vh, 420px);
       max-width: var(--portrait-fit);
       min-width: 0;
       min-height: 0;
