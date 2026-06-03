@@ -977,9 +977,11 @@
        eyebrow up — and with it everything that follows in flow (the text) —
        ~37.5% of the portrait height, so the eyebrow/headline rise toward the
        portrait's lower neck/chest. Same visual result as before. The text
-       paints over the portrait naturally (it comes later in the DOM). */
+       paints over the portrait naturally (it comes later in the DOM).
+       The +32px eases that pull back a touch so the eyebrow/text sit a little
+       lower and cover less of the portrait. */
     .hero .wrap { position: relative; z-index: 2; }
-    .hero .wrap > .eyebrow { margin-top: calc(var(--fig-h) * -0.375); }
+    .hero .wrap > .eyebrow { margin-top: calc(var(--fig-h) * -0.375 + 32px); }
     /* let the long eyebrow wrap to two lines like the mockup; subtle shadow
        keeps it legible where it overlaps the portrait */
     .hero .eyebrow {
@@ -1132,7 +1134,12 @@
           <!-- /Hero note -->
           <div class="hero__cta">
             <a class="btn" href="#work">View Work <span class="arrow" aria-hidden="true">↓</span></a>
+            <!-- "About" CTA disabled for now to keep the hero uncluttered.
+                 To bring it back, just uncomment the line below. The mobile
+                 3-pill fit rules (.hero__cta in the @media blocks) are left in
+                 place, so it will slot back in on one row automatically.
             <a class="btn btn--ghost" href="#about">About</a>
+            -->
             <a class="btn btn--ghost" href="#contact">Get in Touch</a>
           </div>
         </div>
