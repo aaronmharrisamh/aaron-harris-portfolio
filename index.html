@@ -664,46 +664,8 @@
   .project:nth-of-type(even) .project__media { order: 2; }
   .project:nth-of-type(even) .project__body  { order: 1; }
 
-  /* media column */
+  /* media column (the .gallery holder lives here; see PROJECT IMAGE GALLERY) */
   .project__media { position: relative; }
-  .figure {
-    position: relative;
-    border-radius: var(--radius);
-    overflow: hidden;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    box-shadow: 0 30px 80px -40px rgba(0,0,0,.8);
-    transition: transform .6s var(--ease), box-shadow .6s var(--ease), border-color .6s;
-  }
-  .figure img {
-    width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
-    transition: transform .9s var(--ease), filter .6s;
-  }
-  .project__media:hover .figure {
-    transform: translateY(-6px);
-    border-color: var(--accent);
-    box-shadow: 0 40px 90px -38px rgba(0,0,0,.85), 0 0 0 1px var(--accent-faint);
-  }
-  .project__media:hover .figure img { transform: scale(1.04); }
-  .figure::after {
-    content: ""; position: absolute; inset: 0;
-    background: linear-gradient(120deg, transparent 60%, var(--accent-faint));
-    opacity: 0; transition: opacity .6s;
-  }
-  .project__media:hover .figure::after { opacity: 1; }
-
-  /* small inset image overlapping the main figure */
-  .figure-inset {
-    position: absolute; right: -14px; bottom: -22px;
-    width: 38%; max-width: 220px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    border: 2px solid var(--bg);
-    box-shadow: 0 20px 50px -22px rgba(0,0,0,.9);
-    transition: transform .6s var(--ease);
-  }
-  .figure-inset img { aspect-ratio: 4 / 3; object-fit: cover; width: 100%; }
-  .project__media:hover .figure-inset { transform: translateY(-4px) scale(1.03); }
 
   /* body column */
   .project__index {
@@ -760,13 +722,244 @@
   }
 
   /* AUTO-HIDE empty optional sections — every project block keeps its optional
-     bits (inset image, stats, highlights) as tags for a uniform copy-paste
-     shape; when one is left empty it simply vanishes. The JS sweep at the
-     bottom of the file also removes any left with stray whitespace (which would
-     defeat :empty), so an empty box never shows on the page. */
+     bits (stats, highlights) as tags for a uniform copy-paste shape; when one is
+     left empty it simply vanishes. The JS sweep at the bottom of the file also
+     removes any left with stray whitespace (which would defeat :empty), so an
+     empty box never shows on the page. */
   .project .stats:empty,
-  .project .highlights:empty,
-  .project .figure-inset:empty { display: none; }
+  .project .highlights:empty { display: none; }
+
+  /* ============================================================
+     PROJECT IMAGE GALLERY  (Phase 1)
+     A CSS "holder" (16:9 backdrop: panel + blue bokeh + faint `+`
+     grid + chamfer frame) holds photos of any ratio, contained with
+     padding so the holder always frames them. The JS enhances each
+     authored `.gallery` (a list of <img>) into the structure below.
+     ============================================================ */
+
+  /* pre-enhancement fallback: before the JS runs (or if it never does),
+     show just the first image so nothing stacks awkwardly. */
+  .gallery:not(.is-ready) > img { display: none; width: 100%; border-radius: var(--radius); }
+  .gallery:not(.is-ready) > img:first-of-type { display: block; }
+
+  .gallery.is-ready { display: block; }
+
+  /* the holder: a fixed 16:9 stage. overflow is VISIBLE so the optional
+     corner preview can stick out; the chamfer/clip lives on the frame. */
+  .gallery__holder {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    cursor: zoom-in;          /* the image area opens the lightbox (Phase 2) */
+  }
+
+  /* the framed backdrop: panel base, two soft blue bokeh glows, a faint
+     tiled `+` grid, a subtle inset hairline, and a chamfered (notched) edge. */
+  .gallery__frame {
+    position: absolute; inset: 0;
+    overflow: hidden;
+    background-color: var(--panel);
+    background-image:
+      url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='46'%20height='46'%3E%3Cpath%20d='M23%2018v10M18%2023h10'%20stroke='rgba(150,180,220,0.15)'%20stroke-width='1'/%3E%3C/svg%3E"),
+      radial-gradient(50% 70% at 30% 28%, rgba(56,120,200,0.34), rgba(56,120,200,0) 60%),
+      radial-gradient(46% 64% at 76% 74%, rgba(38,86,160,0.26), rgba(38,86,160,0) 62%);
+    background-repeat: repeat, no-repeat, no-repeat;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), 0 30px 80px -40px rgba(0,0,0,.8);
+    clip-path: polygon(
+      14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px),
+      calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px);
+  }
+
+  /* the padded stage that holds the stacked images, so the holder shows
+     as a margin around every photo. */
+  .gallery__stage { position: absolute; inset: clamp(10px, 2.4%, 24px); }
+
+  /* each photo: contained (any ratio fits, never stretched), centered,
+     floating on the holder with a faint drop shadow, cross-faded. */
+  .gallery__img {
+    position: absolute; inset: 0; margin: auto;       /* centered in the stage */
+    max-width: 100%; max-height: 100%;
+    width: auto; height: auto;        /* shrink large photos to fit; never upscale
+                                         a small one to mush (it stays crisp + centered) */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .5s var(--ease);
+    filter: drop-shadow(0 14px 26px rgba(0,0,0,.5));
+  }
+  .gallery__img.is-active { opacity: 1; }
+
+  /* optional per-image caption: bottom scrim, fades in with its image,
+     hidden when the active image has no data-caption. */
+  .gallery__caption {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 2.6rem 1.1rem .9rem;
+    background: linear-gradient(transparent, rgba(4,8,14,.72));
+    color: #fff; font-size: .82rem; letter-spacing: .02em;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .45s var(--ease), transform .45s var(--ease);
+    pointer-events: none;
+  }
+  .gallery__caption.is-visible { opacity: 1; transform: none; }
+
+  /* prev / next arrows: overlaid on the holder edges. Appear on hover or
+     focus (and always on touch). Hidden for single-image galleries. */
+  .gallery__nav {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 42px; height: 42px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 50%;
+    background: rgba(8,12,20,.55); color: var(--text-soft);
+    cursor: pointer; z-index: 3; padding: 0;
+    opacity: 0; transition: opacity .3s, background .3s, border-color .3s, color .3s;
+  }
+  .gallery__nav--prev { left: 12px; }
+  .gallery__nav--next { right: 12px; }
+  .gallery__nav svg { width: 16px; height: 16px; display: block; }
+  .gallery__holder:hover .gallery__nav,
+  .gallery__nav:focus-visible { opacity: 1; }
+  .gallery__nav:hover { background: rgba(8,12,20,.85); border-color: var(--accent); color: #fff; }
+  @media (hover: none) { .gallery__nav { opacity: 1; } }
+
+  /* circle thumbnails beneath the holder: each an upper-left crop of its
+     image. Hidden for single-image galleries. */
+  .gallery__dots {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: .55rem; margin-top: .9rem;
+  }
+  .gallery__dot {
+    width: 30px; height: 30px; padding: 0; overflow: hidden;
+    border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel); cursor: pointer; opacity: .55;
+    transition: opacity .25s, border-color .25s, transform .2s, box-shadow .25s;
+  }
+  .gallery__dot img {
+    width: 100%; height: 100%; display: block;
+    object-fit: cover; object-position: left top;   /* upper-left crop */
+  }
+  .gallery__dot:hover { opacity: .9; transform: translateY(-1px); }
+  .gallery__dot.is-active {
+    opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-faint);
+  }
+
+  /* optional "next image" preview teaser: a mini of the next image,
+     overlapping the holder's bottom-right corner; clicking it advances.
+     Shown only when the .gallery has data-next-preview. */
+  .gallery__preview {
+    position: absolute; right: -10px; bottom: -16px;
+    width: 30%; max-width: 188px; aspect-ratio: 4 / 3;
+    padding: 0; overflow: hidden; cursor: pointer; z-index: 4;
+    border: 2px solid var(--bg); background: var(--panel);
+    box-shadow: 0 20px 44px -20px rgba(0,0,0,.9);
+    clip-path: polygon(12px 0, 100% 0, 100% 100%, 0 100%, 0 12px);
+    transition: transform .3s var(--ease), border-color .3s;
+  }
+  .gallery__preview:hover { transform: translateY(-3px) scale(1.03); border-color: var(--accent); }
+  .gallery__preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gallery__preview::after {
+    content: "Next"; position: absolute; left: 0; right: 0; bottom: 0;
+    font-size: .58rem; letter-spacing: .16em; text-transform: uppercase;
+    text-align: center; padding: .14rem; color: #fff; background: rgba(4,8,14,.6);
+  }
+
+  /* keyboard focus rings on the gallery controls (the arrow also reveals
+     itself on focus via the rule above). */
+  .gallery__nav:focus-visible,
+  .gallery__dot:focus-visible,
+  .gallery__preview:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  /* single-image galleries: no arrows, no dots, no preview. */
+  .gallery--single .gallery__nav,
+  .gallery--single .gallery__dots,
+  .gallery--single .gallery__preview { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gallery__img, .gallery__caption, .gallery__nav, .gallery__preview { transition: none; }
+  }
+
+  /* ============================================================
+     LIGHTBOX  (Phase 2)
+     One reusable fullscreen viewer. Desktop: image simply fit to the
+     page (no zoom). Touch devices: pinch-zoom + clamped pan (added in
+     the JS). Plus (X) close, prev/next arrows, a slim always-on caption
+     bar, and Esc / backdrop close. Sits above the header (z 1000).
+     ============================================================ */
+  body.lb-open { overflow: hidden; }
+
+  .lightbox {
+    position: fixed; inset: 0; z-index: 2000;
+    background: rgba(4,6,10,.93);
+    animation: lb-fade .25s var(--ease-soft) both;
+  }
+  .lightbox[hidden] { display: none; }
+  @keyframes lb-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* the stage centers the image and reserves margins so the photo never
+     collides with the close button, arrows, or caption bar. */
+  /* explicit inset rectangle (not padding) defines the safe area, so the photo
+     never collides with the close button, arrows, or caption bar, and the box
+     stays symmetric at any width. */
+  .lightbox__stage {
+    position: absolute;
+    top: clamp(48px, 8vh, 76px);
+    right: clamp(44px, 8vw, 96px);
+    bottom: clamp(52px, 9vh, 84px);
+    left: clamp(44px, 8vw, 96px);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    touch-action: none;       /* the JS owns touch gestures on mobile */
+  }
+  .lightbox__img {
+    max-width: 100%; max-height: 100%;
+    min-width: 0; min-height: 0;     /* allow the flex item to shrink to fit */
+    object-fit: contain;
+    transform-origin: center center;
+    will-change: transform;
+    user-select: none; -webkit-user-select: none;
+    -webkit-user-drag: none;
+    filter: drop-shadow(0 22px 50px rgba(0,0,0,.55));
+  }
+  .lightbox__img.is-zoomed { cursor: grab; }
+
+  .lightbox__close,
+  .lightbox__nav {
+    position: absolute; z-index: 2; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(12,16,24,.6); color: #fff; cursor: pointer;
+    border-radius: 50%;
+    transition: background .25s, border-color .25s, transform .2s;
+  }
+  .lightbox__close:hover,
+  .lightbox__nav:hover { background: rgba(12,16,24,.95); border-color: var(--accent); }
+  .lightbox__close:focus-visible,
+  .lightbox__nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .lightbox__close { top: 16px; right: 18px; width: 46px; height: 46px; }
+  .lightbox__close svg { width: 20px; height: 20px; }
+  .lightbox__nav { top: 50%; transform: translateY(-50%); width: 50px; height: 50px; }
+  .lightbox__nav svg { width: 22px; height: 22px; }
+  .lightbox__nav--prev { left: 16px; }
+  .lightbox__nav--next { right: 16px; }
+  .lightbox__nav:hover { transform: translateY(-50%) scale(1.05); }
+
+  .lightbox__caption {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+    padding: .85rem 1.2rem 1rem; text-align: center;
+    background: linear-gradient(transparent, rgba(4,6,10,.82));
+    color: #fff; font-size: .85rem; letter-spacing: .02em;
+  }
+  .lightbox__caption.is-empty { display: none; }
+
+  @media (max-width: 560px) {
+    .lightbox__close { width: 42px; height: 42px; top: 10px; right: 10px; }
+    .lightbox__nav { width: 44px; height: 44px; }
+    .lightbox__nav--prev { left: 8px; }
+    .lightbox__nav--next { right: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lightbox { animation: none; }
+    .lightbox__nav, .lightbox__close { transition: none; }
+  }
 
   /* ============================================================
      ABOUT
@@ -1052,7 +1245,6 @@
     .about__grid { grid-template-columns: 1fr; }
     .portrait { margin-bottom: .5rem; }
 
-    .figure-inset { width: 42%; right: -8px; bottom: -16px; }
     .spec { grid-template-columns: 72px 1fr; gap: .7rem; }
 
     /* keep Email / Call / TXT on a single row on phones */
@@ -1082,6 +1274,17 @@
     .hero__cta .btn .arrow { display: none; }
   }
   </style>
+
+  <!-- Graceful degradation: without JS the reveal animations never fire, so
+       force all content visible and let each gallery show its first image. The
+       <img> tags + alt already live in the static HTML for crawlers; this keeps
+       them viewable for no-JS users too. -->
+  <noscript>
+    <style>
+      .reveal, .reveal-hero > *, .hero .wrap > .eyebrow, .hero__portrait { opacity: 1 !important; transform: none !important; }
+      .gallery:not(.is-ready) > img:first-of-type { display: block !important; }
+    </style>
+  </noscript>
 </head>
 
 <body>
@@ -1181,6 +1384,10 @@
     </section>
 
     <!-- ===================== SELECTED WORK ===================== -->
+    <!-- NOTE: gallery images below are temporary stand-ins from img/seed/,
+         generated by tools/gen_placeholders.py. Replace the <img> src values
+         with real photos as they arrive; img/seed/ and that script can then be
+         retired. (Originals archived in /archived/.) -->
     <section class="work" id="work" aria-label="Selected work">
       <div class="wrap">
         <div class="section-head reveal">
@@ -1203,10 +1410,10 @@
              ║       labeled fields (title, meta, image, copy, stats, chips).      ║
              ║   • REMOVE  → delete a whole block (START banner to END banner).     ║
              ║                                                                    ║
-             ║  OPTIONAL bits (inset image · stats · highlights) live in every     ║
-             ║  block. To use one, fill it in. To skip one, just empty it out and  ║
-             ║  leave the empty tag in place — it AUTO-HIDES. Don't delete the     ║
-             ║  tag itself, so the block keeps its copy-paste shape.               ║
+             ║  IMAGES live in each project's GALLERY (one <img> per photo). Add   ║
+             ║  or remove a photo by adding/removing one <img> line. Arrows, dots, ║
+             ║  captions, and the lightbox build from that list automatically.     ║
+             ║  OPTIONAL bits (stats · highlights) AUTO-HIDE when left empty.      ║
              ╚══════════════════════════════════════════════════════════════════╝ -->
 
         <!-- ╔═══════════════════════════════════════════════════════════════╗
@@ -1215,14 +1422,20 @@
         <article class="project">
           <div class="project__media reveal">
 
-            <!-- IMAGE (required) · change src + alt · side auto-alternates -->
-            <figure class="figure">
-              <img src="img/placeholder-forerunner.jpg" width="1600" height="900"
-                   alt="Forerunner 3 — BabylonJS 3D visualization of space-domain awareness data (placeholder)." loading="lazy" />
-            </figure>
-
-            <!-- OPTIONAL · inset image · empty = auto-hidden · to use: put an <img> inside this figure -->
-            <figure class="figure-inset"></figure>
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/forerunner-01.jpg" loading="lazy"
+                   alt="Forerunner 3 live satellite scene (placeholder)."
+                   data-caption="Live satellite scene" />
+              <img src="img/seed/forerunner-02.jpg" loading="lazy"
+                   alt="Forerunner 3 debris timeline (placeholder)." />
+              <img src="img/seed/forerunner-03.jpg" loading="lazy"
+                   alt="Forerunner 3 Google Earth tile fusion (placeholder)."
+                   data-caption="Google Earth tile fusion" />
+            </div>
 
           </div>
           <div class="project__body reveal d1">
@@ -1264,14 +1477,17 @@
         <article class="project">
           <div class="project__media reveal">
 
-            <!-- IMAGE (required) · change src + alt · side auto-alternates -->
-            <figure class="figure">
-              <img src="img/placeholder-phillips.jpg" width="1600" height="900"
-                   alt="Phillips Lifestyles — dual-window logistics and scheduling platform (placeholder)." loading="lazy" />
-            </figure>
-
-            <!-- OPTIONAL · inset image · empty = auto-hidden · to use: put an <img> inside this figure -->
-            <figure class="figure-inset"></figure>
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/phillips-01.jpg" loading="lazy"
+                   alt="Phillips Lifestyles dual-window scheduling UI (placeholder)."
+                   data-caption="Dual-window scheduling UI" />
+              <img src="img/seed/phillips-02.jpg" loading="lazy"
+                   alt="Phillips Lifestyles fleet tracking map (placeholder)." />
+            </div>
 
           </div>
           <div class="project__body reveal d1">
@@ -1316,17 +1532,22 @@
         <article class="project">
           <div class="project__media reveal">
 
-            <!-- IMAGE (required) · change src + alt · side auto-alternates -->
-            <figure class="figure">
-              <img src="img/placeholder-planetarium.jpg" width="1600" height="900"
-                   alt="COGNiTiON Mobile Planetarium — dome show in progress (placeholder)." loading="lazy" />
-            </figure>
-
-            <!-- OPTIONAL · inset image · empty = auto-hidden · to use: put an <img> inside this figure -->
-            <figure class="figure-inset">
-              <img src="img/placeholder-planetarium-inset.jpg" width="800" height="600"
-                   alt="Custom thermal-isolated small-form-factor PC build (placeholder)." loading="lazy" />
-            </figure>
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/planetarium-01.jpg" loading="lazy"
+                   alt="COGNiTiON planetarium dome show (placeholder)."
+                   data-caption="Dome show in progress" />
+              <img src="img/seed/planetarium-02.jpg" loading="lazy"
+                   alt="COGNiTiON planetarium panorama (placeholder)." />
+              <img src="img/seed/planetarium-03.jpg" loading="lazy"
+                   alt="COGNiTiON custom SFF PC build (placeholder)."
+                   data-caption="Custom SFF PC build" />
+              <img src="img/seed/planetarium-04.jpg" loading="lazy"
+                   alt="COGNiTiON projector column detail (placeholder)." />
+            </div>
 
           </div>
           <div class="project__body reveal d1">
@@ -1371,14 +1592,15 @@
         <article class="project">
           <div class="project__media reveal">
 
-            <!-- IMAGE (required) · change src + alt · side auto-alternates -->
-            <figure class="figure">
-              <img src="img/placeholder-blockade.jpg" width="1600" height="900"
-                   alt="Blockade Runner — voxel space-sim and ship-construction system (placeholder)." loading="lazy" />
-            </figure>
-
-            <!-- OPTIONAL · inset image · empty = auto-hidden · to use: put an <img> inside this figure -->
-            <figure class="figure-inset"></figure>
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/blockade-01.jpg" loading="lazy"
+                   alt="Blockade Runner voxel ship construction (placeholder)."
+                   data-caption="Voxel ship construction" />
+            </div>
 
           </div>
           <div class="project__body reveal d1">
@@ -1423,17 +1645,26 @@
         <article class="project">
           <div class="project__media reveal">
 
-            <!-- IMAGE (required) · change src + alt · side auto-alternates -->
-            <figure class="figure">
-              <img src="img/placeholder-aitooling.jpg" width="1600" height="900"
-                   alt="AI-augmented engineering tooling — composite of shipped internal apps (placeholder)." loading="lazy" />
-            </figure>
-
-            <!-- OPTIONAL · inset image · empty = auto-hidden · to use: put an <img> inside this figure -->
-            <figure class="figure-inset">
-              <img src="img/placeholder-aitooling-inset.jpg" width="800" height="600"
-                   alt="Tool composite — mascot notifier, call-stack visualizer, fisheye converter (placeholder)." loading="lazy" />
-            </figure>
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag.
+                 (This project opts in: data-next-preview is set on the .gallery below.) -->
+            <div class="gallery" data-next-preview>
+              <img src="img/seed/aitooling-01.jpg" loading="lazy"
+                   alt="AI-augmented tooling composite (placeholder)."
+                   data-caption="Shipped tooling composite" />
+              <img src="img/seed/aitooling-02.jpg" loading="lazy"
+                   alt="Wulfram 2 call-stack visualizer (placeholder)."
+                   data-caption="Call-stack visualizer" />
+              <img src="img/seed/aitooling-03.jpg" loading="lazy"
+                   alt="Fisheye video converter UI (placeholder)." />
+              <img src="img/seed/aitooling-04.jpg" loading="lazy"
+                   alt="360 to 180 fisheye converter (placeholder)."
+                   data-caption="360 to 180 fisheye converter" />
+              <img src="img/seed/aitooling-05.jpg" loading="lazy"
+                   alt="Mascot notifier icon (placeholder)." />
+            </div>
 
           </div>
           <div class="project__body reveal d1">
@@ -1686,6 +1917,360 @@
       reveals.forEach(function (el) { el.classList.add("in"); });
     }
 
+    /* ===========================================================
+       LIGHTBOX  (Phase 2)
+       One reusable fullscreen viewer for every gallery. Desktop: the
+       image is simply fit to the page (no zoom). Touch devices: pinch
+       zoom and clamped pan. Plus (X) close, prev/next arrows, a slim
+       always-on caption bar, Esc / backdrop close, a focus trap, and the
+       rest of the page made inert while open. No libraries. */
+    var lightbox = (function () {
+      var root, stage, imgEl, captionEl, closeBtn, prevBtn, nextBtn;
+      var mainEl = doc.querySelector("main");
+      var images = [], current = 0, opener = null, lastFocus = null, built = false;
+      var zoomable = false, scale = 1, tx = 0, ty = 0;
+      var MAX = 4;
+
+      function svgButton(cls, label, inner) {
+        var b = doc.createElement("button");
+        b.type = "button"; b.className = cls;
+        b.setAttribute("aria-label", label); b.innerHTML = inner;
+        return b;
+      }
+      function chevron(dir) {
+        var pts = dir === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6";
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="' +
+          pts + '"/></svg>';
+      }
+      var X_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/>' +
+        '<line x1="18" y1="6" x2="6" y2="18"/></svg>';
+
+      function build() {
+        root = doc.createElement("div");
+        root.className = "lightbox";
+        root.setAttribute("role", "dialog");
+        root.setAttribute("aria-modal", "true");
+        root.setAttribute("aria-label", "Image viewer");
+        root.hidden = true;
+
+        stage = doc.createElement("div");
+        stage.className = "lightbox__stage";
+        imgEl = doc.createElement("img");
+        imgEl.className = "lightbox__img";
+        imgEl.alt = ""; imgEl.draggable = false;
+        stage.appendChild(imgEl);
+
+        closeBtn = svgButton("lightbox__close", "Close image viewer", X_ICON);
+        prevBtn = svgButton("lightbox__nav lightbox__nav--prev", "Previous image", chevron("prev"));
+        nextBtn = svgButton("lightbox__nav lightbox__nav--next", "Next image", chevron("next"));
+        captionEl = doc.createElement("div");
+        captionEl.className = "lightbox__caption";
+
+        root.appendChild(stage);
+        root.appendChild(closeBtn);
+        root.appendChild(prevBtn);
+        root.appendChild(nextBtn);
+        root.appendChild(captionEl);
+        doc.body.appendChild(root);
+
+        closeBtn.addEventListener("click", close);
+        prevBtn.addEventListener("click", function (e) { e.stopPropagation(); go(current - 1); });
+        nextBtn.addEventListener("click", function (e) { e.stopPropagation(); go(current + 1); });
+        /* click on the backdrop (or stage padding), but not the image or a
+           control, closes. */
+        root.addEventListener("click", function (e) {
+          if (e.target === root || e.target === stage) close();
+        });
+        imgEl.addEventListener("click", function (e) { e.stopPropagation(); });
+        doc.addEventListener("keydown", onKey);
+        bindTouch();
+        built = true;
+      }
+
+      /* ---- keyboard + focus trap ---- */
+      function onKey(e) {
+        if (!root || root.hidden) return;
+        if (e.key === "Escape") { e.preventDefault(); close(); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); go(current - 1); }
+        else if (e.key === "ArrowRight") { e.preventDefault(); go(current + 1); }
+        else if (e.key === "Tab") { trap(e); }
+      }
+      function controls() {
+        return [closeBtn, prevBtn, nextBtn].filter(function (b) { return b.style.display !== "none"; });
+      }
+      function trap(e) {
+        var f = controls();
+        if (!f.length) return;
+        var i = f.indexOf(doc.activeElement);
+        if (i === -1) { e.preventDefault(); f[0].focus(); }
+        else if (e.shiftKey && i === 0) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+      }
+
+      /* hide the rest of the page from AT + tab order while open */
+      function inert(on) {
+        [header, mainEl].forEach(function (el) {
+          if (!el) return;
+          if (on) { el.setAttribute("aria-hidden", "true"); el.setAttribute("inert", ""); }
+          else { el.removeAttribute("aria-hidden"); el.removeAttribute("inert"); }
+        });
+      }
+
+      function open(imgEls, startIndex, openerEl) {
+        if (!built) build();
+        images = Array.prototype.map.call(imgEls, function (im) {
+          return {
+            src: im.currentSrc || im.src,
+            caption: im.getAttribute("data-caption") || "",
+            alt: im.getAttribute("alt") || ""
+          };
+        });
+        if (!images.length) return;
+        opener = openerEl || null;
+        lastFocus = doc.activeElement;
+        current = startIndex || 0;
+        zoomable = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+        root.hidden = false;
+        doc.body.classList.add("lb-open");
+        inert(true);
+        var many = images.length > 1;
+        prevBtn.style.display = nextBtn.style.display = many ? "" : "none";
+        render();
+        closeBtn.focus();
+      }
+
+      function render() {
+        resetZoom();
+        var im = images[current];
+        imgEl.src = im.src;
+        imgEl.alt = im.alt;
+        if (im.caption) { captionEl.textContent = im.caption; captionEl.classList.remove("is-empty"); }
+        else { captionEl.textContent = ""; captionEl.classList.add("is-empty"); }
+      }
+      function go(i) {
+        var n = images.length;
+        if (!n) return;
+        current = ((i % n) + n) % n;       /* wrap-around */
+        render();
+      }
+      function close() {
+        if (!root || root.hidden) return;
+        root.hidden = true;
+        doc.body.classList.remove("lb-open");
+        inert(false);
+        resetZoom();
+        var back = opener || lastFocus;
+        if (back && typeof back.focus === "function") back.focus();
+      }
+
+      /* ---- zoom / pan (touch only) ---- */
+      function applyTransform() {
+        imgEl.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+        imgEl.classList.toggle("is-zoomed", scale > 1.01);
+      }
+      function resetZoom() { scale = 1; tx = 0; ty = 0; if (imgEl) applyTransform(); }
+      function clampPan() {
+        var r = stage.getBoundingClientRect();
+        var mx = (scale - 1) * r.width / 2, my = (scale - 1) * r.height / 2;
+        tx = Math.max(-mx, Math.min(mx, tx));
+        ty = Math.max(-my, Math.min(my, ty));
+      }
+      function dist(t) {
+        var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      function center() {
+        var r = stage.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      var pinch = null, pan = null, lastTap = 0;
+      function bindTouch() {
+        stage.addEventListener("touchstart", function (e) {
+          if (!zoomable) return;
+          if (e.touches.length === 2) {
+            var c = center();
+            var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            var my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            pinch = { d0: dist(e.touches), s0: scale, fx: mx - c.x, fy: my - c.y, tx0: tx, ty0: ty };
+            pan = null;
+          } else if (e.touches.length === 1) {
+            pinch = null;
+            pan = scale > 1.01 ? { x: e.touches[0].clientX - tx, y: e.touches[0].clientY - ty } : null;
+          }
+        }, { passive: true });
+
+        stage.addEventListener("touchmove", function (e) {
+          if (!zoomable) return;
+          if (pinch && e.touches.length === 2) {
+            e.preventDefault();
+            var s = Math.max(1, Math.min(MAX, pinch.s0 * (dist(e.touches) / pinch.d0)));
+            tx = pinch.fx - (pinch.fx - pinch.tx0) * (s / pinch.s0);   /* keep focal point fixed */
+            ty = pinch.fy - (pinch.fy - pinch.ty0) * (s / pinch.s0);
+            scale = s; clampPan(); applyTransform();
+          } else if (pan && e.touches.length === 1 && scale > 1.01) {
+            e.preventDefault();
+            tx = e.touches[0].clientX - pan.x;
+            ty = e.touches[0].clientY - pan.y;
+            clampPan(); applyTransform();
+          }
+        }, { passive: false });
+
+        stage.addEventListener("touchend", function (e) {
+          if (!zoomable) return;
+          if (e.touches.length === 0) {
+            if (scale <= 1.01) { scale = 1; tx = 0; ty = 0; applyTransform(); }
+            if (pinch === null && pan === null) {           /* a clean tap: detect double-tap */
+              var now = Date.now();
+              if (now - lastTap < 300) {
+                if (scale > 1.01) { resetZoom(); } else { scale = 2; clampPan(); applyTransform(); }
+                lastTap = 0; e.preventDefault();
+              } else { lastTap = now; }
+            }
+          }
+          if (e.touches.length < 2) pinch = null;
+          if (e.touches.length === 0) pan = null;
+        }, { passive: false });
+      }
+
+      return { open: open };
+    })();
+
+    /* ---- project image galleries (Phase 1) ----
+       Enhance each authored `.gallery` (a plain list of <img>) into a holder
+       with a framed CSS backdrop, a padded image stage, cross-fade navigation,
+       circle thumbnails, an optional caption, and an optional "next image"
+       preview teaser (opt-in via data-next-preview). Arrows, dots, and the
+       preview auto-hide for single-image galleries. The active image carries a
+       `data-lightbox` hook for the Phase 2 lightbox. */
+    function buildGalleries() {
+      var galleries = doc.querySelectorAll(".gallery");
+      Array.prototype.forEach.call(galleries, function (gallery) {
+        if (gallery.classList.contains("is-ready")) return;
+        var imgs = Array.prototype.filter.call(gallery.children, function (el) {
+          return el.tagName === "IMG";
+        });
+        if (!imgs.length) return;
+
+        var wantsPreview = gallery.hasAttribute("data-next-preview");
+        var single = imgs.length === 1;
+        var index = 0;
+        var previewImg = null;
+        var dotButtons = [];
+
+        var holder = doc.createElement("div");
+        holder.className = "gallery__holder";
+        var frame = doc.createElement("div");
+        frame.className = "gallery__frame";
+        var stage = doc.createElement("div");
+        stage.className = "gallery__stage";
+
+        imgs.forEach(function (img, i) {
+          img.classList.add("gallery__img");
+          if (i === 0) img.classList.add("is-active");
+          stage.appendChild(img);
+        });
+        frame.appendChild(stage);
+
+        var caption = doc.createElement("div");
+        caption.className = "gallery__caption";
+        frame.appendChild(caption);
+        holder.appendChild(frame);
+        holder.setAttribute("tabindex", "-1");   /* focusable so the lightbox can return focus here */
+        holder.addEventListener("click", function () { lightbox.open(imgs, index, holder); });
+
+        function makeNav(dir, label) {
+          var b = doc.createElement("button");
+          b.type = "button";
+          b.className = "gallery__nav gallery__nav--" + dir;
+          b.setAttribute("aria-label", label);
+          var pts = dir === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6";
+          b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<polyline points="' + pts + '"/></svg>';
+          return b;
+        }
+
+        var prev = null, next = null, preview = null;
+        if (!single) {
+          prev = makeNav("prev", "Previous image");
+          next = makeNav("next", "Next image");
+          holder.appendChild(prev);
+          holder.appendChild(next);
+
+          if (wantsPreview) {
+            preview = doc.createElement("button");
+            preview.type = "button";
+            preview.className = "gallery__preview";
+            preview.setAttribute("aria-label", "Show next image");
+            previewImg = doc.createElement("img");
+            previewImg.alt = "";
+            previewImg.loading = "lazy";
+            preview.appendChild(previewImg);
+            holder.appendChild(preview);
+          }
+        }
+
+        var dots = doc.createElement("div");
+        dots.className = "gallery__dots";
+        if (!single) {
+          imgs.forEach(function (img, i) {
+            var dot = doc.createElement("button");
+            dot.type = "button";
+            dot.className = "gallery__dot";
+            dot.setAttribute("aria-label", "Show image " + (i + 1) + " of " + imgs.length);
+            var dimg = doc.createElement("img");
+            dimg.src = img.getAttribute("data-sd") || img.src;   /* _sd thumb hook for later */
+            dimg.alt = "";
+            dimg.loading = "lazy";
+            dot.appendChild(dimg);
+            dot.addEventListener("click", function () { show(i); });
+            dots.appendChild(dot);
+            dotButtons.push(dot);
+          });
+        }
+
+        gallery.appendChild(holder);
+        gallery.appendChild(dots);
+        gallery.classList.add("is-ready");
+        if (single) gallery.classList.add("gallery--single");
+
+        function show(i) {
+          var n = imgs.length;
+          index = ((i % n) + n) % n;                /* wrap-around */
+          imgs.forEach(function (img, k) { img.classList.toggle("is-active", k === index); });
+          dotButtons.forEach(function (d, k) { d.classList.toggle("is-active", k === index); });
+          var cap = imgs[index].getAttribute("data-caption");
+          if (cap) { caption.textContent = cap; caption.classList.add("is-visible"); }
+          else { caption.textContent = ""; caption.classList.remove("is-visible"); }
+          if (previewImg) {
+            var nx = imgs[(index + 1) % n];
+            previewImg.src = nx.getAttribute("data-sd") || nx.src;
+          }
+          imgs.forEach(function (img, k) {
+            if (k === index) { img.setAttribute("data-lightbox", ""); }
+            else { img.removeAttribute("data-lightbox"); }
+          });
+        }
+
+        if (!single) {
+          prev.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); });
+          next.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
+          if (preview) {
+            preview.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
+          }
+          holder.addEventListener("keydown", function (e) {
+            if (e.key === "ArrowLeft") { e.preventDefault(); show(index - 1); }
+            else if (e.key === "ArrowRight") { e.preventDefault(); show(index + 1); }
+          });
+        }
+
+        show(0);
+      });
+    }
+    buildGalleries();
+
     /* ---- active nav link via section observation ---- */
     var navLinks = Array.prototype.slice.call(nav.querySelectorAll("a"));
     var sections = navLinks
@@ -1705,13 +2290,12 @@
     }
 
     /* ---- auto-cull empty optional project sections ----
-       Every project block keeps its optional bits (inset image, stats,
-       highlights) as tags even when unused, so the markup stays copy-paste
-       uniform. CSS :empty hides the cleanly-empty ones with no flash; this
-       sweep is the backstop that also removes any left with only whitespace
-       (which would defeat :empty), so an editor never ends up with a stray
-       empty box on the page. */
-    var optionalBits = doc.querySelectorAll(".project .stats, .project .highlights, .project .figure-inset");
+       Every project block keeps its optional bits (stats, highlights) as tags
+       even when unused, so the markup stays copy-paste uniform. CSS :empty hides
+       the cleanly-empty ones with no flash; this sweep is the backstop that also
+       removes any left with only whitespace (which would defeat :empty), so an
+       editor never ends up with a stray empty box on the page. */
+    var optionalBits = doc.querySelectorAll(".project .stats, .project .highlights");
     Array.prototype.forEach.call(optionalBits, function (el) {
       var hasContent = el.children.length > 0 || el.textContent.replace(/\s+/g, "") !== "";
       if (!hasContent && el.parentNode) { el.parentNode.removeChild(el); }
