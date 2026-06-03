@@ -523,18 +523,38 @@
       align-self: start;            /* top-aligned with the headline */
       justify-self: start;          /* anchor left — never cross into the text */
       top: 0; bottom: auto; right: auto; left: 0;
-      /* Aspect ratio is driven by height alone: `width:auto` lets the browser
-         derive width from the image's intrinsic 616×598, so it NEVER distorts.
-         Do NOT cap the width here — `max-width` on an <img> with a fixed height
-         squishes the picture horizontally instead of scaling it down. */
+      /* FIT-TO-SPACE sizing (keeps the WHOLE figure on-screen, only shrinking
+         when the desktop view gets tight):
+           • width/height auto + max-height + max-width  → the browser scales the
+             image to fit BOTH caps while preserving its 616×598 aspect ratio
+             (no distortion — that only happens if you pin one dimension and cap
+             the other).
+           • max-height keeps the wide-screen size we already tuned.
+           • max-width = the horizontal room from the portrait's LEFT anchor
+             (column-2's left edge) to the viewport's right edge, minus a small
+             gap — so the figure can never run off the right edge and get the
+             hard straight clip that looked "creepy".
+         --portrait-fit derivation (all from the grid geometry below):
+             col1     = (contentW - 2·gutter - gap) · 2/3
+             col2Left = (100vw - contentW)/2 + gutter + col1 + gap
+             room     = 100vw - col2Left  =  50vw - contentW/6 + gutter/3 - gap/3
+           where contentW = min(100vw, --maxw). On wide screens this room exceeds
+           the figure's natural width, so max-height governs and nothing changes;
+           as the window narrows, room shrinks below it and the figure scales down
+           to stay fully visible. */
+      --portrait-fit: calc(
+        50vw
+        - min(100vw, var(--maxw)) / 6
+        + var(--gutter) / 3
+        - var(--hero-col-gap) / 3
+        - 24px            /* breathing gap from the viewport edge */
+      );
       width: auto;
-      /* Height is now a fixed-ish clamp (not a % of the row, which no longer
-         grows). Tuned to fit the slimmer hero: head near the headline, torso
-         fade landing around the CTA row. Overflow on `.hero` clips any spill. */
-      height: clamp(420px, 52vh, 560px);
+      height: auto;
+      max-height: clamp(420px, 52vh, 560px);
+      max-width: var(--portrait-fit);
       min-width: 0;
       min-height: 0;
-      max-width: none;              /* let the true aspect ratio win — see above */
       object-fit: contain;          /* belt-and-suspenders: never stretch */
       /* No CSS mask — the fade is baked into the PNG. */
     }
