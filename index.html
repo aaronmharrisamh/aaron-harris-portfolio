@@ -850,7 +850,7 @@
     left: 0;
     bottom: clamp(12px, 2vw, 18px);
     max-width: min(62%, 420px);
-    pointer-events: auto;
+    pointer-events: none;     /* a quiet label; taps fall through to swipe / lightbox */
     display: flex;
     align-items: center;
     min-height: 2.18rem;
@@ -864,8 +864,27 @@
       0 18px 44px -30px rgba(0,0,0,.95);
     -webkit-backdrop-filter: blur(14px) saturate(1.14);
             backdrop-filter: blur(14px) saturate(1.14);
+    /* Hidden at rest on every device; it glides in only at the right moment
+       (desktop: hover / focus below; touch: a transient .is-visible on change). */
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity .62s var(--ease-soft), transform .62s var(--ease-soft);
   }
   .gallery__caption.is-empty { display: none; }
+  /* Desktop pointer: the subtitle only whispers in while hovering or focused. */
+  @media (hover: hover) and (pointer: fine) {
+    .gallery__holder:hover .gallery__caption,
+    .gallery__holder:focus-within .gallery__caption {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* Touch: JS adds .is-visible on each image change, then drops it after a
+     gracious beat so the frame settles back to pure minimalism. */
+  .gallery__caption.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
   .gallery__caption::before {
     content: "";
     flex: 0 0 auto;
@@ -911,8 +930,10 @@
     text-shadow: 0 0 16px rgba(74,165,232,.18);
     pointer-events: none;
     opacity: 0;
-    transform: translateY(-4px);
-    transition: opacity .34s var(--ease-soft), transform .34s var(--ease-soft);
+    transform: translateY(-6px);
+    /* Slow, soft fade so the count glides in on a change and dissolves back out
+       (the JS reveal timer holds it visible in between). */
+    transition: opacity .62s var(--ease-soft), transform .62s var(--ease-soft);
   }
   .gallery__counter.is-visible,
   .gallery__holder:focus-within .gallery__counter {
@@ -1131,7 +1152,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter { transition: none; }
+    .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter, .gallery__caption { transition: none; }
   }
 
   /* ============================================================
@@ -2475,11 +2496,26 @@
        breakpoint. (The lightbox keeps its own arrows; the swipe is unaffected.) */
     var GALLERY_ARROWS_DESKTOP = "bar";
     var GALLERY_ARROWS_MOBILE  = "bar";
+
+    /* Show the "01 / 05" slide count at all? Off by default (a cleaner, more
+       minimal frame). Flip to true to bring it back everywhere; when on it keeps
+       its existing behavior — hidden at rest, glides in on a change (and on hover
+       on desktop), then fades out. This single switch covers desktop and mobile. */
+    var GALLERY_SHOW_COUNTER = false;
+
     doc.body.classList.add("ga-d-" + GALLERY_ARROWS_DESKTOP);
     doc.body.classList.add("ga-m-" + GALLERY_ARROWS_MOBILE);
     var GA_IMAGE = GALLERY_ARROWS_DESKTOP === "image" || GALLERY_ARROWS_MOBILE === "image";
     var GA_BAR   = GALLERY_ARROWS_DESKTOP === "bar"   || GALLERY_ARROWS_MOBILE === "bar";
     var GA_DOTS  = GALLERY_ARROWS_DESKTOP === "dots"  || GALLERY_ARROWS_MOBILE === "dots";
+
+    /* On touch (no hover), the subtitle + count are hidden at rest and only
+       glide in for a moment on each image change; on hover devices CSS handles
+       the subtitle on hover, so the JS transient reveal there is for the count
+       only. Re-evaluated live so a resized desktop window stays correct. */
+    var GA_TOUCH_MQ = window.matchMedia ? window.matchMedia("(hover: none)") : null;
+    var GA_COUNTER_HOLD = 2600;   /* count lingers, then sexily fades out */
+    var GA_CAPTION_HOLD = 3800;   /* subtitle lingers a more gracious beat */
 
     function buildGalleries() {
       var galleries = doc.querySelectorAll(".gallery");
@@ -2500,6 +2536,7 @@
         var captionText = null;    /* the caption text span inside it */
         var counterText = null;    /* current slide count */
         var counterTimer = 0;      /* transient reveal after image changes */
+        var captionTimer = 0;      /* transient subtitle reveal (touch only) */
         var navCluster = null;     /* floating prev/next rocker */
         var previewImg = null;
         var dotButtons = [];
@@ -2554,7 +2591,22 @@
           counterTimer = window.setTimeout(function () {
             counterTimer = 0;
             counterText.classList.remove("is-visible");
-          }, 2500);
+          }, GA_COUNTER_HOLD);
+        }
+
+        /* Touch only: fade the subtitle in on an image change, then let it
+           dissolve back out after a gracious beat. On hover devices the subtitle
+           is hover-revealed by CSS, so we leave it alone here. */
+        function revealCaption() {
+          if (!caption || !captionText) return;
+          if (!GA_TOUCH_MQ || !GA_TOUCH_MQ.matches) return;
+          if (caption.classList.contains("is-empty")) return;   /* nothing to show */
+          caption.classList.add("is-visible");
+          if (captionTimer) window.clearTimeout(captionTimer);
+          captionTimer = window.setTimeout(function () {
+            captionTimer = 0;
+            caption.classList.remove("is-visible");
+          }, GA_CAPTION_HOLD);
         }
 
         var preview = null;
@@ -2615,7 +2667,7 @@
             caption.appendChild(captionText);
             hud.appendChild(caption);
           }
-          if (!single) {
+          if (!single && GALLERY_SHOW_COUNTER) {
             counterText = doc.createElement("span");
             counterText.className = "gallery__counter";
             hud.appendChild(counterText);
@@ -2648,7 +2700,7 @@
             if (caption) caption.classList.toggle("is-empty", !cap);
           }
           if (counterText) { counterText.textContent = countLabel(index, n); }
-          if (revealOnChange && changed) revealCounter();
+          if (revealOnChange && changed) { revealCounter(); revealCaption(); }
           if (ambient) {
             var active = imgs[index];
             ambient.src = active.getAttribute("data-sd") || active.currentSrc || active.src;
