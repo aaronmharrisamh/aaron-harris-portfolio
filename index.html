@@ -664,8 +664,11 @@
   .project:nth-of-type(even) .project__media { order: 2; }
   .project:nth-of-type(even) .project__body  { order: 1; }
 
-  /* media column (the .gallery holder lives here; see PROJECT IMAGE GALLERY) */
-  .project__media { position: relative; }
+  /* media column (the .gallery holder lives here; see PROJECT IMAGE GALLERY).
+     min-width:0 lets this grid track size by its fr share rather than growing to
+     fit content, so a long no-wrap caption clips with an ellipsis instead of
+     widening the column. */
+  .project__media { position: relative; min-width: 0; }
 
   /* body column */
   .project__index {
@@ -787,18 +790,25 @@
   }
   .gallery__img.is-active { opacity: 1; }
 
-  /* optional per-image caption: bottom scrim, fades in with its image,
-     hidden when the active image has no data-caption. */
+  /* per-image caption: its own subtle, soft dark area directly BELOW the holder
+     (not overlaid on the photo), spanning the holder's full width. Present only
+     when the gallery has any caption. An EXPLICIT fixed one-line height keeps the
+     area identical for every image: blank images get an invisible placeholder (a
+     non-breaking space, set in JS), and long captions are clipped to one line
+     with an ellipsis rather than wrapping. A faint radial wash that fades to
+     transparent reads as a "fuzzy shadowy" space rather than a hard panel. */
   .gallery__caption {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    padding: 2.6rem 1.1rem .9rem;
-    background: linear-gradient(transparent, rgba(4,8,14,.72));
-    color: #fff; font-size: .82rem; letter-spacing: .02em;
-    opacity: 0; transform: translateY(8px);
-    transition: opacity .45s var(--ease), transform .45s var(--ease);
-    pointer-events: none;
+    margin-top: .7rem;
+    height: 2.4rem;
+    line-height: 2.4rem;      /* fixed one-line height; centers the single line vertically */
+    padding: 0 1rem;
+    text-align: center;
+    color: var(--text-soft);
+    font-size: .82rem; letter-spacing: .02em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-radius: var(--radius-sm);
+    background: radial-gradient(75% 130% at 50% 50%, rgba(0,0,0,.55), rgba(0,0,0,0) 75%);
   }
-  .gallery__caption.is-visible { opacity: 1; transform: none; }
 
   /* prev / next arrows: overlaid on the holder edges. Hidden by default and
      revealed per breakpoint by the GALLERY_ARROWS_DESKTOP / _MOBILE flags
@@ -873,7 +883,7 @@
   .gallery--single .gallery__preview { display: none; }
 
   @media (prefers-reduced-motion: reduce) {
-    .gallery__img, .gallery__caption, .gallery__nav, .gallery__preview { transition: none; }
+    .gallery__img, .gallery__nav, .gallery__preview { transition: none; }
   }
 
   /* ============================================================
@@ -2166,7 +2176,9 @@
 
         var wantsPreview = gallery.hasAttribute("data-next-preview");
         var single = imgs.length === 1;
+        var anyCaption = imgs.some(function (im) { return !!im.getAttribute("data-caption"); });
         var index = 0;
+        var caption = null;
         var previewImg = null;
         var dotButtons = [];
         var justSwiped = false;   /* set by a mobile swipe so the trailing click doesn't open the lightbox */
@@ -2184,10 +2196,6 @@
           stage.appendChild(img);
         });
         frame.appendChild(stage);
-
-        var caption = doc.createElement("div");
-        caption.className = "gallery__caption";
-        frame.appendChild(caption);
         holder.appendChild(frame);
         holder.setAttribute("tabindex", "-1");   /* focusable so the lightbox can return focus here */
         holder.addEventListener("click", function () {
@@ -2248,6 +2256,14 @@
         }
 
         gallery.appendChild(holder);
+        if (anyCaption) {
+          /* captions live in their own subtle area BELOW the holder (not over the
+             photo). Created only when at least one image has a caption; left blank
+             for images that have none, so the gallery height never jumps. */
+          caption = doc.createElement("div");
+          caption.className = "gallery__caption";
+          gallery.appendChild(caption);
+        }
         gallery.appendChild(dots);
         gallery.classList.add("is-ready");
         if (single) gallery.classList.add("gallery--single");
@@ -2257,9 +2273,7 @@
           index = ((i % n) + n) % n;                /* wrap-around */
           imgs.forEach(function (img, k) { img.classList.toggle("is-active", k === index); });
           dotButtons.forEach(function (d, k) { d.classList.toggle("is-active", k === index); });
-          var cap = imgs[index].getAttribute("data-caption");
-          if (cap) { caption.textContent = cap; caption.classList.add("is-visible"); }
-          else { caption.textContent = ""; caption.classList.remove("is-visible"); }
+          if (caption) { caption.textContent = imgs[index].getAttribute("data-caption") || " "; }   /* nbsp keeps the one-line height when blank */
           if (previewImg) {
             var nx = imgs[(index + 1) % n];
             previewImg.src = nx.getAttribute("data-sd") || nx.src;
