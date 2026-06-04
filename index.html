@@ -800,16 +800,21 @@
   }
   .gallery__caption.is-visible { opacity: 1; transform: none; }
 
-  /* prev / next arrows: overlaid on the holder edges. Appear on hover or
-     focus (and always on touch). Hidden for single-image galleries. */
+  /* prev / next arrows: overlaid on the holder edges. Hidden by default and
+     revealed per breakpoint by the GALLERY_ARROWS_DESKTOP / _MOBILE flags
+     (which add body.ga-arrows-desktop / .ga-arrows-mobile). When shown they
+     appear on hover or focus (and always on touch). */
   .gallery__nav {
     position: absolute; top: 50%; transform: translateY(-50%);
-    width: 42px; height: 42px; display: grid; place-items: center;
+    width: 42px; height: 42px; display: none; place-items: center;
     border: 1px solid var(--line); border-radius: 50%;
     background: rgba(8,12,20,.55); color: var(--text-soft);
     cursor: pointer; z-index: 3; padding: 0;
     opacity: 0; transition: opacity .3s, background .3s, border-color .3s, color .3s;
   }
+  /* show on desktop (>=881px) and/or mobile (<=880px) when that flag is on */
+  @media (min-width: 881px) { body.ga-arrows-desktop .gallery__nav { display: grid; } }
+  @media (max-width: 880px) { body.ga-arrows-mobile  .gallery__nav { display: grid; } }
   .gallery__nav--prev { left: 12px; }
   .gallery__nav--next { right: 12px; }
   .gallery__nav svg { width: 16px; height: 16px; display: block; }
@@ -853,11 +858,6 @@
   }
   .gallery__preview:hover { transform: translateY(-3px) scale(1.03); border-color: var(--accent); }
   .gallery__preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .gallery__preview::after {
-    content: "Next"; position: absolute; left: 0; right: 0; bottom: 0;
-    font-size: .58rem; letter-spacing: .16em; text-transform: uppercase;
-    text-align: center; padding: .14rem; color: #fff; background: rgba(4,8,14,.6);
-  }
 
   /* keyboard focus rings on the gallery controls (the arrow also reveals
      itself on focus via the rule above). */
@@ -2145,11 +2145,15 @@
        preview auto-hide for single-image galleries. The active image carries a
        `data-lightbox` hook for the Phase 2 lightbox. */
 
-    /* Inline holder arrows: OFF by default. The "Next" preview, the circle dots,
-       and the mobile swipe (below) handle navigation, which reads cleaner. Flip
-       this single switch to true to show the prev/next arrows on the holder
-       again. (The lightbox keeps its own arrows regardless of this switch.) */
-    var GALLERY_ARROWS = false;
+    /* Inline holder arrows, split by viewport (the site's 880px breakpoint).
+       Desktop ON, mobile OFF by default; flip either switch independently. The
+       arrows are always built for multi-image galleries; these flags add body
+       classes that CSS uses to show/hide them per breakpoint. (The lightbox
+       keeps its own arrows; the mobile swipe is unaffected.) */
+    var GALLERY_ARROWS_DESKTOP = true;
+    var GALLERY_ARROWS_MOBILE = false;
+    if (GALLERY_ARROWS_DESKTOP) doc.body.classList.add("ga-arrows-desktop");
+    if (GALLERY_ARROWS_MOBILE) doc.body.classList.add("ga-arrows-mobile");
 
     function buildGalleries() {
       var galleries = doc.querySelectorAll(".gallery");
@@ -2205,12 +2209,11 @@
 
         var prev = null, next = null, preview = null;
         if (!single) {
-          if (GALLERY_ARROWS) {
-            prev = makeNav("prev", "Previous image");
-            next = makeNav("next", "Next image");
-            holder.appendChild(prev);
-            holder.appendChild(next);
-          }
+          /* always built; CSS shows them per breakpoint via the flags above */
+          prev = makeNav("prev", "Previous image");
+          next = makeNav("next", "Next image");
+          holder.appendChild(prev);
+          holder.appendChild(next);
 
           if (wantsPreview) {
             preview = doc.createElement("button");
