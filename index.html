@@ -790,53 +790,82 @@
   }
   .gallery__img.is-active { opacity: 1; }
 
-  /* per-image caption: its own subtle, soft dark area directly BELOW the holder
-     (not overlaid on the photo), spanning the holder's full width. Present only
-     when the gallery has any caption. An EXPLICIT fixed one-line height keeps the
-     area identical for every image: blank images get an invisible placeholder (a
-     non-breaking space, set in JS), and long captions are clipped to one line
-     with an ellipsis rather than wrapping. A faint radial wash that fades to
-     transparent reads as a "fuzzy shadowy" space rather than a hard panel. */
+  /* caption / control BAR below the holder (not over the photo), full holder
+     width: a flex row with the centered caption text, plus prev/next arrows on
+     the ends only when arrow placement is "bar". Built when there's a caption (or
+     to host bar-mode arrows). Fixed one-line height so it never shifts; a subtle,
+     even dark wash gives any end arrows a consistent home. */
   .gallery__caption {
+    display: flex; align-items: center;
     margin-top: .7rem;
     height: 2.4rem;
-    line-height: 2.4rem;      /* fixed one-line height; centers the single line vertically */
-    padding: 0 1rem;
+    padding: 0 .35rem;
+    border-radius: var(--radius-sm);
+    background: radial-gradient(95% 150% at 50% 50%, rgba(0,0,0,.5), rgba(0,0,0,.26) 92%);
+  }
+  /* the caption text, centered between the arrows. Blank images get a
+     non-breaking space (set in JS); long captions clip to one line with an
+     ellipsis (min-width:0 lets the flex item shrink so the ellipsis engages). */
+  .gallery__caption-text {
+    flex: 1 1 auto; min-width: 0;
     text-align: center;
     color: var(--text-soft);
     font-size: .82rem; letter-spacing: .02em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    border-radius: var(--radius-sm);
-    background: radial-gradient(75% 130% at 50% 50%, rgba(0,0,0,.55), rgba(0,0,0,0) 75%);
   }
 
-  /* prev / next arrows: overlaid on the holder edges. Hidden by default and
-     revealed per breakpoint by the GALLERY_ARROWS_DESKTOP / _MOBILE flags
-     (which add body.ga-arrows-desktop / .ga-arrows-mobile). When shown they
-     appear on hover or focus (and always on touch). */
+  /* PREV / NEXT ARROWS — built once per used location (image / bar / dots) and
+     placed there in the DOM; hidden by default and shown for the chosen
+     placement per breakpoint via the body.ga-d-<mode> / .ga-m-<mode> classes.
+     Base look is a minimal inline-SVG chevron; image mode overrides it below. */
   .gallery__nav {
+    display: none; place-items: center;   /* becomes grid when shown */
+    border: 0; background: none; padding: 0;
+    color: var(--muted); cursor: pointer;
+    transition: color .2s, background .3s, border-color .3s, opacity .3s;
+  }
+  .gallery__nav svg { width: 15px; height: 15px; display: block; }
+  .gallery__nav:hover { color: var(--text); }
+
+  /* show the chosen placement for each breakpoint */
+  @media (min-width: 881px) {
+    body.ga-d-image .gallery__nav--image { display: grid; }
+    body.ga-d-bar   .gallery__nav--bar   { display: grid; }
+    body.ga-d-dots  .gallery__nav--dots  { display: grid; }
+  }
+  @media (max-width: 880px) {
+    body.ga-m-image .gallery__nav--image { display: grid; }
+    body.ga-m-bar   .gallery__nav--bar   { display: grid; }
+    body.ga-m-dots  .gallery__nav--dots  { display: grid; }
+  }
+
+  /* BAR placement: chevron sized to the bar height, sitting at its ends */
+  .gallery__nav--bar { flex: 0 0 auto; width: 2.4rem; height: 2.4rem; }
+
+  /* DOTS placement: chevron flanking the centered circle cluster */
+  .gallery__nav--dots { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; }
+  .gallery__nav--dots.gallery__nav--prev { margin-right: .15rem; }
+  .gallery__nav--dots.gallery__nav--next { margin-left: .15rem; }
+
+  /* IMAGE placement: circular overlay button on the photo's edges, revealed on
+     hover / focus (and always shown on touch), like the original style. */
+  .gallery__nav--image {
     position: absolute; top: 50%; transform: translateY(-50%);
-    width: 42px; height: 42px; display: none; place-items: center;
+    width: 42px; height: 42px; z-index: 3; opacity: 0;
     border: 1px solid var(--line); border-radius: 50%;
     background: rgba(8,12,20,.55); color: var(--text-soft);
-    cursor: pointer; z-index: 3; padding: 0;
-    opacity: 0; transition: opacity .3s, background .3s, border-color .3s, color .3s;
   }
-  /* show on desktop (>=881px) and/or mobile (<=880px) when that flag is on */
-  @media (min-width: 881px) { body.ga-arrows-desktop .gallery__nav { display: grid; } }
-  @media (max-width: 880px) { body.ga-arrows-mobile  .gallery__nav { display: grid; } }
-  .gallery__nav--prev { left: 12px; }
-  .gallery__nav--next { right: 12px; }
-  .gallery__nav svg { width: 16px; height: 16px; display: block; }
-  .gallery__holder:hover .gallery__nav,
-  .gallery__nav:focus-visible { opacity: 1; }
-  .gallery__nav:hover { background: rgba(8,12,20,.85); border-color: var(--accent); color: #fff; }
-  @media (hover: none) { .gallery__nav { opacity: 1; } }
+  .gallery__nav--image.gallery__nav--prev { left: 12px; }
+  .gallery__nav--image.gallery__nav--next { right: 12px; }
+  .gallery__holder:hover .gallery__nav--image,
+  .gallery__nav--image:focus-visible { opacity: 1; }
+  .gallery__nav--image:hover { background: rgba(8,12,20,.85); border-color: var(--accent); color: #fff; }
+  @media (hover: none) { .gallery__nav--image { opacity: 1; } }
 
   /* circle thumbnails beneath the holder: each an upper-left crop of its
      image. Hidden for single-image galleries. */
   .gallery__dots {
-    display: flex; flex-wrap: wrap; justify-content: center;
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
     gap: .55rem; margin-top: .9rem;
   }
   .gallery__dot {
@@ -1403,7 +1432,7 @@
         <div class="section-head reveal">
           <span class="eyebrow">Selected Work</span>
           <h2>Selected systems I led from concept to shipped product.</h2>
-          <p>Spanning space-domain awareness, industrial logistics, educational simulation, indie game systems, and AI-augmented tooling.</p>
+          <p>Spanning space-domain awareness, industrial logistics, educational simulation, public XR installations, indie game systems, and AI-augmented tooling.</p>
         </div>
 
         <!-- ╔══════════════════════════════════════════════════════════════════╗
@@ -1536,120 +1565,7 @@
         </article>
         <!-- ╚═══════════════ END · Phillips Lifestyles ═══════════════╝ -->
 
-        <!-- ╔═══════════════════════════════════════════════════════════════╗
-             ║  PROJECT — COGNiTiON Mobile Planetarium                        ║
-             ╚═══════════════════════════════════════════════════════════════╝ -->
-        <article class="project">
-          <div class="project__media reveal">
-
-            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
-                 Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
-                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
-            <div class="gallery">
-              <img src="img/seed/planetarium-01.jpg" loading="lazy"
-                   alt="COGNiTiON planetarium dome show (placeholder)."
-                   data-caption="Dome show in progress" />
-              <img src="img/seed/planetarium-02.jpg" loading="lazy"
-                   alt="COGNiTiON planetarium panorama (placeholder)." />
-              <img src="img/seed/planetarium-03.jpg" loading="lazy"
-                   alt="COGNiTiON custom SFF PC build (placeholder)."
-                   data-caption="Custom SFF PC build" />
-              <img src="img/seed/planetarium-04.jpg" loading="lazy"
-                   alt="COGNiTiON projector column detail (placeholder)." />
-            </div>
-
-          </div>
-          <div class="project__body reveal d1">
-
-            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
-            <span class="project__index"></span>
-
-            <!-- TITLE -->
-            <h3 class="project__title">COGNiTiON Mobile Planetarium</h3>
-
-            <!-- META · company · role · dates -->
-            <p class="project__meta">Earth &amp; Space Lab Director · 2023–Present</p>
-
-            <!-- LEAD · one-sentence hook -->
-            <p class="project__lead">A $50K real-time astronomical simulation rig, custom-integrated à la carte from international vendors: an Israeli dome, a Belgian fisheye lens, and a SEILER/ZEISS custom-modified projector.</p>
-
-            <!-- DESCRIPTION · the full paragraph -->
-            <p class="project__desc">After rejecting off-the-shelf commercial systems, I sourced components internationally (traveling to RSA Cosmos in France to inform the design) and became SEILER's first customer for a fully custom-integrated mobile platform. The build adds novel external, thermal-isolated electronics and a 5G wireless presenter interface designed so kids can take the controls without breaking the show.</p>
-
-            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
-            <div class="stats">
-              <span class="stat"><b>100+</b> live shows</span>
-              <span class="stat"><b>10,000+</b> attendees</span>
-            </div>
-
-            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
-            <ul class="highlights"></ul>
-
-            <!-- SPECS / chips (required) · edit Role and the chip tags -->
-            <div class="specs">
-              <div class="spec"><dt>Role</dt><dd>Systems Architect · Designer · Presenter</dd></div>
-              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Space Engine</span><span class="chip">Custom SFF PC build</span><span class="chip">5G wireless presenter UI</span></span></dd></div>
-            </div>
-
-          </div>
-        </article>
-        <!-- ╚═══════════════ END · COGNiTiON Mobile Planetarium ═══════════════╝ -->
-
-        <!-- ╔═══════════════════════════════════════════════════════════════╗
-             ║  PROJECT — Blockade Runner                                     ║
-             ╚═══════════════════════════════════════════════════════════════╝ -->
-        <article class="project">
-          <div class="project__media reveal">
-
-            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
-                 Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
-                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
-            <div class="gallery">
-              <img src="img/seed/blockade-01.jpg" loading="lazy"
-                   alt="Blockade Runner voxel ship construction (placeholder)."
-                   data-caption="Voxel ship construction" />
-            </div>
-
-          </div>
-          <div class="project__body reveal d1">
-
-            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
-            <span class="project__index"></span>
-
-            <!-- TITLE -->
-            <h3 class="project__title">Blockade Runner</h3>
-
-            <!-- META · company · role · dates -->
-            <p class="project__meta">ZanMgt · Co-Founder &amp; Lead Designer · 2011–2016</p>
-
-            <!-- LEAD · one-sentence hook -->
-            <p class="project__lead">A voxel-based space-sim with a unique ship-construction system and realistic physics: 5,000+ paying early-access customers across international markets, on a bi-weekly release cadence.</p>
-
-            <!-- DESCRIPTION · the full paragraph -->
-            <p class="project__desc">The heart of the game was ship construction as a genuine design problem, where every block of mass changed how a vessel handled. We shipped fortnightly in tight dialogue with the community, and the voxel work, including the <em>Liquid Cubed</em> real-time fluid-simulation experiments, still reads as distinctive in 2026. A tiny team that landed thousands of paying customers worldwide.</p>
-
-            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
-            <div class="stats">
-              <span class="stat"><b>5,000+</b> paying customers</span>
-              <span class="stat"><b>Bi-weekly</b> release cadence</span>
-            </div>
-
-            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
-            <ul class="highlights"></ul>
-
-            <!-- SPECS / chips (required) · edit Role and the chip tags -->
-            <div class="specs">
-              <div class="spec"><dt>Role</dt><dd>Co-Founder · Lead Designer</dd></div>
-              <div class="spec"><dt>Tech</dt><dd><span class="chips"><span class="chip">Custom voxel engine</span><span class="chip">Real-time physics</span><span class="chip">Proprietary fluid sim</span></span></dd></div>
-            </div>
-
-          </div>
-        </article>
-        <!-- ╚═══════════════ END · Blockade Runner ═══════════════╝ -->
-
-        <!-- ╔═══════════════════════════════════════════════════════════════╗
+       <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — AI-Augmented Engineering Workflow                   ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
         <article class="project">
@@ -1714,6 +1630,180 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · AI-Augmented Engineering Workflow ═══════════════╝ -->
+
+        <!-- ╔═══════════════════════════════════════════════════════════════╗
+             ║  PROJECT — COGNiTiON Mobile Planetarium                        ║
+             ╚═══════════════════════════════════════════════════════════════╝ -->
+        <article class="project">
+          <div class="project__media reveal">
+
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/planetarium-01.jpg" loading="lazy"
+                   alt="COGNiTiON planetarium dome show (placeholder)."
+                   data-caption="Dome show in progress" />
+              <img src="img/seed/planetarium-02.jpg" loading="lazy"
+                   alt="COGNiTiON planetarium panorama (placeholder)." />
+              <img src="img/seed/planetarium-03.jpg" loading="lazy"
+                   alt="COGNiTiON custom SFF PC build (placeholder)."
+                   data-caption="Custom SFF PC build" />
+              <img src="img/seed/planetarium-04.jpg" loading="lazy"
+                   alt="COGNiTiON projector column detail (placeholder)." />
+            </div>
+
+          </div>
+          <div class="project__body reveal d1">
+
+            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
+            <span class="project__index"></span>
+
+            <!-- TITLE -->
+            <h3 class="project__title">COGNiTiON Mobile Planetarium</h3>
+
+            <!-- META · company · role · dates -->
+            <p class="project__meta">Earth &amp; Space Lab Director · 2023–Present</p>
+
+            <!-- LEAD · one-sentence hook -->
+            <p class="project__lead">A $50K real-time astronomical simulation rig, custom-integrated à la carte from international vendors: an Israeli dome, a Belgian fisheye lens, and a SEILER/ZEISS custom-modified projector.</p>
+
+            <!-- DESCRIPTION · the full paragraph -->
+            <p class="project__desc">After rejecting off-the-shelf commercial systems, I sourced components internationally (traveling to RSA Cosmos in France to inform the design) and became SEILER's first customer for a fully custom-integrated mobile platform. The build adds novel external, thermal-isolated electronics and a 5G wireless presenter interface designed so kids can take the controls without breaking the show.</p>
+
+            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <div class="stats">
+              <span class="stat"><b>100+</b> live shows</span>
+              <span class="stat"><b>10,000+</b> attendees</span>
+            </div>
+
+            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <ul class="highlights"></ul>
+
+            <!-- SPECS / chips (required) · edit Role and the chip tags -->
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Systems Architect · Designer · Presenter</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Space Engine</span><span class="chip">Custom SFF PC build</span><span class="chip">5G wireless presenter UI</span></span></dd></div>
+            </div>
+
+          </div>
+        </article>
+        <!-- ╚═══════════════ END · COGNiTiON Mobile Planetarium ═══════════════╝ -->
+
+        <!-- ╔═══════════════════════════════════════════════════════════════╗
+             ║  PROJECT — COGNiTiON Commercial VR Program                  ║
+             ╚═══════════════════════════════════════════════════════════════╝ -->
+        <article class="project">
+          <div class="project__media reveal">
+
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/cognition-vr-01.jpg" loading="lazy"
+                   alt="COGNiTiON four-station commercial VR lab (placeholder)."
+                   data-caption="Four-station VR lab" />
+              <img src="img/seed/cognition-vr-02.jpg" loading="lazy"
+                   alt="COGNiTiON Valve Index headset and controller station (placeholder)."
+                   data-caption="Valve Index station hardware" />
+              <img src="img/seed/cognition-vr-03.jpg" loading="lazy"
+                   alt="COGNiTiON custom RTX-class PC station for VR operations (placeholder)."
+                   data-caption="Custom RTX-class PC stations" />
+            </div>
+
+          </div>
+          <div class="project__body reveal d1">
+
+            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
+            <span class="project__index"></span>
+
+            <!-- TITLE -->
+            <h3 class="project__title">COGNiTiON Commercial VR Program</h3>
+
+            <!-- META · company · role · dates -->
+            <p class="project__meta">COGNiTiON &middot; Earth &amp; Space Lab Director &middot; 2023&ndash;Present</p>
+
+            <!-- LEAD · one-sentence hook -->
+            <p class="project__lead">A four-station public VR installation built for general admission: Valve Index headsets, custom RTX-class PCs, curated educational and family-friendly experiences, and staff-ready operations.</p>
+
+            <!-- DESCRIPTION · the full paragraph -->
+            <p class="project__desc">I led the design and build of a commercial VR program that could survive daily science-center use, from hardware selection and PC builds to experience curation, operational flow, and staff training. The program extended the Earth &amp; Space Lab beyond the dome with flight simulation, driving simulation, hands-on creative play, and repeatable procedures that let staff run the stations independently.</p>
+
+            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <div class="stats">
+              <span class="stat"><b>4</b> public VR stations</span>
+              <span class="stat"><b>Staff-run</b> operations</span>
+            </div>
+
+            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <ul class="highlights"></ul>
+
+            <!-- SPECS / chips (required) · edit Role and the chip tags -->
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>XR Systems Architect &middot; Hardware Build &middot; Staff Training</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Valve Index</span><span class="chip">Custom RTX PCs</span><span class="chip">SteamVR</span><span class="chip">Aerofly VR</span><span class="chip">BeamNG VR</span><span class="chip">Job Simulator</span><span class="chip">Minecraft VR</span></span></dd></div>
+            </div>
+
+          </div>
+        </article>
+        <!-- ╚═══════════════ END · COGNiTiON Commercial VR Program ═══════════════╝ -->
+
+        <!-- ╔═══════════════════════════════════════════════════════════════╗
+             ║  PROJECT — Blockade Runner                                     ║
+             ╚═══════════════════════════════════════════════════════════════╝ -->
+        <article class="project">
+          <div class="project__media reveal">
+
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/blockade-01.jpg" loading="lazy"
+                   alt="Blockade Runner voxel ship construction (placeholder)."
+                   data-caption="Voxel ship construction" />
+            </div>
+
+          </div>
+          <div class="project__body reveal d1">
+
+            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
+            <span class="project__index"></span>
+
+            <!-- TITLE -->
+            <h3 class="project__title">Blockade Runner</h3>
+
+            <!-- META · company · role · dates -->
+            <p class="project__meta">ZanMgt · Co-Founder &amp; Lead Designer · 2011–2016</p>
+
+            <!-- LEAD · one-sentence hook -->
+            <p class="project__lead">A voxel-based space-sim with a unique ship-construction system and realistic physics: 5,000+ paying early-access customers across international markets, on a bi-weekly release cadence.</p>
+
+            <!-- DESCRIPTION · the full paragraph -->
+            <p class="project__desc">The heart of the game was ship construction as a genuine design problem, where every block of mass changed how a vessel handled. We shipped fortnightly in tight dialogue with the community, and the voxel work, including the <em>Liquid Cubed</em> real-time fluid-simulation experiments, still reads as distinctive in 2026. A tiny team that landed thousands of paying customers worldwide.</p>
+
+            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <div class="stats">
+              <span class="stat"><b>5,000+</b> paying customers</span>
+              <span class="stat"><b>Bi-weekly</b> release cadence</span>
+            </div>
+
+            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <ul class="highlights"></ul>
+
+            <!-- SPECS / chips (required) · edit Role and the chip tags -->
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Co-Founder · Lead Designer</dd></div>
+              <div class="spec"><dt>Tech</dt><dd><span class="chips"><span class="chip">Custom voxel engine</span><span class="chip">Real-time physics</span><span class="chip">Proprietary fluid sim</span></span></dd></div>
+            </div>
+
+          </div>
+        </article>
+        <!-- ╚═══════════════ END · Blockade Runner ═══════════════╝ -->
+
+ 
 
       </div>
     </section>
@@ -2155,15 +2245,22 @@
        preview auto-hide for single-image galleries. The active image carries a
        `data-lightbox` hook for the Phase 2 lightbox. */
 
-    /* Inline holder arrows, split by viewport (the site's 880px breakpoint).
-       Desktop ON, mobile OFF by default; flip either switch independently. The
-       arrows are always built for multi-image galleries; these flags add body
-       classes that CSS uses to show/hide them per breakpoint. (The lightbox
-       keeps its own arrows; the mobile swipe is unaffected.) */
-    var GALLERY_ARROWS_DESKTOP = true;
-    var GALLERY_ARROWS_MOBILE = false;
-    if (GALLERY_ARROWS_DESKTOP) doc.body.classList.add("ga-arrows-desktop");
-    if (GALLERY_ARROWS_MOBILE) doc.body.classList.add("ga-arrows-mobile");
+    /* Prev/next arrow PLACEMENT, chosen independently for desktop and mobile
+       (the site's 880px breakpoint). Each is one of:
+         "off"   - no arrows (swipe / preview / dots still navigate)
+         "image" - overlaid on the photo's edges (original hover-reveal style)
+         "bar"   - at the ends of the caption bar
+         "dots"  - flanking the row of circle thumbnails
+       Switch a placement by editing its value. Arrows are built only in the
+       locations these two settings use, and CSS shows the right one per
+       breakpoint. (The lightbox keeps its own arrows; the swipe is unaffected.) */
+    var GALLERY_ARROWS_DESKTOP = "bar";
+    var GALLERY_ARROWS_MOBILE  = "bar";
+    doc.body.classList.add("ga-d-" + GALLERY_ARROWS_DESKTOP);
+    doc.body.classList.add("ga-m-" + GALLERY_ARROWS_MOBILE);
+    var GA_IMAGE = GALLERY_ARROWS_DESKTOP === "image" || GALLERY_ARROWS_MOBILE === "image";
+    var GA_BAR   = GALLERY_ARROWS_DESKTOP === "bar"   || GALLERY_ARROWS_MOBILE === "bar";
+    var GA_DOTS  = GALLERY_ARROWS_DESKTOP === "dots"  || GALLERY_ARROWS_MOBILE === "dots";
 
     function buildGalleries() {
       var galleries = doc.querySelectorAll(".gallery");
@@ -2178,9 +2275,11 @@
         var single = imgs.length === 1;
         var anyCaption = imgs.some(function (im) { return !!im.getAttribute("data-caption"); });
         var index = 0;
-        var caption = null;
+        var caption = null;        /* the control bar element */
+        var captionText = null;    /* the centered text span inside it */
         var previewImg = null;
         var dotButtons = [];
+        var prevButtons = [], nextButtons = [];   /* every arrow copy across the used locations */
         var justSwiped = false;   /* set by a mobile swipe so the trailing click doesn't open the lightbox */
 
         var holder = doc.createElement("div");
@@ -2203,25 +2302,26 @@
           lightbox.open(imgs, index, holder);
         });
 
-        function makeNav(dir, label) {
+        function makeNav(dir, location, label) {
           var b = doc.createElement("button");
           b.type = "button";
-          b.className = "gallery__nav gallery__nav--" + dir;
+          b.className = "gallery__nav gallery__nav--" + location + " gallery__nav--" + dir;
           b.setAttribute("aria-label", label);
           var pts = dir === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6";
           b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
             'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
             '<polyline points="' + pts + '"/></svg>';
+          (dir === "prev" ? prevButtons : nextButtons).push(b);
           return b;
         }
 
-        var prev = null, next = null, preview = null;
+        var preview = null;
         if (!single) {
-          /* always built; CSS shows them per breakpoint via the flags above */
-          prev = makeNav("prev", "Previous image");
-          next = makeNav("next", "Next image");
-          holder.appendChild(prev);
-          holder.appendChild(next);
+          /* image-mode arrows overlay the photo's edges (built only if used) */
+          if (GA_IMAGE) {
+            holder.appendChild(makeNav("prev", "image", "Previous image"));
+            holder.appendChild(makeNav("next", "image", "Next image"));
+          }
 
           if (wantsPreview) {
             preview = doc.createElement("button");
@@ -2239,6 +2339,8 @@
         var dots = doc.createElement("div");
         dots.className = "gallery__dots";
         if (!single) {
+          /* dots-mode arrows flank the centered circle cluster: [<] o o o [>] */
+          if (GA_DOTS) dots.appendChild(makeNav("prev", "dots", "Previous image"));
           imgs.forEach(function (img, i) {
             var dot = doc.createElement("button");
             dot.type = "button";
@@ -2253,15 +2355,21 @@
             dots.appendChild(dot);
             dotButtons.push(dot);
           });
+          if (GA_DOTS) dots.appendChild(makeNav("next", "dots", "Next image"));
         }
 
         gallery.appendChild(holder);
-        if (anyCaption) {
-          /* captions live in their own subtle area BELOW the holder (not over the
-             photo). Created only when at least one image has a caption; left blank
-             for images that have none, so the gallery height never jumps. */
+        /* caption / control BAR below the holder: the centered caption text, plus
+           bar-mode arrows on the ends when used. Built when there's a caption to
+           show, or when bar-mode arrows need a home on a multi-image gallery. */
+        if (anyCaption || (!single && GA_BAR)) {
           caption = doc.createElement("div");
           caption.className = "gallery__caption";
+          if (!single && GA_BAR) caption.appendChild(makeNav("prev", "bar", "Previous image"));
+          captionText = doc.createElement("span");
+          captionText.className = "gallery__caption-text";
+          caption.appendChild(captionText);
+          if (!single && GA_BAR) caption.appendChild(makeNav("next", "bar", "Next image"));
           gallery.appendChild(caption);
         }
         gallery.appendChild(dots);
@@ -2273,7 +2381,7 @@
           index = ((i % n) + n) % n;                /* wrap-around */
           imgs.forEach(function (img, k) { img.classList.toggle("is-active", k === index); });
           dotButtons.forEach(function (d, k) { d.classList.toggle("is-active", k === index); });
-          if (caption) { caption.textContent = imgs[index].getAttribute("data-caption") || " "; }   /* nbsp keeps the one-line height when blank */
+          if (captionText) { captionText.textContent = imgs[index].getAttribute("data-caption") || " "; }   /* nbsp keeps the one-line height when blank */
           if (previewImg) {
             var nx = imgs[(index + 1) % n];
             previewImg.src = nx.getAttribute("data-sd") || nx.src;
@@ -2285,8 +2393,8 @@
         }
 
         if (!single) {
-          if (prev) prev.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); });
-          if (next) next.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
+          prevButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); }); });
+          nextButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); }); });
           if (preview) {
             preview.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
           }
