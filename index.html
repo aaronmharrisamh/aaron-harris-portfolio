@@ -733,11 +733,11 @@
   .project .highlights:empty { display: none; }
 
   /* ============================================================
-     PROJECT IMAGE GALLERY  (Phase 1)
-     A CSS "holder" (16:9 backdrop: panel + blue bokeh + faint `+`
-     grid + chamfer frame) holds photos of any ratio, contained with
-     padding so the holder always frames them. The JS enhances each
-     authored `.gallery` (a list of <img>) into the structure below.
+     PROJECT IMAGE GALLERY
+     Authoring stays simple: each project owns a plain `.gallery`
+     list of <img> tags. JS turns that into a restrained, cinematic
+     image stage with an in-frame HUD, progress timeline, swipe,
+     and lightbox support.
      ============================================================ */
 
   /* pre-enhancement fallback: before the JS runs (or if it never does),
@@ -745,36 +745,80 @@
   .gallery:not(.is-ready) > img { display: none; width: 100%; border-radius: var(--radius); }
   .gallery:not(.is-ready) > img:first-of-type { display: block; }
 
-  .gallery.is-ready { display: block; }
+  .gallery.is-ready { display: block; width: 100%; min-width: 0; }
 
-  /* the holder: a fixed 16:9 stage. overflow is VISIBLE so the optional
-     corner preview can stick out; the chamfer/clip lives on the frame. */
+  /* Fixed 16:9 showcase. The frame owns all chrome now: image, ambient
+     backdrop, HUD, progress timeline, and optional preview chip. */
   .gallery__holder {
     position: relative;
+    width: 100%;
+    max-width: 100%;
     aspect-ratio: 16 / 9;
+    isolation: isolate;
     cursor: zoom-in;          /* the image area opens the lightbox (Phase 2) */
     touch-action: pan-y;      /* vertical scroll stays native; horizontal = swipe */
   }
 
-  /* the framed backdrop: panel base, two soft blue bokeh glows, a faint
-     tiled `+` grid, a subtle inset hairline, and softly rounded corners.
-     overflow:hidden clips the images + caption to the rounded edge. */
+  /* Glassy media surface. The active image is also mirrored into a blurred
+     ambience layer, so screenshots/photos color the frame without extra assets. */
   .gallery__frame {
     position: absolute; inset: 0;
     overflow: hidden;
-    border-radius: var(--radius);
-    background-color: var(--panel);
-    background-image:
-      url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='46'%20height='46'%3E%3Cpath%20d='M23%2018v10M18%2023h10'%20stroke='rgba(150,180,220,0.15)'%20stroke-width='1'/%3E%3C/svg%3E"),
-      radial-gradient(50% 70% at 30% 28%, rgba(56,120,200,0.34), rgba(56,120,200,0) 60%),
-      radial-gradient(46% 64% at 76% 74%, rgba(38,86,160,0.26), rgba(38,86,160,0) 62%);
-    background-repeat: repeat, no-repeat, no-repeat;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), 0 30px 80px -40px rgba(0,0,0,.8);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.11);
+    background:
+      radial-gradient(140% 120% at 50% 0%, rgba(255,255,255,.06), rgba(255,255,255,0) 56%),
+      #090c12;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.10),
+      inset 0 -1px 0 rgba(0,0,0,.52),
+      0 28px 80px -44px rgba(0,0,0,1);
+  }
+  .gallery__frame::before,
+  .gallery__frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .gallery__frame::before {
+    z-index: 0;
+    background:
+      radial-gradient(80% 80% at 18% 12%, rgba(74,165,232,.16), rgba(74,165,232,0) 58%),
+      radial-gradient(64% 72% at 88% 88%, rgba(255,255,255,.07), rgba(255,255,255,0) 62%),
+      linear-gradient(120deg, rgba(255,255,255,.055), transparent 28%, transparent 72%, rgba(255,255,255,.035));
+  }
+  .gallery__frame::after {
+    z-index: 4;
+    background:
+      linear-gradient(180deg, rgba(5,8,12,.16), transparent 28%, transparent 54%, rgba(4,7,12,.66)),
+      linear-gradient(90deg, rgba(0,0,0,.20), transparent 22%, transparent 78%, rgba(0,0,0,.18));
+  }
+  .gallery__ambient {
+    position: absolute;
+    inset: -16%;
+    width: 132%;
+    height: 132%;
+    object-fit: cover;
+    z-index: 0;
+    opacity: 0;
+    pointer-events: none;
+    filter: blur(34px) saturate(1.16) brightness(.72);
+    transform: scale(1.05);
+    transition: opacity .52s var(--ease), transform .75s var(--ease);
+  }
+  .gallery__ambient.is-active {
+    opacity: .46;
+    transform: scale(1.02);
   }
 
-  /* the padded stage that holds the stacked images, so the holder shows
-     as a margin around every photo. */
-  .gallery__stage { position: absolute; inset: clamp(10px, 2.4%, 24px); }
+  /* The active work image stays contained and inspectable. */
+  .gallery__stage {
+    position: absolute;
+    inset: clamp(14px, 2.45%, 26px);
+    z-index: 2;
+    border-radius: 7px;
+  }
 
   /* each photo: contained (any ratio fits, never stretched), centered,
      floating on the holder with a faint drop shadow, cross-faded. */
@@ -785,33 +829,129 @@
                                          a small one to mush (it stays crisp + centered) */
     opacity: 0;
     pointer-events: none;
-    transition: opacity .5s var(--ease);
-    filter: drop-shadow(0 14px 26px rgba(0,0,0,.5));
+    border-radius: 6px;
+    transform: translateZ(0) scale(.985);
+    transition: opacity .46s var(--ease), transform .5s var(--ease), filter .5s var(--ease);
+    filter: drop-shadow(0 20px 34px rgba(0,0,0,.46));
   }
-  .gallery__img.is-active { opacity: 1; }
+  .gallery__img.is-active { opacity: 1; transform: translateZ(0) scale(1); }
 
-  /* caption / control BAR below the holder (not over the photo), full holder
-     width: a flex row with the centered caption text, plus prev/next arrows on
-     the ends only when arrow placement is "bar". Built when there's a caption (or
-     to host bar-mode arrows). Fixed one-line height so it never shifts; a subtle,
-     even dark wash gives any end arrows a consistent home. */
-  .gallery__caption {
-    display: flex; align-items: center;
-    margin-top: .7rem;
-    height: 2.4rem;
-    padding: 0 .35rem;
-    border-radius: var(--radius-sm);
-    background: radial-gradient(95% 150% at 50% 50%, rgba(0,0,0,.5), rgba(0,0,0,.26) 92%);
+  .gallery__hud {
+    position: absolute;
+    inset: clamp(10px, 2.2%, 18px);
+    z-index: 7;
+    pointer-events: none;
   }
-  /* the caption text, centered between the arrows. Blank images get a
-     non-breaking space (set in JS); long captions clip to one line with an
-     ellipsis (min-width:0 lets the flex item shrink so the ellipsis engages). */
+
+  /* Lower-left editorial label. The caption becomes a quiet annotation instead
+     of part of a control bar, so the image keeps breathing room. */
+  .gallery__caption {
+    position: absolute;
+    left: 0;
+    bottom: clamp(12px, 2vw, 18px);
+    max-width: min(62%, 420px);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    min-height: 2.18rem;
+    padding: .48rem .78rem;
+    border-left: 2px solid rgba(111,188,242,.76);
+    border-radius: 0 8px 8px 0;
+    background:
+      linear-gradient(90deg, rgba(6,9,14,.84), rgba(6,9,14,.54) 74%, rgba(6,9,14,0));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.07),
+      0 18px 44px -30px rgba(0,0,0,.95);
+    -webkit-backdrop-filter: blur(14px) saturate(1.14);
+            backdrop-filter: blur(14px) saturate(1.14);
+  }
+  .gallery__caption.is-empty { display: none; }
+  .gallery__caption::before {
+    content: "";
+    flex: 0 0 auto;
+    width: .42rem;
+    height: .42rem;
+    margin-right: .52rem;
+    border-radius: 50%;
+    background: var(--accent-bright);
+    box-shadow: 0 0 18px rgba(74,165,232,.35);
+  }
+  /* Blank images get a non-breaking space (set in JS); long captions clip to
+     one line with an ellipsis. */
   .gallery__caption-text {
-    flex: 1 1 auto; min-width: 0;
-    text-align: center;
-    color: var(--text-soft);
-    font-size: .82rem; letter-spacing: .02em;
+    min-width: 0;
+    text-align: left;
+    color: rgba(235,238,244,.94);
+    font-size: .75rem;
+    font-weight: 780;
+    letter-spacing: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 12px rgba(0,0,0,.5);
+  }
+  .gallery__counter {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 3.7rem;
+    padding: .46rem .58rem;
+    text-align: center;
+    color: rgba(235,238,244,.92);
+    font-size: .66rem;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    border: 1px solid rgba(255,255,255,.105);
+    border-radius: 999px;
+    background: rgba(8,12,18,.52);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 14px 36px -28px rgba(0,0,0,.9);
+    -webkit-backdrop-filter: blur(14px) saturate(1.14);
+            backdrop-filter: blur(14px) saturate(1.14);
+    text-shadow: 0 0 16px rgba(74,165,232,.18);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .34s var(--ease-soft), transform .34s var(--ease-soft);
+  }
+  .gallery__counter.is-visible,
+  .gallery__holder:focus-within .gallery__counter {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .gallery__holder:hover .gallery__counter {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .gallery__nav-cluster {
+    position: absolute;
+    right: 0;
+    bottom: clamp(12px, 2vw, 18px);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: .18rem;
+    padding: .24rem;
+    border: 1px solid rgba(255,255,255,.11);
+    border-radius: 999px;
+    background: rgba(8,12,18,.58);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.09),
+      0 18px 42px -28px rgba(0,0,0,.95);
+    -webkit-backdrop-filter: blur(16px) saturate(1.18);
+            backdrop-filter: blur(16px) saturate(1.18);
+  }
+  .gallery__nav-cluster::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: .58rem;
+    bottom: .58rem;
+    width: 1px;
+    background: rgba(255,255,255,.09);
+    transform: translateX(-50%);
   }
 
   /* PREV / NEXT ARROWS — built once per used location (image / bar / dots) and
@@ -820,9 +960,11 @@
      Base look is a minimal inline-SVG chevron; image mode overrides it below. */
   .gallery__nav {
     display: none; place-items: center;   /* becomes grid when shown */
-    border: 0; background: none; padding: 0;
+    border: 1px solid transparent;
+    background: none;
+    padding: 0;
     color: var(--muted); cursor: pointer;
-    transition: color .2s, background .3s, border-color .3s, opacity .3s;
+    transition: color .2s, background .25s, border-color .25s, opacity .25s, transform .25s;
   }
   .gallery__nav svg { width: 15px; height: 15px; display: block; }
   .gallery__nav:hover { color: var(--text); }
@@ -839,11 +981,25 @@
     body.ga-m-dots  .gallery__nav--dots  { display: grid; }
   }
 
-  /* BAR placement: chevron sized to the bar height, sitting at its ends */
-  .gallery__nav--bar { flex: 0 0 auto; width: 2.4rem; height: 2.4rem; }
+  /* BAR placement: a floating two-button nav rocker. */
+  .gallery__nav--bar {
+    flex: 0 0 auto;
+    width: 2.18rem;
+    height: 2.18rem;
+    border-radius: 999px;
+    color: rgba(235,238,244,.78);
+    border-color: transparent;
+    background: transparent;
+  }
+  .gallery__nav--bar:hover {
+    color: #fff;
+    background: rgba(74,165,232,.18);
+    border-color: rgba(74,165,232,.20);
+    transform: scale(1.04);
+  }
 
-  /* DOTS placement: chevron flanking the centered circle cluster */
-  .gallery__nav--dots { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; }
+  /* DOTS placement: chevrons flanking the centered progress rail if selected. */
+  .gallery__nav--dots { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 999px; }
   .gallery__nav--dots.gallery__nav--prev { margin-right: .15rem; }
   .gallery__nav--dots.gallery__nav--next { margin-left: .15rem; }
 
@@ -862,40 +1018,74 @@
   .gallery__nav--image:hover { background: rgba(8,12,20,.85); border-color: var(--accent); color: #fff; }
   @media (hover: none) { .gallery__nav--image { opacity: 1; } }
 
-  /* circle thumbnails beneath the holder: each an upper-left crop of its
-     image. Hidden for single-image galleries. */
+  /* Full-width timeline at the bottom of the frame. Each segment remains a real
+     button, but the visual reads like an integrated media scrub line. */
   .gallery__dots {
-    display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
-    gap: .55rem; margin-top: .9rem;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: stretch;
+    align-items: stretch;
+    gap: 2px;
+    margin: 0;
+    height: 3px;
+    pointer-events: auto;
   }
   .gallery__dot {
-    width: 30px; height: 30px; padding: 0; overflow: hidden;
-    border-radius: 50%; border: 1px solid var(--line);
-    background: var(--panel); cursor: pointer; opacity: .55;
-    transition: opacity .25s, border-color .25s, transform .2s, box-shadow .25s;
+    position: relative;
+    flex: 1 1 0;
+    width: auto;
+    height: 3px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: rgba(255,255,255,.16);
+    cursor: pointer;
+    opacity: 1;
+    transition: background .25s, box-shadow .25s;
   }
   .gallery__dot img {
-    width: 100%; height: 100%; display: block;
-    object-fit: cover; object-position: left top;   /* upper-left crop */
+    display: none;
   }
-  .gallery__dot:hover { opacity: .9; transform: translateY(-1px); }
+  .gallery__dot:hover { background: rgba(255,255,255,.34); }
   .gallery__dot.is-active {
-    opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-faint);
+    background: linear-gradient(90deg, var(--accent-bright), var(--accent-deep));
+    box-shadow: 0 0 20px rgba(74,165,232,.34);
   }
 
-  /* optional "next image" preview teaser: a mini of the next image,
-     overlapping the holder's bottom-right corner; clicking it advances.
-     Shown only when the .gallery has data-next-preview. */
+  /* Optional next-image teaser, now a restrained top-right preview chip. */
   .gallery__preview {
-    position: absolute; right: -10px; bottom: -16px;
-    width: 30%; max-width: 188px; aspect-ratio: 4 / 3;
-    padding: 0; overflow: hidden; cursor: pointer; z-index: 4;
-    border: 2px solid var(--bg); background: var(--panel);
-    box-shadow: 0 20px 44px -20px rgba(0,0,0,.9);
-    border-radius: var(--radius-sm);     /* rounded on all four corners */
-    transition: transform .3s var(--ease), border-color .3s;
+    position: absolute;
+    left: clamp(12px, 2.35%, 20px);
+    top: clamp(12px, 2.35%, 20px);
+    width: 19%;
+    max-width: 118px;
+    aspect-ratio: 4 / 3;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+    z-index: 7;
+    opacity: .62;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(10,13,18,.62);
+    box-shadow: 0 18px 42px -24px rgba(0,0,0,.95);
+    border-radius: 8px;
+    transform: translateY(-3px) scale(.98);
+    transition: transform .28s var(--ease), border-color .28s, opacity .28s;
+    -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
   }
-  .gallery__preview:hover { transform: translateY(-3px) scale(1.03); border-color: var(--accent); }
+  .gallery__holder:hover .gallery__preview,
+  .gallery__preview:focus-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  .gallery__preview:hover { border-color: rgba(74,165,232,.55); }
   .gallery__preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   /* keyboard focus rings on the gallery controls (the arrow also reveals
@@ -911,8 +1101,37 @@
   .gallery--single .gallery__dots,
   .gallery--single .gallery__preview { display: none; }
 
+  @media (hover: none) {
+    .gallery__preview { opacity: .86; transform: none; }
+  }
+
+  @media (max-width: 880px) {
+    .gallery__stage { inset: clamp(10px, 2.8%, 18px); }
+    .gallery__hud { inset: 9px; }
+    .gallery__caption {
+      max-width: 58%;
+      min-height: 2.08rem;
+      padding: .4rem .62rem;
+    }
+    .gallery__caption-text { font-size: .72rem; }
+    .gallery__counter { min-width: 3rem; font-size: .62rem; }
+    .gallery__nav-cluster { padding: .2rem; }
+    .gallery__nav--bar { width: 1.82rem; height: 1.82rem; }
+    .gallery__preview { width: 22%; max-width: 96px; }
+  }
+
+  @media (max-width: 440px) {
+    .gallery__caption { max-width: 56%; padding-inline: .54rem; }
+    .gallery__caption::before { width: .34rem; height: .34rem; margin-right: .42rem; }
+    .gallery__caption-text { font-size: .68rem; }
+    .gallery__counter { min-width: 2.72rem; font-size: .58rem; }
+    .gallery__nav--bar { width: 1.66rem; height: 1.66rem; }
+    .gallery__nav--bar svg { width: 13px; height: 13px; }
+    .gallery__preview { width: 25%; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .gallery__img, .gallery__nav, .gallery__preview { transition: none; }
+    .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter { transition: none; }
   }
 
   /* ============================================================
@@ -1463,7 +1682,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <div class="gallery">
               <img src="img/seed/forerunner-01.jpg" loading="lazy"
@@ -1518,7 +1737,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <div class="gallery">
               <img src="img/seed/phillips-01.jpg" loading="lazy"
@@ -1573,7 +1792,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag.
                  (This project opts in: data-next-preview is set on the .gallery below.) -->
             <div class="gallery" data-next-preview>
@@ -1639,7 +1858,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <div class="gallery">
               <img src="img/seed/planetarium-01.jpg" loading="lazy"
@@ -1699,7 +1918,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <div class="gallery">
               <img src="img/seed/cognition-vr-01.jpg" loading="lazy"
@@ -1758,7 +1977,7 @@
 
             <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
                  Add or remove a photo = add or remove one <img> line below.
-                 Arrows + circle dots + lightbox auto-build; a single image hides them.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <div class="gallery">
               <img src="img/seed/blockade-01.jpg" loading="lazy"
@@ -2237,11 +2456,11 @@
       return { open: open };
     })();
 
-    /* ---- project image galleries (Phase 1) ----
+    /* ---- project image galleries ----
        Enhance each authored `.gallery` (a plain list of <img>) into a holder
        with a framed CSS backdrop, a padded image stage, cross-fade navigation,
-       circle thumbnails, an optional caption, and an optional "next image"
-       preview teaser (opt-in via data-next-preview). Arrows, dots, and the
+       progress timeline, an optional in-frame HUD, and an optional "next image"
+       preview teaser (opt-in via data-next-preview). Arrows, pips, and the
        preview auto-hide for single-image galleries. The active image carries a
        `data-lightbox` hook for the Phase 2 lightbox. */
 
@@ -2249,8 +2468,8 @@
        (the site's 880px breakpoint). Each is one of:
          "off"   - no arrows (swipe / preview / dots still navigate)
          "image" - overlaid on the photo's edges (original hover-reveal style)
-         "bar"   - at the ends of the caption bar
-         "dots"  - flanking the row of circle thumbnails
+         "bar"   - inside the in-frame HUD
+         "dots"  - flanking the progress timeline
        Switch a placement by editing its value. Arrows are built only in the
        locations these two settings use, and CSS shows the right one per
        breakpoint. (The lightbox keeps its own arrows; the swipe is unaffected.) */
@@ -2275,8 +2494,13 @@
         var single = imgs.length === 1;
         var anyCaption = imgs.some(function (im) { return !!im.getAttribute("data-caption"); });
         var index = 0;
-        var caption = null;        /* the control bar element */
-        var captionText = null;    /* the centered text span inside it */
+        var ambient = null;        /* blurred active-image backdrop */
+        var hud = null;            /* in-frame control layer */
+        var caption = null;        /* lower-left caption label */
+        var captionText = null;    /* the caption text span inside it */
+        var counterText = null;    /* current slide count */
+        var counterTimer = 0;      /* transient reveal after image changes */
+        var navCluster = null;     /* floating prev/next rocker */
         var previewImg = null;
         var dotButtons = [];
         var prevButtons = [], nextButtons = [];   /* every arrow copy across the used locations */
@@ -2286,6 +2510,11 @@
         holder.className = "gallery__holder";
         var frame = doc.createElement("div");
         frame.className = "gallery__frame";
+        ambient = doc.createElement("img");
+        ambient.className = "gallery__ambient";
+        ambient.alt = "";
+        ambient.loading = "lazy";
+        ambient.setAttribute("aria-hidden", "true");
         var stage = doc.createElement("div");
         stage.className = "gallery__stage";
 
@@ -2294,8 +2523,6 @@
           if (i === 0) img.classList.add("is-active");
           stage.appendChild(img);
         });
-        frame.appendChild(stage);
-        holder.appendChild(frame);
         holder.setAttribute("tabindex", "-1");   /* focusable so the lightbox can return focus here */
         holder.addEventListener("click", function () {
           if (justSwiped) { justSwiped = false; return; }
@@ -2315,6 +2542,21 @@
           return b;
         }
 
+        function countLabel(i, n) {
+          function pad(v) { return v < 10 ? "0" + v : String(v); }
+          return pad(i + 1) + " / " + pad(n);
+        }
+
+        function revealCounter() {
+          if (!counterText) return;
+          counterText.classList.add("is-visible");
+          if (counterTimer) window.clearTimeout(counterTimer);
+          counterTimer = window.setTimeout(function () {
+            counterTimer = 0;
+            counterText.classList.remove("is-visible");
+          }, 2500);
+        }
+
         var preview = null;
         if (!single) {
           /* image-mode arrows overlay the photo's edges (built only if used) */
@@ -2332,14 +2574,14 @@
             previewImg.alt = "";
             previewImg.loading = "lazy";
             preview.appendChild(previewImg);
-            holder.appendChild(preview);
+            frame.appendChild(preview);
           }
         }
 
         var dots = doc.createElement("div");
         dots.className = "gallery__dots";
         if (!single) {
-          /* dots-mode arrows flank the centered circle cluster: [<] o o o [>] */
+          /* dots-mode arrows flank the centered progress rail: [<] - - - [>] */
           if (GA_DOTS) dots.appendChild(makeNav("prev", "dots", "Previous image"));
           imgs.forEach(function (img, i) {
             var dot = doc.createElement("button");
@@ -2351,37 +2593,67 @@
             dimg.alt = "";
             dimg.loading = "lazy";
             dot.appendChild(dimg);
-            dot.addEventListener("click", function () { show(i); });
+            dot.addEventListener("click", function (e) { e.stopPropagation(); show(i, true); });
             dots.appendChild(dot);
             dotButtons.push(dot);
           });
           if (GA_DOTS) dots.appendChild(makeNav("next", "dots", "Next image"));
         }
 
+        frame.appendChild(ambient);
         gallery.appendChild(holder);
-        /* caption / control BAR below the holder: the centered caption text, plus
-           bar-mode arrows on the ends when used. Built when there's a caption to
-           show, or when bar-mode arrows need a home on a multi-image gallery. */
-        if (anyCaption || (!single && GA_BAR)) {
-          caption = doc.createElement("div");
-          caption.className = "gallery__caption";
-          if (!single && GA_BAR) caption.appendChild(makeNav("prev", "bar", "Previous image"));
-          captionText = doc.createElement("span");
-          captionText.className = "gallery__caption-text";
-          caption.appendChild(captionText);
-          if (!single && GA_BAR) caption.appendChild(makeNav("next", "bar", "Next image"));
-          gallery.appendChild(caption);
+        /* In-frame HUD: caption, counter, and arrows each get their own zone. */
+        if (anyCaption || !single) {
+          hud = doc.createElement("div");
+          hud.className = "gallery__hud";
+          hud.addEventListener("click", function (e) { e.stopPropagation(); });
+          if (anyCaption) {
+            caption = doc.createElement("div");
+            caption.className = "gallery__caption";
+            captionText = doc.createElement("span");
+            captionText.className = "gallery__caption-text";
+            caption.appendChild(captionText);
+            hud.appendChild(caption);
+          }
+          if (!single) {
+            counterText = doc.createElement("span");
+            counterText.className = "gallery__counter";
+            hud.appendChild(counterText);
+          }
+          if (!single && GA_BAR) {
+            navCluster = doc.createElement("div");
+            navCluster.className = "gallery__nav-cluster";
+            navCluster.appendChild(makeNav("prev", "bar", "Previous image"));
+            navCluster.appendChild(makeNav("next", "bar", "Next image"));
+            hud.appendChild(navCluster);
+          }
+          frame.appendChild(hud);
         }
-        gallery.appendChild(dots);
+        frame.appendChild(dots);
+        frame.appendChild(stage);
+        holder.appendChild(frame);
         gallery.classList.add("is-ready");
         if (single) gallery.classList.add("gallery--single");
 
-        function show(i) {
+        function show(i, revealOnChange) {
           var n = imgs.length;
-          index = ((i % n) + n) % n;                /* wrap-around */
+          var nextIndex = ((i % n) + n) % n;        /* wrap-around */
+          var changed = nextIndex !== index;
+          index = nextIndex;
           imgs.forEach(function (img, k) { img.classList.toggle("is-active", k === index); });
           dotButtons.forEach(function (d, k) { d.classList.toggle("is-active", k === index); });
-          if (captionText) { captionText.textContent = imgs[index].getAttribute("data-caption") || " "; }   /* nbsp keeps the one-line height when blank */
+          if (captionText) {
+            var cap = imgs[index].getAttribute("data-caption") || "";
+            captionText.textContent = cap;
+            if (caption) caption.classList.toggle("is-empty", !cap);
+          }
+          if (counterText) { counterText.textContent = countLabel(index, n); }
+          if (revealOnChange && changed) revealCounter();
+          if (ambient) {
+            var active = imgs[index];
+            ambient.src = active.getAttribute("data-sd") || active.currentSrc || active.src;
+            ambient.classList.add("is-active");
+          }
           if (previewImg) {
             var nx = imgs[(index + 1) % n];
             previewImg.src = nx.getAttribute("data-sd") || nx.src;
@@ -2393,14 +2665,14 @@
         }
 
         if (!single) {
-          prevButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); }); });
-          nextButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); }); });
+          prevButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1, true); }); });
+          nextButtons.forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1, true); }); });
           if (preview) {
-            preview.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
+            preview.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1, true); });
           }
           holder.addEventListener("keydown", function (e) {
-            if (e.key === "ArrowLeft") { e.preventDefault(); show(index - 1); }
-            else if (e.key === "ArrowRight") { e.preventDefault(); show(index + 1); }
+            if (e.key === "ArrowLeft") { e.preventDefault(); show(index - 1, true); }
+            else if (e.key === "ArrowRight") { e.preventDefault(); show(index + 1, true); }
           });
           bindSwipe();
         }
@@ -2466,7 +2738,7 @@
               act.style.opacity = "0";
               tgt.style.transition = "opacity " + dur + "ms ease";
               tgt.style.opacity = "1";
-              settleTimer = window.setTimeout(function () { settleTimer = 0; show(target); clearStyles(); }, dur + 20);
+              settleTimer = window.setTimeout(function () { settleTimer = 0; show(target, true); clearStyles(); }, dur + 20);
             } else {
               act.style.transition = "transform " + dur + "ms ease, opacity " + dur + "ms ease";
               act.style.transform = "translateX(0)";
@@ -2477,7 +2749,7 @@
           }, { passive: true });
         }
 
-        show(0);
+        show(0, false);
       });
     }
     buildGalleries();
