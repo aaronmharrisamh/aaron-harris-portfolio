@@ -750,6 +750,7 @@
     position: relative;
     aspect-ratio: 16 / 9;
     cursor: zoom-in;          /* the image area opens the lightbox (Phase 2) */
+    touch-action: pan-y;      /* vertical scroll stays native; horizontal = swipe */
   }
 
   /* the framed backdrop: panel base, two soft blue bokeh glows, a faint
@@ -2143,6 +2144,13 @@
        preview teaser (opt-in via data-next-preview). Arrows, dots, and the
        preview auto-hide for single-image galleries. The active image carries a
        `data-lightbox` hook for the Phase 2 lightbox. */
+
+    /* Inline holder arrows: OFF by default. The "Next" preview, the circle dots,
+       and the mobile swipe (below) handle navigation, which reads cleaner. Flip
+       this single switch to true to show the prev/next arrows on the holder
+       again. (The lightbox keeps its own arrows regardless of this switch.) */
+    var GALLERY_ARROWS = false;
+
     function buildGalleries() {
       var galleries = doc.querySelectorAll(".gallery");
       Array.prototype.forEach.call(galleries, function (gallery) {
@@ -2157,6 +2165,7 @@
         var index = 0;
         var previewImg = null;
         var dotButtons = [];
+        var justSwiped = false;   /* set by a mobile swipe so the trailing click doesn't open the lightbox */
 
         var holder = doc.createElement("div");
         holder.className = "gallery__holder";
@@ -2177,7 +2186,10 @@
         frame.appendChild(caption);
         holder.appendChild(frame);
         holder.setAttribute("tabindex", "-1");   /* focusable so the lightbox can return focus here */
-        holder.addEventListener("click", function () { lightbox.open(imgs, index, holder); });
+        holder.addEventListener("click", function () {
+          if (justSwiped) { justSwiped = false; return; }
+          lightbox.open(imgs, index, holder);
+        });
 
         function makeNav(dir, label) {
           var b = doc.createElement("button");
@@ -2193,10 +2205,12 @@
 
         var prev = null, next = null, preview = null;
         if (!single) {
-          prev = makeNav("prev", "Previous image");
-          next = makeNav("next", "Next image");
-          holder.appendChild(prev);
-          holder.appendChild(next);
+          if (GALLERY_ARROWS) {
+            prev = makeNav("prev", "Previous image");
+            next = makeNav("next", "Next image");
+            holder.appendChild(prev);
+            holder.appendChild(next);
+          }
 
           if (wantsPreview) {
             preview = doc.createElement("button");
@@ -2254,8 +2268,8 @@
         }
 
         if (!single) {
-          prev.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); });
-          next.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
+          if (prev) prev.addEventListener("click", function (e) { e.stopPropagation(); show(index - 1); });
+          if (next) next.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
           if (preview) {
             preview.addEventListener("click", function (e) { e.stopPropagation(); show(index + 1); });
           }
@@ -2263,6 +2277,79 @@
             if (e.key === "ArrowLeft") { e.preventDefault(); show(index - 1); }
             else if (e.key === "ArrowRight") { e.preventDefault(); show(index + 1); }
           });
+          bindSwipe();
+        }
+
+        /* ---- mobile swipe-to-change (Option B: drag-and-fade) ----
+           A clear horizontal drag moves the active photo with the finger while
+           the target photo fades in beneath it; a vertical drag still scrolls the
+           page; a near-still touch stays a tap that opens the lightbox. Commit on
+           a quarter-width drag OR a quick flick; otherwise spring back. Wraps
+           around. Touch-only (these listeners never fire without touch). */
+        function bindSwipe() {
+          var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          var x0 = 0, y0 = 0, t0 = 0, lock = null, target = -1, width = 1, settleTimer = 0;
+
+          function clearStyles() {
+            imgs.forEach(function (im) { im.style.transition = ""; im.style.transform = ""; im.style.opacity = ""; });
+          }
+
+          holder.addEventListener("touchstart", function (e) {
+            if (e.touches.length !== 1) return;
+            if (settleTimer) { window.clearTimeout(settleTimer); settleTimer = 0; clearStyles(); }
+            justSwiped = false;
+            x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+            lock = null; target = -1;
+            width = holder.getBoundingClientRect().width || 1;
+          }, { passive: true });
+
+          holder.addEventListener("touchmove", function (e) {
+            if (e.touches.length !== 1 || lock === "v") return;
+            var dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
+            if (lock === null) {
+              if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;   /* wait for a clear direction */
+              lock = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+            }
+            if (lock !== "h") return;
+            e.preventDefault();   /* take over horizontal; vertical scrolling was never blocked */
+            var n = imgs.length;
+            target = dx < 0 ? (index + 1) % n : (index - 1 + n) % n;
+            var prog = Math.min(1, Math.abs(dx) / (width * 0.6));
+            imgs.forEach(function (im, k) {
+              im.style.transition = "none";
+              if (k === index) { im.style.transform = "translateX(" + dx + "px)"; im.style.opacity = "1"; }
+              else if (k === target) { im.style.transform = ""; im.style.opacity = String(prog); }
+              else { im.style.transform = ""; im.style.opacity = "0"; }
+            });
+          }, { passive: false });
+
+          holder.addEventListener("touchend", function (e) {
+            if (lock !== "h") { lock = null; return; }
+            lock = null;
+            var dx = e.changedTouches[0] ? e.changedTouches[0].clientX - x0 : 0;
+            var dt = Date.now() - t0, dist = Math.abs(dx);
+            var flick = dt < 300 && dist > 40 && dist / dt > 0.3;
+            var commit = target >= 0 && (dist > width * 0.25 || flick);
+            var act = imgs[index], tgt = target >= 0 ? imgs[target] : null;
+            var dur = reduce ? 0 : 260;
+            justSwiped = true;   /* swallow the click that browsers fire after a drag */
+
+            if (commit && tgt) {
+              var dir = dx < 0 ? -1 : 1;
+              act.style.transition = "transform " + dur + "ms ease, opacity " + dur + "ms ease";
+              act.style.transform = "translateX(" + (dir * width) + "px)";
+              act.style.opacity = "0";
+              tgt.style.transition = "opacity " + dur + "ms ease";
+              tgt.style.opacity = "1";
+              settleTimer = window.setTimeout(function () { settleTimer = 0; show(target); clearStyles(); }, dur + 20);
+            } else {
+              act.style.transition = "transform " + dur + "ms ease, opacity " + dur + "ms ease";
+              act.style.transform = "translateX(0)";
+              act.style.opacity = "1";
+              if (tgt) { tgt.style.transition = "opacity " + dur + "ms ease"; tgt.style.opacity = "0"; }
+              settleTimer = window.setTimeout(function () { settleTimer = 0; clearStyles(); }, dur + 20);
+            }
+          }, { passive: true });
         }
 
         show(0);
