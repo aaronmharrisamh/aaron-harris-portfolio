@@ -1158,9 +1158,10 @@
   /* ============================================================
      LIGHTBOX  (Phase 2)
      One reusable fullscreen viewer. Desktop: image simply fit to the
-     page (no zoom). Touch devices: pinch-zoom + clamped pan (added in
-     the JS). Plus (X) close, prev/next arrows, a slim always-on caption
-     bar, and Esc / backdrop close. Sits above the header (z 1000).
+     page (no zoom). Touch devices: pinch-zoom + clamped pan + drag-to-change
+     photos (added in the JS). Plus (X) close, prev/next arrows, a lower-left
+     subtitle that glides in then idle-fades, and Esc / backdrop close. Sits
+     above the header (z 1000).
      ============================================================ */
   body.lb-open { overflow: hidden; }
 
@@ -1187,9 +1188,14 @@
     overflow: hidden;
     touch-action: none;       /* the JS owns touch gestures on mobile */
   }
+  /* Two stacked layers: the active image, and an incoming layer revealed beneath
+     it during a touch drag (so the lightbox slides photo-to-photo exactly like
+     the main gallery). Both are absolutely centered + contained. */
   .lightbox__img {
+    position: absolute; inset: 0; margin: auto;       /* centered within the stage */
     max-width: 100%; max-height: 100%;
-    min-width: 0; min-height: 0;     /* allow the flex item to shrink to fit */
+    width: auto; height: auto;
+    min-width: 0; min-height: 0;
     object-fit: contain;
     transform-origin: center center;
     will-change: transform;
@@ -1197,6 +1203,8 @@
     -webkit-user-drag: none;
     filter: drop-shadow(0 22px 50px rgba(0,0,0,.55));
   }
+  .lightbox__img--active   { z-index: 1; }
+  .lightbox__img--incoming { z-index: 0; opacity: 0; pointer-events: none; }   /* hidden until a drag reveals it */
   .lightbox__img.is-zoomed { cursor: grab; }
 
   .lightbox__close,
@@ -1221,23 +1229,59 @@
   .lightbox__nav--next { right: 16px; }
   .lightbox__nav:hover { transform: translateY(-50%) scale(1.05); }
 
+  /* Editorial subtitle, mirroring the in-frame gallery caption: a quiet glass
+     chip with an accent dot, anchored near the image's lower-left (not pinned to
+     the very bottom). Hidden at rest; it glides in on an image change / mouse
+     movement (desktop) or a drag (touch), then fades back out. */
   .lightbox__caption {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
-    padding: .85rem 1.2rem 1rem; text-align: center;
-    background: linear-gradient(transparent, rgba(4,6,10,.82));
-    color: #fff; font-size: .85rem; letter-spacing: .02em;
+    position: absolute;
+    left: clamp(20px, 8vw, 96px);
+    bottom: clamp(58px, 10vh, 96px);
+    right: auto; top: auto;
+    z-index: 3;
+    max-width: min(72%, 540px);
+    display: flex; align-items: center;
+    padding: .5rem .9rem;
+    border-left: 2px solid rgba(111,188,242,.78);
+    border-radius: 0 8px 8px 0;
+    background: linear-gradient(90deg, rgba(6,9,14,.86), rgba(6,9,14,.5) 76%, rgba(6,9,14,0));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 18px 44px -30px rgba(0,0,0,.95);
+    -webkit-backdrop-filter: blur(14px) saturate(1.14);
+            backdrop-filter: blur(14px) saturate(1.14);
+    color: rgba(235,238,244,.95);
+    font-size: .9rem; font-weight: 700; letter-spacing: 0; line-height: 1.3;
+    text-shadow: 0 1px 12px rgba(0,0,0,.5);
+    pointer-events: none;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .6s var(--ease-soft), transform .6s var(--ease-soft);
+  }
+  .lightbox__caption::before {
+    content: ""; flex: 0 0 auto;
+    width: .46rem; height: .46rem; margin-right: .55rem;
+    border-radius: 50%;
+    background: var(--accent-bright);
+    box-shadow: 0 0 18px rgba(74,165,232,.4);
   }
   .lightbox__caption.is-empty { display: none; }
+  .lightbox__caption.is-visible { opacity: 1; transform: translateY(0); }
 
   @media (max-width: 560px) {
     .lightbox__close { width: 42px; height: 42px; top: 10px; right: 10px; }
     .lightbox__nav { width: 44px; height: 44px; }
     .lightbox__nav--prev { left: 8px; }
     .lightbox__nav--next { right: 8px; }
+    .lightbox__caption {
+      left: clamp(14px, 5vw, 28px);
+      bottom: clamp(64px, 12vh, 96px);
+      max-width: 80%;
+      padding: .42rem .72rem;
+      font-size: .8rem;
+    }
+    .lightbox__caption::before { width: .4rem; height: .4rem; margin-right: .46rem; }
   }
   @media (prefers-reduced-motion: reduce) {
     .lightbox { animation: none; }
-    .lightbox__nav, .lightbox__close { transition: none; }
+    .lightbox__nav, .lightbox__close, .lightbox__caption, .lightbox__img { transition: none; }
   }
 
   /* ============================================================
@@ -2260,16 +2304,19 @@
     /* ===========================================================
        LIGHTBOX  (Phase 2)
        One reusable fullscreen viewer for every gallery. Desktop: the
-       image is simply fit to the page (no zoom). Touch devices: pinch
-       zoom and clamped pan. Plus (X) close, prev/next arrows, a slim
-       always-on caption bar, Esc / backdrop close, a focus trap, and the
-       rest of the page made inert while open. No libraries. */
+       image is simply fit to the page (no zoom); the subtitle glides in on
+       mouse movement / image change, then idle-fades. Touch devices: pinch
+       zoom + clamped pan, plus drag-to-change photos (when not zoomed) that
+       mirrors the main gallery. Plus (X) close, prev/next arrows, a lower-left
+       subtitle, Esc / backdrop close, a focus trap, and the rest of the page
+       made inert while open. No libraries. */
     var lightbox = (function () {
-      var root, stage, imgEl, captionEl, closeBtn, prevBtn, nextBtn;
+      var root, stage, imgEl, imgInEl, captionEl, closeBtn, prevBtn, nextBtn;
       var mainEl = doc.querySelector("main");
       var images = [], current = 0, opener = null, lastFocus = null, built = false;
       var zoomable = false, scale = 1, tx = 0, ty = 0;
       var MAX = 4;
+      var captionIdle = 0, LB_CAPTION_HOLD = 2800;   /* subtitle hold before it fades */
 
       function svgButton(cls, label, inner) {
         var b = doc.createElement("button");
@@ -2297,8 +2344,14 @@
 
         stage = doc.createElement("div");
         stage.className = "lightbox__stage";
+        /* incoming layer first (beneath), active layer on top */
+        imgInEl = doc.createElement("img");
+        imgInEl.className = "lightbox__img lightbox__img--incoming";
+        imgInEl.alt = ""; imgInEl.draggable = false;
+        imgInEl.setAttribute("aria-hidden", "true");
+        stage.appendChild(imgInEl);
         imgEl = doc.createElement("img");
-        imgEl.className = "lightbox__img";
+        imgEl.className = "lightbox__img lightbox__img--active";
         imgEl.alt = ""; imgEl.draggable = false;
         stage.appendChild(imgEl);
 
@@ -2324,6 +2377,9 @@
           if (e.target === root || e.target === stage) close();
         });
         imgEl.addEventListener("click", function (e) { e.stopPropagation(); });
+        /* Desktop: any mouse movement re-summons the subtitle; the idle timer in
+           revealCaption() then fades it back out once the pointer goes still. */
+        root.addEventListener("mousemove", revealCaption);
         doc.addEventListener("keydown", onKey);
         bindTouch();
         built = true;
@@ -2381,6 +2437,18 @@
         closeBtn.focus();
       }
 
+      /* Fade the subtitle in, then schedule it to dissolve after a gracious beat.
+         Shared by the image-change, desktop mouse-move, and touch-drag paths. */
+      function revealCaption() {
+        if (!captionEl || captionEl.classList.contains("is-empty")) return;
+        captionEl.classList.add("is-visible");
+        if (captionIdle) window.clearTimeout(captionIdle);
+        captionIdle = window.setTimeout(function () {
+          captionIdle = 0;
+          captionEl.classList.remove("is-visible");
+        }, LB_CAPTION_HOLD);
+      }
+
       function render() {
         resetZoom();
         var im = images[current];
@@ -2388,6 +2456,7 @@
         imgEl.alt = im.alt;
         if (im.caption) { captionEl.textContent = im.caption; captionEl.classList.remove("is-empty"); }
         else { captionEl.textContent = ""; captionEl.classList.add("is-empty"); }
+        revealCaption();   /* glides in on every image change (incl. open) */
       }
       function go(i) {
         var n = images.length;
@@ -2400,6 +2469,10 @@
         root.hidden = true;
         doc.body.classList.remove("lb-open");
         inert(false);
+        if (captionIdle) { window.clearTimeout(captionIdle); captionIdle = 0; }
+        if (captionEl) captionEl.classList.remove("is-visible");
+        if (swipeSettle) { window.clearTimeout(swipeSettle); swipeSettle = 0; }
+        if (imgInEl) { imgInEl.style.transition = ""; imgInEl.style.opacity = ""; }
         resetZoom();
         var back = opener || lastFocus;
         if (back && typeof back.focus === "function") back.focus();
@@ -2425,19 +2498,45 @@
         var r = stage.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       }
-      var pinch = null, pan = null, lastTap = 0;
+      var pinch = null, pan = null, lastTap = 0, swipe = null, swipeSettle = 0;
+
+      /* Reset the inline styles used by a drag so CSS governs again: the active
+         layer falls back to visible/identity, the incoming layer back to hidden. */
+      function clearSwipeStyles() {
+        imgEl.style.transition = "";
+        imgEl.style.opacity = "";
+        imgInEl.style.transition = "";
+        imgInEl.style.opacity = "";     /* → class default: hidden */
+        applyTransform();               /* normalize active transform (identity unless zoomed) */
+      }
+
       function bindTouch() {
         stage.addEventListener("touchstart", function (e) {
           if (!zoomable) return;
+          /* a new touch interrupts any in-flight settle animation, resetting to a
+             clean state (if the swap hadn't run yet, we stay on the current photo) */
+          if (swipeSettle) { window.clearTimeout(swipeSettle); swipeSettle = 0; clearSwipeStyles(); }
           if (e.touches.length === 2) {
             var c = center();
             var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
             var my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
             pinch = { d0: dist(e.touches), s0: scale, fx: mx - c.x, fy: my - c.y, tx0: tx, ty0: ty };
-            pan = null;
+            pan = null; swipe = null;
           } else if (e.touches.length === 1) {
             pinch = null;
-            pan = scale > 1.01 ? { x: e.touches[0].clientX - tx, y: e.touches[0].clientY - ty } : null;
+            if (scale > 1.01) {
+              /* zoomed in → one finger pans the photo (swipe-to-change is off) */
+              pan = { x: e.touches[0].clientX - tx, y: e.touches[0].clientY - ty };
+              swipe = null;
+            } else {
+              /* at natural size → one finger drags between photos (like the gallery) */
+              pan = null;
+              swipe = images.length > 1 ? {
+                x0: e.touches[0].clientX, y0: e.touches[0].clientY,
+                t0: Date.now(), lock: null, target: -1,
+                width: stage.getBoundingClientRect().width || 1
+              } : null;
+            }
           }
         }, { passive: true });
 
@@ -2454,11 +2553,76 @@
             tx = e.touches[0].clientX - pan.x;
             ty = e.touches[0].clientY - pan.y;
             clampPan(); applyTransform();
+          } else if (swipe && e.touches.length === 1 && scale <= 1.01) {
+            var dx = e.touches[0].clientX - swipe.x0, dy = e.touches[0].clientY - swipe.y0;
+            if (swipe.lock === null) {
+              if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;   /* wait for a clear direction */
+              swipe.lock = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+            }
+            if (swipe.lock !== "h") return;
+            e.preventDefault();
+            var n = images.length;
+            var tgt = dx < 0 ? (current + 1) % n : (current - 1 + n) % n;
+            if (tgt !== swipe.target) { swipe.target = tgt; imgInEl.src = images[tgt].src; }
+            var prog = Math.min(1, Math.abs(dx) / (swipe.width * 0.6));
+            imgEl.style.transition = "none";
+            imgEl.style.transform = "translateX(" + dx + "px)";
+            imgInEl.style.transition = "none";
+            imgInEl.style.opacity = String(prog);
+            revealCaption();   /* the subtitle answers the drag */
           }
         }, { passive: false });
 
         stage.addEventListener("touchend", function (e) {
           if (!zoomable) return;
+
+          /* a committed horizontal drag resolves to a photo change (or springs back) */
+          if (swipe && swipe.lock === "h") {
+            var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            var ct = e.changedTouches[0];
+            var dx = ct ? ct.clientX - swipe.x0 : 0;
+            var dt = Date.now() - swipe.t0, moved = Math.abs(dx);
+            var flick = dt < 300 && moved > 40 && moved / dt > 0.3;
+            var commit = swipe.target >= 0 && (moved > swipe.width * 0.25 || flick);
+            var dur = reduce ? 0 : 260;
+            var dir = dx < 0 ? -1 : 1, w = swipe.width, target = swipe.target;
+            if (commit) {
+              /* active photo slides off + fades; the incoming layer (already the
+                 target, centered) fades up to take its place. */
+              imgEl.style.transition = "transform " + dur + "ms ease, opacity " + dur + "ms ease";
+              imgEl.style.transform = "translateX(" + (dir * w) + "px)";
+              imgEl.style.opacity = "0";
+              imgInEl.style.transition = "opacity " + dur + "ms ease";
+              imgInEl.style.opacity = "1";
+              swipeSettle = window.setTimeout(function () {
+                swipeSettle = 0;
+                /* hand off under cover: swap the active layer to the target
+                   INSTANTLY (transition off) while the incoming layer still shows
+                   the same photo, then hide the incoming layer. No flicker. */
+                imgEl.style.transition = "none";
+                go(target);                 /* src→target, transform→identity, caption reveal */
+                imgEl.style.opacity = "1";
+                imgInEl.style.transition = "none";
+                imgInEl.style.opacity = "0";
+                window.requestAnimationFrame(function () {
+                  imgEl.style.transition = ""; imgEl.style.opacity = "";
+                  imgInEl.style.transition = ""; imgInEl.style.opacity = "";
+                });
+              }, dur + 20);
+            } else {
+              /* not far enough → spring the active photo back, fade the target out */
+              imgEl.style.transition = "transform " + dur + "ms ease, opacity " + dur + "ms ease";
+              imgEl.style.transform = "translateX(0)";
+              imgEl.style.opacity = "1";
+              imgInEl.style.transition = "opacity " + dur + "ms ease";
+              imgInEl.style.opacity = "0";
+              swipeSettle = window.setTimeout(function () { swipeSettle = 0; clearSwipeStyles(); }, dur + 20);
+            }
+            swipe = null; pinch = null; pan = null;
+            return;
+          }
+          swipe = null;
+
           if (e.touches.length === 0) {
             if (scale <= 1.01) { scale = 1; tx = 0; ty = 0; applyTransform(); }
             if (pinch === null && pan === null) {           /* a clean tap: detect double-tap */
