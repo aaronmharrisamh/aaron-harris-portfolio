@@ -341,7 +341,10 @@
     position: relative;
     min-height: clamp(620px, 92vh, 920px);
     display: flex; align-items: center;
-    padding-top: 6rem;
+    /* Headroom above the eyebrow/headline: base 6rem + ~50px (3.125rem) so the
+       hero content sits lower beneath the fixed header. Mobile gets a smaller
+       bump (see the ≤880px block) so it doesn't push the figure too far down. */
+    padding-top: 9.125rem;
     overflow: hidden;
   }
   /* drifting ambient glows — LEGACY V1, disabled in V2 (see .hero__stage).
@@ -1497,7 +1500,9 @@
     .hero {
       display: block;
       min-height: auto;
-      padding-top: 5.5rem;
+      /* Headroom above the eyebrow: base 5.5rem + ~32px (2rem). Smaller bump
+         than desktop (which adds ~50px) so the stacked portrait still fits. */
+      padding-top: 7.5rem;
       padding-bottom: 3rem;
       /* portrait size, shared so the overlap can be a clean % of its height.
          (aspect ratio of the source image: 598 / 616 ≈ 0.971)
