@@ -652,7 +652,7 @@
     display: grid;
     grid-template-columns: 1.35fr 1fr;
     gap: clamp(1.8rem, 4vw, 4rem);
-    align-items: center;
+    align-items: start;   /* top-align both columns; image is nudged to title level below */
     padding-block: clamp(3rem, 7vw, 6rem);
     border-top: 1px solid var(--line-soft);
     counter-increment: project;     /* drives the automatic 01, 02, 03… index */
@@ -671,7 +671,10 @@
      min-width:0 lets this grid track size by its fr share rather than growing to
      fit content, so a long no-wrap caption clips with an ellipsis instead of
      widening the column. */
-  .project__media { position: relative; min-width: 0; }
+  /* Nudge the image down so its top sits at the project TITLE, leaving the
+     "01" index above it (the header stands out). ~= the eyebrow's height;
+     zeroed out in the ≤880px stacked layout where the image is on top. */
+  .project__media { position: relative; min-width: 0; margin-top: 2.2rem; }
 
   /* body column */
   .project__index {
@@ -1288,6 +1291,165 @@
   }
 
   /* ============================================================
+     DEEP-DIVE DRAWER  ("Learn more")
+     A right-side slide-over that swaps in a longer write-up for one
+     project: a few paragraphs, single photos (each opens the shared
+     lightbox on click / Enter for zoom), and bullet-point blocks.
+     Built once in JS and filled from that project's
+     <template class="deepdive" data-title data-subtitle>. Sits above
+     the header (z 1000) and below the lightbox (z 2000), so a zoomed
+     photo overlays the panel.
+
+     AUTHORING a deep dive (all plain HTML, like the rest of the page):
+       1. Drop a trigger button in the .project__body:
+            <button class="project__more" type="button">Learn more …</button>
+       2. Add a sibling template holding the expanded content:
+            <template class="deepdive" data-title="…" data-subtitle="…">
+              <p>…paragraph…</p>
+              <figure class="dd-figure">
+                <img src="…" alt="…" /><figcaption>…</figcaption>
+              </figure>
+              <h4>Section label</h4>
+              <ul class="dd-points"><li>…</li></ul>
+              <p class="dd-note">…quiet footer / attribution…</p>
+            </template>
+     A project with no trigger + template simply has no drawer.
+     ============================================================ */
+  body.dd-open { overflow: hidden; }
+
+  .dd {
+    position: fixed; inset: 0; z-index: 1500;
+    visibility: hidden;
+    transition: visibility 0s linear .5s;   /* hold visible through the slide-out */
+  }
+  .dd.is-open { visibility: visible; transition: visibility 0s; }
+
+  .dd__scrim {
+    position: absolute; inset: 0;
+    background: rgba(4,6,10,.66);
+    opacity: 0;
+    transition: opacity .45s var(--ease-soft);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  }
+  .dd.is-open .dd__scrim { opacity: 1; }
+
+  /* the panel slides in from the right */
+  .dd__panel {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: min(560px, 100%);
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    box-shadow: -30px 0 80px -40px rgba(0,0,0,.9);
+    transform: translateX(100%);
+    transition: transform .5s var(--ease);
+    will-change: transform;
+  }
+  .dd.is-open .dd__panel { transform: translateX(0); }
+
+  .dd__head {
+    position: relative; flex: 0 0 auto;
+    padding: clamp(1.6rem, 4vw, 2.4rem) clamp(1.4rem, 4vw, 2.4rem) 1.2rem;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .dd__eyebrow {
+    font-size: .72rem; font-weight: 800; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .dd__title {
+    margin-top: .6rem; padding-right: 3rem;   /* clear the close button */
+    font-size: clamp(1.5rem, 3.4vw, 2rem);
+    font-weight: 800; letter-spacing: -.02em; line-height: 1.12;
+  }
+  .dd__subtitle {
+    margin-top: .5rem; color: var(--muted);
+    font-size: .84rem; letter-spacing: .02em;
+  }
+  .dd__subtitle:empty { display: none; }
+
+  .dd__close {
+    position: absolute; top: 1rem; right: 1rem;
+    width: 42px; height: 42px; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 50%;
+    background: rgba(12,16,24,.5); color: var(--text-soft); cursor: pointer;
+    transition: background .25s, border-color .25s, color .25s;
+  }
+  .dd__close:hover { background: var(--panel-2); border-color: var(--accent); color: #fff; }
+  .dd__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dd__close svg { width: 18px; height: 18px; }
+
+  /* scrollable body — the cloned template content lands here */
+  .dd__body {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    padding: clamp(1.4rem, 4vw, 2.4rem);
+    -webkit-overflow-scrolling: touch;
+  }
+  .dd__body > * + * { margin-top: 1.15rem; }
+  .dd__body p { color: var(--text-soft); font-size: .96rem; line-height: 1.7; }
+  .dd__body h4 {
+    font-size: .78rem; font-weight: 800; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim); margin-top: 1.9rem;
+  }
+
+  /* a single photo; click / Enter opens the shared lightbox (zoom) */
+  figure.dd-figure { margin: 1.5rem 0 0; }
+  figure.dd-figure img {
+    width: 100%; display: block; border-radius: var(--radius);
+    border: 1px solid var(--line); cursor: zoom-in;
+    transition: border-color .25s;
+  }
+  figure.dd-figure img:hover { border-color: rgba(74,165,232,.55); }
+  figure.dd-figure img:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  figure.dd-figure figcaption {
+    margin-top: .55rem; color: var(--muted);
+    font-size: .78rem; letter-spacing: .02em;
+  }
+  figure.dd-figure figcaption:empty { display: none; }
+
+  /* bullet block — mirrors the card .highlights diamond markers */
+  ul.dd-points { margin-top: 1.2rem; display: grid; gap: .6rem; list-style: none; padding: 0; }
+  ul.dd-points li {
+    position: relative; padding-left: 1.4rem;
+    color: var(--text-soft); font-size: .92rem; line-height: 1.55;
+  }
+  ul.dd-points li::before {
+    content: ""; position: absolute; left: 0; top: .55em;
+    width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
+    transform: rotate(45deg);
+  }
+
+  /* a quiet attribution / footer line inside a deep dive */
+  .dd-note {
+    margin-top: 1.8rem; padding-top: 1.2rem;
+    border-top: 1px solid var(--line-soft);
+    color: var(--muted); font-size: .82rem; letter-spacing: .01em;
+  }
+
+  /* the card trigger button */
+  .project__more {
+    margin-top: 1.7rem;
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .58rem 1.1rem;
+    font: inherit; font-size: .85rem; font-weight: 700; letter-spacing: .02em;
+    color: var(--text); cursor: pointer;
+    background: rgba(74,165,232,.08);
+    border: 1px solid rgba(74,165,232,.35); border-radius: 999px;
+    transition: background .25s, border-color .25s;
+  }
+  .project__more:hover { background: rgba(74,165,232,.16); border-color: var(--accent); }
+  .project__more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .project__more svg { width: 15px; height: 15px; transition: transform .25s var(--ease); }
+  .project__more:hover svg { transform: translateX(3px); }
+
+  @media (max-width: 560px) {
+    .dd__panel { width: 100%; border-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dd, .dd__scrim, .dd__panel, .project__more svg { transition: none; }
+  }
+
+  /* ============================================================
      ABOUT
      ============================================================ */
   .about { padding-block: var(--section-pad); }
@@ -1569,6 +1731,7 @@
     .project, .project:nth-of-type(even) { grid-template-columns: 1fr; gap: 1.8rem; }
     .project:nth-of-type(even) .project__media { order: 0; }
     .project:nth-of-type(even) .project__body  { order: 0; }
+    .project__media { margin-top: 0; }   /* stacked: image on top, no title-level nudge */
 
     .about__grid { grid-template-columns: 1fr; }
     .portrait { margin-bottom: .5rem; }
@@ -1775,29 +1938,150 @@
             <h3 class="project__title">Forerunner 3</h3>
 
             <!-- META · company · role · dates -->
-            <p class="project__meta">Space Interactions · Technical Lead · 2025–Present</p>
+            <p class="project__meta">HarrisXR LLC, in collaboration with Space Interactions Inc. · Technical Lead · 2025–Present</p>
 
             <!-- LEAD · one-sentence hook -->
-            <p class="project__lead">A web-based 3D visualization platform for space-domain awareness, fusing live satellite data and Google Earth tiling into one navigable scene.</p>
+            <p class="project__lead">A web-based 3D visualization platform, the "Google Earth" for satellites: it renders every object from low Earth orbit to geostationary against live Google Earth terrain, accurate and fast on phone and desktop alike.</p>
 
             <!-- DESCRIPTION · the full paragraph -->
-            <p class="project__desc">As founding technical lead, I drove a fast-tracked, AI-augmented rebuild of a legacy WebGL/JS platform into a modern BabylonJS/TypeScript application, with UI/UX and 3D mesh optimization tuned for clarity under heavy live data. The lineage runs deep: Forerunner&nbsp;2 indexed 500,000+ historical TLE records with time-traversal queries, and the orbital-debris work was presented at the 2024 Space Symposium.</p>
+            <p class="project__desc">Built by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I lead the development: a fast-tracked, AI-augmented rebuild that migrated a pure WebGL&nbsp;2.0 renderer onto modern BabylonJS and TypeScript. I own the architecture, UI, and design direction while driving much of the implementation through Claude Code and Codex, marshalling both to ship in weeks what would traditionally take months. The result holds proper SGP4 propagation and real geopositioning accuracy while rendering 30,000+ tracked objects at a smooth clip on mid-range phones.</p>
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
-            <div class="stats"></div>
+            <div class="stats">
+              <span class="stat"><b>30,000+</b> objects at 30+ fps</span>
+              <span class="stat"><b>LEO to GEO</b> full coverage</span>
+              <span class="stat"><b>SGP4</b> accurate propagation</span>
+              <span class="stat"><b>Google Earth</b> tiles</span>
+            </div>
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
-              <div class="spec"><dt>Role</dt><dd>Technical Lead · Founding Engineering Team</dd></div>
-              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">BabylonJS</span><span class="chip">TypeScript</span><span class="chip">REST</span><span class="chip">Google Earth tiles</span></span></dd></div>
+              <div class="spec"><dt>Role</dt><dd>Technical Lead · Architecture, UI &amp; Design · PM</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">BabylonJS</span><span class="chip">TypeScript</span><span class="chip">WebGL 2.0</span><span class="chip">Google Earth tiles</span><span class="chip">SGP4</span></span></dd></div>
             </div>
+
+            <!-- LEARN MORE · opens the deep-dive drawer from the template below -->
+            <button class="project__more" type="button">Learn more
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </button>
+
+            <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
+                 <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
+            <template class="deepdive"
+                      data-title="Forerunner 3"
+                      data-subtitle="HarrisXR LLC, in collaboration with Space Interactions Inc.">
+              <p>Forerunner 3 is built and maintained by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I took on the build ourselves to help get the platform off the ground: he leads the engine and systems code as senior developer, while I own the architecture, UI, design, and project direction.</p>
+              <p>The rebuild was fast-tracked with AI as a genuine collaborator, not a shortcut. We shepherded Claude Code and Codex together across the codebase, migrating a pure WebGL 2.0 renderer onto BabylonJS and TypeScript and modernizing it in weeks rather than months, with everything tuned for clarity under heavy live data.</p>
+              <figure class="dd-figure">
+                <img src="img/seed/forerunner-02.jpg" loading="lazy"
+                     alt="Forerunner 3 live orbital scene over Google Earth terrain (placeholder)." />
+                <figcaption>Live orbital scene over Google Earth terrain (placeholder image).</figcaption>
+              </figure>
+              <p>The goal is to be the definitive place to see where things are in orbit: the "Google Earth" for satellites. It renders 30,000+ tracked objects at 30+ fps on mid-range phones, holds proper SGP4 propagation and real geopositioning accuracy, and feels at home on both phone and desktop. Satellite catalogs are drawn from Space-Track.org and Jonathan's Space Report, layered over live Google Earth terrain.</p>
+              <h4>What I owned</h4>
+              <ul class="dd-points">
+                <li>Architecture and overall system design.</li>
+                <li>UI and interaction design across phone and desktop.</li>
+                <li>3D scene and rendering direction on BabylonJS.</li>
+                <li>Project management and the AI-augmented dev workflow (Claude Code and Codex).</li>
+              </ul>
+              <p class="dd-note">Built by HarrisXR LLC in collaboration with Space Interactions Inc. Early working prototype; public demo arriving soon.</p>
+            </template>
 
           </div>
         </article>
         <!-- ╚═══════════════ END · Forerunner 3 ═══════════════╝ -->
+
+        <!-- ╔═══════════════════════════════════════════════════════════════╗
+             ║  PROJECT — Forerunner 2                                        ║
+             ╚═══════════════════════════════════════════════════════════════╝ -->
+        <article class="project">
+          <div class="project__media reveal">
+
+            <!-- GALLERY · one <img> per photo (src, alt, optional data-caption).
+                 Add or remove a photo = add or remove one <img> line below.
+                 Arrows + progress pips + lightbox auto-build; a single image hides them.
+                 Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <div class="gallery">
+              <img src="img/seed/forerunner-02.jpg" loading="lazy"
+                   alt="Forerunner 2 time-traversable orbital scene (placeholder)."
+                   data-caption="Time-traversable orbital scene" />
+              <img src="img/seed/forerunner-01.jpg" loading="lazy"
+                   alt="Forerunner 2 modern utilitarian UI (placeholder)." />
+              <img src="img/seed/forerunner-03.jpg" loading="lazy"
+                   alt="Forerunner 2 historical TLE catalog view (placeholder)."
+                   data-caption="500,000+ TLE catalog" />
+            </div>
+
+          </div>
+          <div class="project__body reveal d1">
+
+            <!-- NUMBER · automatic (01, 02…) · leave this span empty -->
+            <span class="project__index"></span>
+
+            <!-- TITLE -->
+            <h3 class="project__title">Forerunner 2</h3>
+
+            <!-- META · company · role · dates -->
+            <p class="project__meta">Space Interactions Inc. · Technical Lead · Feb 2024–2025</p>
+
+            <!-- LEAD · one-sentence hook -->
+            <p class="project__lead">A low-spec, self-hostable space-domain awareness platform: jump to any date and see the full satellite picture for that moment, running smoothly on hardware as light as a Surface Pro.</p>
+
+            <!-- DESCRIPTION · the full paragraph -->
+            <p class="project__desc">As technical lead, I drove the conversion of an inherited Forerunner 2 codebase into a modern, developer-friendly TypeScript and Rust base, and led the redesign of the UI and UX from a cartoonish educational look into a clean, utilitarian "engine chic." My brother led the core code as senior developer while I owned direction, 3D graphics, mesh work, and structure. In a later phase I oversaw the data-traversal engine, indexing 500,000+ historical TLE records dating to the 1980s with fast time-traversal queries; its orbital-debris work was presented at the 2024 Space Symposium.</p>
+
+            <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <div class="stats">
+              <span class="stat"><b>500,000+</b> TLE records</span>
+              <span class="stat"><b>Under 10s</b> cold load</span>
+              <span class="stat"><b>Self-hostable</b> bring your own data</span>
+            </div>
+
+            <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <ul class="highlights"></ul>
+
+            <!-- SPECS / chips (required) · edit Role and the chip tags -->
+            <div class="specs">
+              <div class="spec"><dt>Role</dt><dd>Technical Lead · UI/UX, 3D &amp; Data Engine · PM</dd></div>
+              <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">TypeScript</span><span class="chip">Rust</span><span class="chip">MongoDB</span><span class="chip">REST</span><span class="chip">Blender</span></span></dd></div>
+            </div>
+
+            <!-- LEARN MORE · opens the deep-dive drawer from the template below -->
+            <button class="project__more" type="button">Learn more
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </button>
+
+            <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
+                 <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
+            <template class="deepdive"
+                      data-title="Forerunner 2"
+                      data-subtitle="Space Interactions Inc. · Technical Lead">
+              <p>When we came on, Forerunner 2 was an educational-style tool built on an older codebase. I led its conversion into a modern, developer-friendly TypeScript and Rust base that we cleaned up and modernized over several weeks, and I redesigned the interface from a cartoonish look into a utilitarian, engine-inspired aesthetic. TypeScript and Rust were both new to us at the time; we leaned on early-2024 AI to ramp up fast and met the challenge.</p>
+              <figure class="dd-figure">
+                <img src="img/seed/forerunner-01.jpg" loading="lazy"
+                     alt="Forerunner 2 modern utilitarian interface (placeholder)." />
+                <figcaption>The redesigned utilitarian interface (placeholder image).</figcaption>
+              </figure>
+              <p>In a later phase, brought in through HarrisXR LLC, I oversaw a full upgrade of the data-traversal engine. The system indexes more than 500,000 historical TLE records dating to the 1980s and lets you jump to any date and pull that moment's full satellite set from server to client in a couple of seconds on consumer hardware. Getting MongoDB traversal fast across a catalog that size was the core technical challenge.</p>
+              <p>Low hardware requirements were a deliberate specialty. The software cold-loads in under ten seconds and runs well as host or client on light machines like a Surface Pro, and it is designed for local hosting with your own TLE data. I also wrote in-depth developer install and onboarding guides so new engineers could be productive quickly, and ran PM duties on the Jira board to keep the team aligned.</p>
+              <h4>What I owned</h4>
+              <ul class="dd-points">
+                <li>UI/UX redesign to a modern, utilitarian look.</li>
+                <li>Conversion to a modern TypeScript and Rust codebase, with my brother as senior developer.</li>
+                <li>Data-traversal engine: TLE integration and MongoDB query performance.</li>
+                <li>Blender mesh work and 3D direction.</li>
+                <li>Developer onboarding docs and Jira project management.</li>
+              </ul>
+              <p class="dd-note">A Space Interactions Inc. platform, now shelved. Built for government and commercial space-domain awareness.</p>
+            </template>
+
+          </div>
+        </article>
+        <!-- ╚═══════════════ END · Forerunner 2 ═══════════════╝ -->
 
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — Phillips Lifestyles                                 ║
@@ -2644,6 +2928,149 @@
       }
 
       return { open: open };
+    })();
+
+    /* ===========================================================
+       DEEP-DIVE DRAWER  ("Learn more")
+       A right-side slide-over filled from a project's
+       <template class="deepdive" data-title data-subtitle>. Single
+       photos (figure.dd-figure img) reuse the lightbox above for
+       zoom, on click or Enter/Space. Esc, the scrim, and the close
+       button all dismiss; focus returns to the trigger. The shell is
+       built lazily on first open. No libraries. */
+    (function () {
+      var triggers = doc.querySelectorAll(".project__more");
+      if (!triggers.length) return;
+
+      var root, panel, titleEl, subEl, bodyEl, closeBtn;
+      var lastFocus = null, built = false;
+
+      var DD_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+        '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+
+      function build() {
+        root = doc.createElement("div");
+        root.className = "dd";
+        root.setAttribute("role", "dialog");
+        root.setAttribute("aria-modal", "true");
+        root.setAttribute("aria-label", "Project detail");
+
+        var scrim = doc.createElement("div");
+        scrim.className = "dd__scrim";
+
+        panel = doc.createElement("aside");
+        panel.className = "dd__panel";
+
+        var head = doc.createElement("div");
+        head.className = "dd__head";
+        var eyebrow = doc.createElement("div");
+        eyebrow.className = "dd__eyebrow";
+        eyebrow.textContent = "Deep dive";
+        titleEl = doc.createElement("h2");
+        titleEl.className = "dd__title";
+        subEl = doc.createElement("p");
+        subEl.className = "dd__subtitle";
+        closeBtn = doc.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "dd__close";
+        closeBtn.setAttribute("aria-label", "Close project detail");
+        closeBtn.innerHTML = DD_X;
+        head.appendChild(eyebrow);
+        head.appendChild(titleEl);
+        head.appendChild(subEl);
+        head.appendChild(closeBtn);
+
+        bodyEl = doc.createElement("div");
+        bodyEl.className = "dd__body";
+
+        panel.appendChild(head);
+        panel.appendChild(bodyEl);
+        root.appendChild(scrim);
+        root.appendChild(panel);
+        doc.body.appendChild(root);
+
+        scrim.addEventListener("click", close);
+        closeBtn.addEventListener("click", close);
+        doc.addEventListener("keydown", function (e) {
+          if (!root || !root.classList.contains("is-open")) return;
+          if (e.key === "Escape") { e.preventDefault(); close(); }
+          else if (e.key === "Tab") { trap(e); }
+        });
+        /* single photos in the drawer open the shared lightbox */
+        bodyEl.addEventListener("click", function (e) {
+          var img = e.target && e.target.closest ? e.target.closest("figure.dd-figure img") : null;
+          if (img) { e.preventDefault(); lightbox.open([img], 0, img); }
+        });
+        bodyEl.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+          var t = e.target;
+          if (t && t.matches && t.matches("figure.dd-figure img")) {
+            e.preventDefault(); lightbox.open([t], 0, t);
+          }
+        });
+        built = true;
+      }
+
+      function focusables() {
+        if (!panel) return [];
+        return Array.prototype.slice.call(
+          panel.querySelectorAll('button:not([disabled]), a[href], [tabindex="0"]')
+        ).filter(function (el) {
+          return el === closeBtn || el.offsetWidth > 0 || el.offsetHeight > 0;
+        });
+      }
+      function trap(e) {
+        var f = focusables();
+        if (!f.length) return;
+        var i = f.indexOf(doc.activeElement);
+        if (i === -1) { e.preventDefault(); f[0].focus(); }
+        else if (e.shiftKey && i === 0) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+      }
+
+      function open(trigger) {
+        if (!built) build();
+        var project = trigger.closest ? trigger.closest(".project") : null;
+        var tpl = project ? project.querySelector("template.deepdive") : null;
+        if (!tpl) return;
+
+        var titleAttr = tpl.getAttribute("data-title");
+        if (!titleAttr && project) {
+          var h = project.querySelector(".project__title");
+          titleAttr = h ? h.textContent : "";
+        }
+        titleEl.textContent = titleAttr || "";
+        subEl.textContent = tpl.getAttribute("data-subtitle") || "";
+
+        bodyEl.innerHTML = "";
+        bodyEl.appendChild(tpl.content.cloneNode(true));
+        /* make single photos keyboard-focusable + labelled for zoom */
+        Array.prototype.forEach.call(bodyEl.querySelectorAll("figure.dd-figure img"), function (im) {
+          im.setAttribute("tabindex", "0");
+          im.setAttribute("role", "button");
+          if (!im.getAttribute("aria-label")) {
+            im.setAttribute("aria-label", (im.getAttribute("alt") || "Photo") + " (enlarge)");
+          }
+        });
+        bodyEl.scrollTop = 0;
+
+        lastFocus = doc.activeElement;
+        root.classList.add("is-open");
+        doc.body.classList.add("dd-open");
+        window.setTimeout(function () { if (closeBtn) closeBtn.focus(); }, 60);
+      }
+
+      function close() {
+        if (!root) return;
+        root.classList.remove("is-open");
+        doc.body.classList.remove("dd-open");
+        if (lastFocus && lastFocus.focus) lastFocus.focus();
+      }
+
+      Array.prototype.forEach.call(triggers, function (btn) {
+        btn.addEventListener("click", function () { open(btn); });
+      });
     })();
 
     /* ---- project image galleries ----
