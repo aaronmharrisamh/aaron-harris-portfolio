@@ -3960,12 +3960,12 @@
         btns.appendChild(b);
         return b;
       }
+      btn("Quicksave", "", quicksave);
+      btn("Restore", "", restore);
+      var sp = doc.createElement("span"); sp.className = "ced-spacer"; btns.appendChild(sp);
       btn("Apply", "ced-btn--accent", applyModal);
       btn("Revert", "", revertModal);
       btn("Cancel", "", closeModal);
-      var sp = doc.createElement("span"); sp.className = "ced-spacer"; btns.appendChild(sp);
-      btn("Quicksave", "", quicksave);
-      btn("Restore", "", restore);
       modal.appendChild(btns);
 
       doc.addEventListener("keydown", function (e) {
