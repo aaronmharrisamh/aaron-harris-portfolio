@@ -334,6 +334,17 @@
   .textlink:hover { border-bottom-color: var(--accent); gap: .75rem; color: var(--accent-bright); }
   .textlink svg { width: 1em; height: 1em; }
 
+  /* text-size utilities — the copy sizes this page already uses, exposed as
+     named classes for inline <span> wraps (the built-in copy editor's toolbar
+     inserts these; safe to hand-author anywhere). em-based, so each step is
+     relative to the text it sits inside:
+       xs ≈ chip size (.76rem on body copy) · sm ≈ meta/eyebrow (.85rem)
+       lg ≈ lede step-up (1.15×)            · xl ≈ full lede (1.4×) */
+  .text-xs { font-size: .76em; }
+  .text-sm { font-size: .85em; }
+  .text-lg { font-size: 1.15em; }
+  .text-xl { font-size: 1.4em; }
+
   /* ============================================================
      HERO
      ============================================================ */
@@ -1793,8 +1804,12 @@
         <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512" alt="" />
       </span>
       <span class="brand__name">
+        <!--[edit:brand-title]-->
         <span class="brand__title full">AARON M. HARRIS</span>
+        <!--[/edit:brand-title]-->
+        <!--[edit:brand-sub]-->
         <span class="brand__sub">Technical Lead &amp; Solutions Architect</span>
+        <!--[/edit:brand-sub]-->
       </span>
     </a>
 
@@ -1804,9 +1819,15 @@
 
     <nav class="nav" id="nav" aria-label="Primary">
       <div class="nav__links">
+        <!--[edit:nav-work]-->
         <a href="#work">Work</a>
+        <!--[/edit:nav-work]-->
+        <!--[edit:nav-about]-->
         <a href="#about">About</a>
+        <!--[/edit:nav-about]-->
+        <!--[edit:nav-contact]-->
         <a href="#contact">Contact</a>
+        <!--[/edit:nav-contact]-->
       </div>
     </nav>
   </header>
@@ -1855,20 +1876,32 @@
              there's no CSS mask on this image. -->
         <img class="hero__portrait" src="aaron-portfolio-portrait-wfade-transparent.png"
              width="616" height="598" alt="" aria-hidden="true" />
+        <!--[edit:hero-eyebrow]-->
         <span class="eyebrow">Technical Lead &amp; Solutions Architect</span>
+        <!--[/edit:hero-eyebrow]-->
         <div class="hero__inner reveal-hero">
+          <!--[edit:hero-h1]-->
           <h1>I help ambitious teams <span class="hl">ship the impossible</span>.</h1>
+          <!--[/edit:hero-h1]-->
+          <!--[edit:hero-sub]-->
           <p class="hero__sub">Full-stack technical leadership, design sensibility, and AI fluency across product architecture, UI/UX, real-time simulation, VR/XR, and AI-augmented development, from concept to market.</p>
+          <!--[/edit:hero-sub]-->
+          <!--[edit:hero-note]-->
           <p class="hero__note">15+ years shipping product | Full-stack systems | Technical lead | AI-augmented delivery</p>
+          <!--[/edit:hero-note]-->
           <div class="hero__cta">
+            <!--[edit:hero-cta-work]-->
             <a class="btn" href="#work">View Work <span class="arrow" aria-hidden="true">↓</span></a>
+            <!--[/edit:hero-cta-work]-->
             <!-- "About" CTA disabled for now to keep the hero uncluttered.
                  To bring it back, just uncomment the line below. The mobile
                  3-pill fit rules (.hero__cta in the @media blocks) are left in
                  place, so it will slot back in on one row automatically.
             <a class="btn btn--ghost" href="#about">About</a>
             -->
+            <!--[edit:hero-cta-contact]-->
             <a class="btn btn--ghost" href="#contact">Get in Touch</a>
+            <!--[/edit:hero-cta-contact]-->
           </div>
         </div>
       </div>
@@ -1882,9 +1915,15 @@
     <section class="work" id="work" aria-label="Selected work">
       <div class="wrap">
         <div class="section-head reveal">
+          <!--[edit:work-eyebrow]-->
           <span class="eyebrow">Selected Work</span>
+          <!--[/edit:work-eyebrow]-->
+          <!--[edit:work-h2]-->
           <h2>Selected systems I led from concept to shipped product.</h2>
+          <!--[/edit:work-h2]-->
+          <!--[edit:work-intro]-->
           <p>Spanning space-domain awareness, industrial logistics, educational simulation, public XR installations, indie game systems, and AI-augmented tooling.</p>
+          <!--[/edit:work-intro]-->
         </div>
 
         <!-- ╔══════════════════════════════════════════════════════════════════╗
@@ -1935,41 +1974,58 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:fr3-title]-->
             <h3 class="project__title">Forerunner 3</h3>
+            <!--[/edit:fr3-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:fr3-meta]-->
             <p class="project__meta">HarrisXR LLC, in collaboration with Space Interactions Inc. · Technical Lead · 2025–Present</p>
+            <!--[/edit:fr3-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:fr3-lead]-->
             <p class="project__lead">A web-based 3D visualization platform, the "Google Earth" for satellites: it renders every object from low Earth orbit to geostationary against live Google Earth terrain, accurate and fast on phone and desktop alike.</p>
+            <!--[/edit:fr3-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:fr3-desc]-->
             <p class="project__desc">Built by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I lead the development: a fast-tracked, AI-augmented rebuild that migrated a pure WebGL&nbsp;2.0 renderer onto modern BabylonJS and TypeScript. I own the architecture, UI, and design direction while driving much of the implementation through Claude Code and Codex, marshalling both to ship in weeks what would traditionally take months. The result holds proper SGP4 propagation and real geopositioning accuracy while rendering 30,000+ tracked objects at a smooth clip on mid-range phones.</p>
+            <!--[/edit:fr3-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:fr3-stats]-->
             <div class="stats">
               <span class="stat"><b>30,000+</b> objects at 30+ fps</span>
               <span class="stat"><b>LEO to GEO</b> full coverage</span>
               <span class="stat"><b>SGP4</b> accurate propagation</span>
               <span class="stat"><b>Google Earth</b> tiles</span>
             </div>
+            <!--[/edit:fr3-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:fr3-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Technical Lead · Architecture, UI &amp; Design · PM</dd></div>
+              <!--[/edit:fr3-spec-role]-->
+              <!--[edit:fr3-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">BabylonJS</span><span class="chip">TypeScript</span><span class="chip">WebGL 2.0</span><span class="chip">Google Earth tiles</span><span class="chip">SGP4</span></span></dd></div>
+              <!--[/edit:fr3-spec-stack]-->
             </div>
 
             <!-- LEARN MORE · opens the deep-dive drawer from the template below -->
+            <!--[edit:fr3-more]-->
             <button class="project__more" type="button">Learn more
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
+            <!--[/edit:fr3-more]-->
 
             <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
                  <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
+            <!--[edit:fr3-deepdive]-->
             <template class="deepdive"
                       data-title="Forerunner 3"
                       data-subtitle="HarrisXR LLC, in collaboration with Space Interactions Inc.">
@@ -1990,6 +2046,7 @@
               </ul>
               <p class="dd-note">Built by HarrisXR LLC in collaboration with Space Interactions Inc. Early working prototype; public demo arriving soon.</p>
             </template>
+            <!--[/edit:fr3-deepdive]-->
 
           </div>
         </article>
@@ -2023,40 +2080,57 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:fr2-title]-->
             <h3 class="project__title">Forerunner 2</h3>
+            <!--[/edit:fr2-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:fr2-meta]-->
             <p class="project__meta">Space Interactions Inc. · Technical Lead · Feb 2024–2025</p>
+            <!--[/edit:fr2-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:fr2-lead]-->
             <p class="project__lead">A low-spec, self-hostable space-domain awareness platform: jump to any date and see the full satellite picture for that moment, running smoothly on hardware as light as a Surface Pro.</p>
+            <!--[/edit:fr2-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:fr2-desc]-->
             <p class="project__desc">As technical lead, I drove the conversion of an inherited Forerunner 2 codebase into a modern, developer-friendly TypeScript and Rust base, and led the redesign of the UI and UX from a cartoonish educational look into a clean, utilitarian "engine chic." My brother led the core code as senior developer while I owned direction, 3D graphics, mesh work, and structure. In a later phase I oversaw the data-traversal engine, indexing 500,000+ historical TLE records dating to the 1980s with fast time-traversal queries; its orbital-debris work was presented at the 2024 Space Symposium.</p>
+            <!--[/edit:fr2-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:fr2-stats]-->
             <div class="stats">
               <span class="stat"><b>500,000+</b> TLE records</span>
               <span class="stat"><b>Under 10s</b> cold load</span>
               <span class="stat"><b>Self-hostable</b> bring your own data</span>
             </div>
+            <!--[/edit:fr2-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:fr2-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Technical Lead · UI/UX, 3D &amp; Data Engine · PM</dd></div>
+              <!--[/edit:fr2-spec-role]-->
+              <!--[edit:fr2-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">TypeScript</span><span class="chip">Rust</span><span class="chip">MongoDB</span><span class="chip">REST</span><span class="chip">Blender</span></span></dd></div>
+              <!--[/edit:fr2-spec-stack]-->
             </div>
 
             <!-- LEARN MORE · opens the deep-dive drawer from the template below -->
+            <!--[edit:fr2-more]-->
             <button class="project__more" type="button">Learn more
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
+            <!--[/edit:fr2-more]-->
 
             <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
                  <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
+            <!--[edit:fr2-deepdive]-->
             <template class="deepdive"
                       data-title="Forerunner 2"
                       data-subtitle="Space Interactions Inc. · Technical Lead">
@@ -2078,6 +2152,7 @@
               </ul>
               <p class="dd-note">A Space Interactions Inc. platform, now shelved. Built for government and commercial space-domain awareness.</p>
             </template>
+            <!--[/edit:fr2-deepdive]-->
 
           </div>
         </article>
@@ -2108,30 +2183,44 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:phl-title]-->
             <h3 class="project__title">Phillips Lifestyles</h3>
+            <!--[/edit:phl-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:phl-meta]-->
             <p class="project__meta">CTO &amp; Design Lead · 2015–2024</p>
+            <!--[/edit:phl-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:phl-lead]-->
             <p class="project__lead">A multi-system logistics platform built from the ground up: a C# desktop client, MongoDB, custom IoT GPS hardware across an 18-vehicle fleet, and AutoHotkey RPA bridging a legacy POS.</p>
+            <!--[/edit:phl-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:phl-desc]-->
             <p class="project__desc">I architected a unified scheduling system around a dual-window UI philosophy, letting six service techs and three-to-four maintenance techs run their days from one tool. A local-first data store kept crews productive offline, with redundant Google Calendar sync so field techs always had their schedule in hand, while custom Particle.io hardware tracked the fleet in real time and RPA bridged an aged POS that had no API.</p>
+            <!--[/edit:phl-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:phl-stats]-->
             <div class="stats">
               <span class="stat"><b>$1.5M</b> revenue increase</span>
               <span class="stat"><b>~$300K/yr</b> labor saved</span>
             </div>
+            <!--[/edit:phl-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:phl-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Architect · Tech Lead · Designer</dd></div>
+              <!--[/edit:phl-spec-role]-->
+              <!--[edit:phl-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">C#</span><span class="chip">MongoDB</span><span class="chip">Google Calendar API</span><span class="chip">Particle.io IoT</span><span class="chip">AutoHotkey RPA</span></span></dd></div>
+              <!--[/edit:phl-spec-stack]-->
             </div>
 
           </div>
@@ -2172,32 +2261,46 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:aiw-title]-->
             <h3 class="project__title">AI-Augmented Engineering Workflow</h3>
+            <!--[/edit:aiw-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:aiw-meta]-->
             <p class="project__meta">HarrisXR LLC · Founder &amp; Sole Engineer · 2025–Present</p>
+            <!--[/edit:aiw-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:aiw-lead]-->
             <p class="project__lead">10+ Python and web tools for internal and team use, several reaching real-world use — including a paid client deliverable: the patterns I developed while evangelizing AI-first workflows, made tangible.</p>
+            <!--[/edit:aiw-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:aiw-desc]-->
             <p class="project__desc">I work in Claude Code as my primary coding partner inside a structured plan → review → implement cycle that keeps AI velocity from turning into technical debt. The tools below are that workflow in practice: utilities spanning reverse-engineering, real-time projection math, and developer ergonomics.</p>
+            <!--[/edit:aiw-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
             <div class="stats"></div>
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:aiw-highlights]-->
             <ul class="highlights">
               <li>Wulfram 2 call-stack visualizer</li>
               <li>360° → 180° fisheye video converter</li>
               <li>Mascot notification system</li>
               <li>French voice practice via Grok</li>
             </ul>
+            <!--[/edit:aiw-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:aiw-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Founder · Sole Engineer</dd></div>
+              <!--[/edit:aiw-spec-role]-->
+              <!--[edit:aiw-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Python</span><span class="chip">AutoHotkey 2</span><span class="chip">TypeScript</span><span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Gemini</span></span></dd></div>
+              <!--[/edit:aiw-spec-stack]-->
             </div>
 
           </div>
@@ -2234,30 +2337,44 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:cog-title]-->
             <h3 class="project__title">COGNiTiON Mobile Planetarium</h3>
+            <!--[/edit:cog-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:cog-meta]-->
             <p class="project__meta">Earth &amp; Space Lab Director · 2023–Present</p>
+            <!--[/edit:cog-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:cog-lead]-->
             <p class="project__lead">A $50K real-time astronomical simulation rig, custom-integrated à la carte from international vendors: an Israeli dome, a Belgian fisheye lens, and a SEILER/ZEISS custom-modified projector.</p>
+            <!--[/edit:cog-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:cog-desc]-->
             <p class="project__desc">After rejecting off-the-shelf commercial systems, I sourced components internationally (traveling to RSA Cosmos in France to inform the design) and became SEILER's first customer for a fully custom-integrated mobile platform. The build adds novel external, thermal-isolated electronics and a 5G wireless presenter interface designed so kids can take the controls without breaking the show.</p>
+            <!--[/edit:cog-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:cog-stats]-->
             <div class="stats">
               <span class="stat"><b>100+</b> live shows</span>
               <span class="stat"><b>10,000+</b> attendees</span>
             </div>
+            <!--[/edit:cog-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:cog-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Systems Architect · Designer · Presenter</dd></div>
+              <!--[/edit:cog-spec-role]-->
+              <!--[edit:cog-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Space Engine</span><span class="chip">Custom SFF PC build</span><span class="chip">5G wireless presenter UI</span></span></dd></div>
+              <!--[/edit:cog-spec-stack]-->
             </div>
 
           </div>
@@ -2293,30 +2410,44 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:cvr-title]-->
             <h3 class="project__title">COGNiTiON Commercial VR Program</h3>
+            <!--[/edit:cvr-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:cvr-meta]-->
             <p class="project__meta">COGNiTiON &middot; Earth &amp; Space Lab Director &middot; 2023&ndash;Present</p>
+            <!--[/edit:cvr-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:cvr-lead]-->
             <p class="project__lead">A four-station public VR installation built for general admission: Valve Index headsets, custom RTX-class PCs, curated educational and family-friendly experiences, and staff-ready operations.</p>
+            <!--[/edit:cvr-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:cvr-desc]-->
             <p class="project__desc">I led the design and build of a commercial VR program that could survive daily science-center use, from hardware selection and PC builds to experience curation, operational flow, and staff training. The program extended the Earth &amp; Space Lab beyond the dome with flight simulation, driving simulation, hands-on creative play, and repeatable procedures that let staff run the stations independently.</p>
+            <!--[/edit:cvr-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:cvr-stats]-->
             <div class="stats">
               <span class="stat"><b>4</b> public VR stations</span>
               <span class="stat"><b>Staff-run</b> operations</span>
             </div>
+            <!--[/edit:cvr-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:cvr-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>XR Systems Architect &middot; Hardware Build &middot; Staff Training</dd></div>
+              <!--[/edit:cvr-spec-role]-->
+              <!--[edit:cvr-spec-stack]-->
               <div class="spec"><dt>Stack</dt><dd><span class="chips"><span class="chip">Valve Index</span><span class="chip">Custom RTX PCs</span><span class="chip">SteamVR</span><span class="chip">Aerofly VR</span><span class="chip">BeamNG VR</span><span class="chip">Job Simulator</span><span class="chip">Minecraft VR</span></span></dd></div>
+              <!--[/edit:cvr-spec-stack]-->
             </div>
 
           </div>
@@ -2346,30 +2477,44 @@
             <span class="project__index"></span>
 
             <!-- TITLE -->
+            <!--[edit:br-title]-->
             <h3 class="project__title">Blockade Runner</h3>
+            <!--[/edit:br-title]-->
 
             <!-- META · company · role · dates -->
+            <!--[edit:br-meta]-->
             <p class="project__meta">ZanMgt · Co-Founder &amp; Lead Designer · 2011–2016</p>
+            <!--[/edit:br-meta]-->
 
             <!-- LEAD · one-sentence hook -->
+            <!--[edit:br-lead]-->
             <p class="project__lead">A voxel-based space-sim with a unique ship-construction system and realistic physics: 5,000+ paying early-access customers across international markets, on a bi-weekly release cadence.</p>
+            <!--[/edit:br-lead]-->
 
             <!-- DESCRIPTION · the full paragraph -->
+            <!--[edit:br-desc]-->
             <p class="project__desc">The heart of the game was ship construction as a genuine design problem, where every block of mass changed how a vessel handled. We shipped fortnightly in tight dialogue with the community, and the voxel work, including the <em>Liquid Cubed</em> real-time fluid-simulation experiments, still reads as distinctive in 2026. A tiny team that landed thousands of paying customers worldwide.</p>
+            <!--[/edit:br-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:br-stats]-->
             <div class="stats">
               <span class="stat"><b>5,000+</b> paying customers</span>
               <span class="stat"><b>Bi-weekly</b> release cadence</span>
             </div>
+            <!--[/edit:br-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <ul class="highlights"></ul>
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
+              <!--[edit:br-spec-role]-->
               <div class="spec"><dt>Role</dt><dd>Co-Founder · Lead Designer</dd></div>
+              <!--[/edit:br-spec-role]-->
+              <!--[edit:br-spec-tech]-->
               <div class="spec"><dt>Tech</dt><dd><span class="chips"><span class="chip">Custom voxel engine</span><span class="chip">Real-time physics</span><span class="chip">Proprietary fluid sim</span></span></dd></div>
+              <!--[/edit:br-spec-tech]-->
             </div>
 
           </div>
@@ -2384,7 +2529,7 @@
     <!-- ===================== ABOUT ===================== -->
     <section class="about" id="about" aria-label="About Aaron">
       <div class="wrap">
-        <div class="section-head reveal"><span class="eyebrow">About</span></div>
+        <div class="section-head reveal"><!--[edit:about-eyebrow]--><span class="eyebrow">About</span><!--[/edit:about-eyebrow]--></div>
         <div class="about__grid">
           <div class="reveal">
             <div class="portrait">
@@ -2394,15 +2539,27 @@
             </div>
           </div>
           <div class="about__body reveal d1">
+            <!--[edit:about-lede]-->
             <p class="lede">I'm Aaron Harris, a technical lead and solutions architect who has been shipping production software since 2011. I started building games and tools when I was nine, and that lifelong systems instinct still shows up in how I architect, debug, and lead today.</p>
+            <!--[/edit:about-lede]-->
+            <!--[edit:about-p1]-->
             <p>My range is end-to-end: full-stack systems, UI/UX, simulation, integrations, AI-assisted workflows, and the judgment to know what should be built, delegated, simplified, or protected from technical debt.</p>
+            <!--[/edit:about-p1]-->
+            <!--[edit:about-p2]-->
             <p>My pattern is to move fluently between contributor, architect, and team lead: translating between engineers, clients, and stakeholders, turning ambiguous goals into working systems, and helping small teams keep moving when the path is not obvious.</p>
+            <!--[/edit:about-p2]-->
+            <!--[edit:about-p3]-->
             <p>The work that lights me up has people on the other end of it: watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
+            <!--[/edit:about-p3]-->
+            <!--[edit:about-place]-->
             <p class="place">Currently based in Traverse City, Michigan.</p>
+            <!--[/edit:about-place]-->
+            <!--[edit:about-link]-->
             <a class="textlink" href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener">
               Read the full bio on LinkedIn
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
             </a>
+            <!--[/edit:about-link]-->
           </div>
         </div>
       </div>
@@ -2415,29 +2572,43 @@
           <!-- Contact is a deliberately centered closing CTA (eyebrow + heading
                + email + buttons all centered). To left-align the eyebrow like
                the Work/About sections instead, remove the "eyebrow--center" class. -->
+          <!--[edit:contact-eyebrow]-->
           <span class="eyebrow eyebrow--center">Contact</span>
+          <!--[/edit:contact-eyebrow]-->
+          <!--[edit:contact-h2]-->
           <h2>Let's talk.</h2>
+          <!--[/edit:contact-h2]-->
+          <!--[edit:contact-email]-->
           <a class="email" href="mailto:contact@aaronmichaelharris.com">contact@aaronmichaelharris.com</a>
+          <!--[/edit:contact-email]-->
         </div>
         <div class="contact__actions reveal d1">
           <div class="contact__row">
+            <!--[edit:contact-btn-email]-->
             <a class="contact-btn contact-btn--call" href="mailto:contact@aaronmichaelharris.com" aria-label="Email Aaron">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v.4l8 5 8-5V6H4zm16 2.7-7.47 4.67a1 1 0 0 1-1.06 0L4 8.7V18h16V8.7z"/></svg>
               Email
             </a>
+            <!--[/edit:contact-btn-email]-->
+            <!--[edit:contact-btn-call]-->
             <a class="contact-btn contact-btn--call" href="tel:+16162168641" aria-label="Call Aaron">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.25 1z"/></svg>
               Call
             </a>
+            <!--[/edit:contact-btn-call]-->
+            <!--[edit:contact-btn-txt]-->
             <a class="contact-btn contact-btn--call" href="sms:+16162168641" aria-label="Text Aaron">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2zm3 6h10v1.6H7zm0 3.4h7V14H7z"/></svg>
               TXT
             </a>
+            <!--[/edit:contact-btn-txt]-->
           </div>
+          <!--[edit:contact-btn-resume]-->
           <a class="contact-btn" href="Aaron_Harris_Resume.pdf" target="_blank" rel="noopener" aria-label="Download résumé (PDF)">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 1.5L18.5 8H14zM8 13h8v1.6H8zm0 3.2h8V18H8zm0-6.4h4v1.6H8z"/></svg>
             Résumé (PDF)
           </a>
+          <!--[/edit:contact-btn-resume]-->
         </div>
 
         <div class="social-mini reveal d2">
@@ -2453,7 +2624,9 @@
         </div>
       </div>
 
+      <!--[edit:endbar]-->
       <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
+      <!--[/edit:endbar]-->
     </section>
 
   </main>
@@ -3429,8 +3602,636 @@
     var optionalBits = doc.querySelectorAll(".project .stats, .project .highlights");
     Array.prototype.forEach.call(optionalBits, function (el) {
       var hasContent = el.children.length > 0 || el.textContent.replace(/\s+/g, "") !== "";
-      if (!hasContent && el.parentNode) { el.parentNode.removeChild(el); }
+      if (hasContent || !el.parentNode) return;
+      /* copy-editor regions keep their element (removing it would orphan the
+         [edit:] comment pair) - empty it instead so the :empty CSS hides it. */
+      var prev = el.previousSibling;
+      while (prev && prev.nodeType === 3 && prev.nodeValue.trim() === "") prev = prev.previousSibling;
+      if (prev && prev.nodeType === 8 && /^\[edit:[\w-]+\]$/.test(prev.nodeValue.trim())) {
+        el.textContent = "";
+      } else {
+        el.parentNode.removeChild(el);
+      }
     });
+  })();
+  </script>
+
+  <!-- ╔══════════════════════════════════════════════════════════════════════╗
+       ║  BUILT-IN COPY EDITOR (hidden) · activate from the F12 console: edit()  ║
+       ║  Copy regions are fenced by [edit:slug] comment pairs. Edits live       ║
+       ║  in memory; edit.export() downloads this file with them applied.        ║
+       ║  Docs: docs/README.md (local, not published).                           ║
+       ╚══════════════════════════════════════════════════════════════════════╝ -->
+  <script>
+  /* ===========================================================
+     BUILT-IN COPY EDITOR (hidden until activated)
+     ------------------------------------------------------------
+     Activate from the F12 console:  edit()
+     Full docs live in docs/README.md (not published).
+
+     Console commands:
+       edit()            toggle editor mode (badges + panel)
+       edit.list()       table of every editable region
+       edit.export()     download index.html with applied edits spliced in
+       edit.before()     view the page as published (pre-edit)
+       edit.after()      view the page with applied edits
+       edit.revertAll()  discard every applied edit (confirm)
+       edit.clear()      wipe the quicksave slot
+       edit.help()       print this list
+
+     How it works: copy regions are fenced in the HTML by
+     [edit:slug] ... [/edit:slug] comment pairs, each wrapping exactly
+     one element. Editing changes that element's innerHTML live;
+     export re-fetches the pristine source over HTTP and splices only
+     the edited innerHTMLs back between their markers, so the download
+     is byte-identical to the source outside the regions you edited
+     (inside them the browser normalizes entities, e.g. &middot; to a
+     literal character).
+     (Export therefore needs the page served over HTTP, not file://.)
+     Edits live in memory only; nothing persists except the one manual
+     quicksave slot. Casual visitors can never see any of this.
+     =========================================================== */
+  (function () {
+    "use strict";
+    if (window.edit) return;
+    var doc = document;
+
+    var QS_KEY = "amh-copy-editor-quicksave";
+    var VOID_TAGS = { area:1, base:1, br:1, col:1, embed:1, hr:1, img:1,
+                      input:1, link:1, meta:1, param:1, source:1, track:1, wbr:1 };
+
+    var regions = [];          /* {slug, badge, el, original, current, edited, visible, chip, row} */
+    var scanned = false;
+    var active = false;        /* editor mode on/off */
+    var viewing = "after";     /* "after" = with edits, "before" = as published */
+    var exportedClean = true;  /* false once an edit exists that hasn't been exported */
+    var overlay = null, panel = null, panelList = null, viewBtn = null;
+    var modal = null, scrim = null, ta = null, modalTitle = null, modalStatus = null;
+    var openRegion = null;
+    var styleEl = null;
+
+    /* ---------------- scanning ---------------- */
+    function badgeFor(i) {
+      var letter = String.fromCharCode(65 + Math.floor(i / 99));   /* A01–A99, B01… */
+      var n = (i % 99) + 1;
+      return letter + (n < 10 ? "0" + n : String(n));
+    }
+
+    function scan() {
+      if (scanned) return;
+      scanned = true;
+      var walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_COMMENT, null, false);
+      var open = [];
+      var c;
+      while ((c = walker.nextNode())) {
+        var m = /^\[edit:([\w-]+)\]$/.exec(c.nodeValue.trim());
+        if (m) open.push({ slug: m[1], node: c });
+      }
+      open.forEach(function (o) {
+        var el = o.node.nextSibling;
+        while (el && !(el.nodeType === 1)) {
+          if (el.nodeType === 3 && el.nodeValue.trim() !== "") break;
+          el = el.nextSibling;
+        }
+        if (!el || el.nodeType !== 1) {
+          console.warn("[copy editor] marker '" + o.slug + "' is not followed by an element - skipped");
+          return;
+        }
+        var after = el.nextSibling;
+        while (after && after.nodeType === 3 && after.nodeValue.trim() === "") after = after.nextSibling;
+        var ok = after && after.nodeType === 8 &&
+                 after.nodeValue.trim() === "[/edit:" + o.slug + "]";
+        if (!ok) {
+          console.warn("[copy editor] marker '" + o.slug + "' has no matching close right after its element - skipped");
+          return;
+        }
+        var html = el.innerHTML;
+        regions.push({
+          slug: o.slug, badge: badgeFor(regions.length), el: el,
+          original: html, current: html, edited: false,
+          visible: el.getClientRects().length > 0,
+          chip: null, row: null
+        });
+      });
+      console.info("[copy editor] " + regions.length + " editable regions registered.");
+    }
+
+    function dirty() {
+      return !exportedClean && regions.some(function (r) { return r.edited; });
+    }
+
+    /* ---------------- styles (injected only on first activation) ---------------- */
+    var CSS = "" +
+      ".ced-chip{position:absolute;z-index:3000;width:26px;height:26px;padding:0;border-radius:50%;" +
+      "border:1px solid var(--accent);background:var(--panel);color:var(--accent-bright);" +
+      "font:700 9px/1 Consolas,monospace;letter-spacing:.02em;cursor:pointer;" +
+      "display:grid;place-items:center;box-shadow:0 4px 14px -6px var(--accent-glow);" +
+      "transform:translate(-40%,-55%);transition:transform .15s ease,background .15s;}" +
+      ".ced-chip:hover{transform:translate(-40%,-55%) scale(1.25);background:var(--panel-2);}" +
+      ".ced-chip.ced-edited{border-color:var(--c-orange);color:var(--c-orange);}" +
+      ".ced-panel{position:fixed;right:14px;bottom:14px;z-index:3100;width:250px;max-height:min(70vh,560px);" +
+      "display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);" +
+      "border-radius:12px;box-shadow:0 24px 60px -30px rgba(0,0,0,.9);font-size:.78rem;color:var(--text-soft);}" +
+      ".ced-panel__head{padding:.6rem .8rem;border-bottom:1px solid var(--line-soft);display:flex;" +
+      "align-items:center;justify-content:space-between;font-weight:800;letter-spacing:.14em;" +
+      "font-size:.66rem;color:var(--accent);text-transform:uppercase;}" +
+      ".ced-panel__view{font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted);}" +
+      ".ced-panel__view b{color:var(--c-yellow);font-weight:700;}" +
+      ".ced-panel__list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:.35rem 0;}" +
+      ".ced-panel__row{display:flex;gap:.55rem;align-items:center;width:100%;padding:.22rem .8rem;" +
+      "border:0;background:none;color:var(--text-soft);font:inherit;cursor:pointer;text-align:left;}" +
+      ".ced-panel__row:hover{background:var(--panel-2);color:var(--text);}" +
+      ".ced-panel__row .ced-b{flex:none;color:var(--accent-bright);font:700 10px/1 Consolas,monospace;}" +
+      ".ced-panel__row .ced-dot{flex:none;margin-left:auto;width:7px;height:7px;border-radius:50%;" +
+      "background:var(--c-orange);opacity:0;}" +
+      ".ced-panel__row.ced-edited .ced-dot{opacity:1;}" +
+      ".ced-panel__row .ced-hidden{color:var(--dim);font-size:.62rem;}" +
+      ".ced-panel__foot{padding:.55rem .6rem;border-top:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:.35rem;}" +
+      ".ced-btn{padding:.34rem .66rem;border-radius:999px;border:1px solid var(--line);background:var(--bg-deep);" +
+      "color:var(--text-soft);font:600 .7rem var(--font);cursor:pointer;transition:border-color .2s,color .2s;}" +
+      ".ced-btn:hover{border-color:var(--accent);color:var(--text);}" +
+      ".ced-btn--accent{border-color:var(--accent);color:var(--accent-bright);}" +
+      ".ced-scrim{position:fixed;inset:0;z-index:3200;background:rgba(4,6,10,.72);}" +
+      ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
+      "width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--panel);" +
+      "border:1px solid var(--line);border-radius:14px;box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
+      ".ced-modal__head{padding:.8rem 1.1rem .6rem;display:flex;align-items:baseline;gap:.6rem;}" +
+      ".ced-modal__head .ced-b{color:var(--accent-bright);font:700 12px/1 Consolas,monospace;}" +
+      ".ced-modal__head .ced-slug{font-weight:800;color:var(--text);}" +
+      ".ced-modal__tools{display:flex;flex-wrap:wrap;gap:.3rem;padding:0 1.1rem .55rem;}" +
+      ".ced-tool{min-width:30px;padding:.28rem .5rem;border-radius:7px;border:1px solid var(--line);" +
+      "background:var(--bg-deep);color:var(--text-soft);font:600 .72rem var(--font);cursor:pointer;}" +
+      ".ced-tool:hover{border-color:var(--accent);color:var(--text);}" +
+      ".ced-modal textarea{margin:0 1.1rem;flex:1 1 auto;min-height:240px;resize:vertical;" +
+      "background:var(--bg-deep);color:var(--text);border:1px solid var(--line);border-radius:8px;" +
+      "padding:.7rem .8rem;font:12.5px/1.55 Consolas,'Courier New',monospace;white-space:pre-wrap;}" +
+      ".ced-modal textarea:focus-visible{outline:2px solid var(--accent);}" +
+      ".ced-modal__status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
+      ".ced-modal__btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;}" +
+      ".ced-modal__btns .ced-spacer{flex:1 1 auto;}";
+
+    function injectStyles() {
+      if (styleEl) return;
+      styleEl = doc.createElement("style");
+      styleEl.textContent = CSS;
+      doc.head.appendChild(styleEl);
+    }
+
+    /* ---------------- badges + panel ---------------- */
+    function positionChips() {
+      if (!overlay) return;
+      var sx = window.scrollX || window.pageXOffset;
+      var sy = window.scrollY || window.pageYOffset;
+      /* read every rect first, then write every style: one reflow, not eighty */
+      var rects = regions.map(function (r) {
+        if (!r.chip) return null;
+        r.visible = r.el.getClientRects().length > 0;
+        return r.visible ? r.el.getBoundingClientRect() : null;
+      });
+      regions.forEach(function (r, i) {
+        if (!r.chip) return;
+        if (!rects[i]) { r.chip.style.display = "none"; return; }
+        r.chip.style.display = "";
+        r.chip.style.left = (rects[i].left + sx) + "px";
+        r.chip.style.top = (rects[i].top + sy) + "px";
+      });
+    }
+    var repoTimer = 0;
+    function requestReposition() {
+      if (repoTimer) return;
+      repoTimer = window.setTimeout(function () { repoTimer = 0; positionChips(); }, 120);
+    }
+
+    function refreshDirtyUI() {
+      regions.forEach(function (r) {
+        if (r.chip) r.chip.classList.toggle("ced-edited", r.edited);
+        if (r.row) r.row.classList.toggle("ced-edited", r.edited);
+      });
+      if (viewBtn) viewBtn.textContent = viewing === "after" ? "View: after" : "View: BEFORE";
+    }
+
+    function buildUI() {
+      overlay = doc.createElement("div");
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;";
+
+      panel = doc.createElement("div");
+      panel.className = "ced-panel";
+      var head = doc.createElement("div");
+      head.className = "ced-panel__head";
+      head.innerHTML = "<span>Copy editor</span>";
+      viewBtn = doc.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "ced-btn ced-panel__view";
+      viewBtn.addEventListener("click", function () {
+        (viewing === "after" ? api.before : api.after)();
+      });
+      head.appendChild(viewBtn);
+      panel.appendChild(head);
+
+      panelList = doc.createElement("div");
+      panelList.className = "ced-panel__list";
+      regions.forEach(function (r) {
+        var row = doc.createElement("button");
+        row.type = "button";
+        row.className = "ced-panel__row";
+        row.innerHTML = '<span class="ced-b">' + r.badge + "</span><span>" + r.slug + "</span>" +
+          (r.visible ? "" : ' <span class="ced-hidden">(hidden)</span>') +
+          '<span class="ced-dot"></span>';
+        row.addEventListener("click", function () { openModal(r); });
+        r.row = row;
+        panelList.appendChild(row);
+      });
+      panel.appendChild(panelList);
+
+      var foot = doc.createElement("div");
+      foot.className = "ced-panel__foot";
+      function footBtn(label, cls, fn) {
+        var b = doc.createElement("button");
+        b.type = "button"; b.className = "ced-btn" + (cls ? " " + cls : "");
+        b.textContent = label;
+        b.addEventListener("click", fn);
+        foot.appendChild(b);
+      }
+      footBtn("Export", "ced-btn--accent", function () { api.export(); });
+      footBtn("Revert all", "", function () { api.revertAll(); });
+      footBtn("Exit", "", function () { api(); });
+      panel.appendChild(foot);
+
+      regions.forEach(function (r) {
+        if (!r.visible) return;
+        var chip = doc.createElement("button");
+        chip.type = "button";
+        chip.className = "ced-chip";
+        chip.textContent = r.badge;
+        chip.title = r.slug;
+        chip.addEventListener("click", function (e) { e.stopPropagation(); openModal(r); });
+        r.chip = chip;
+        overlay.appendChild(chip);
+      });
+
+      doc.body.appendChild(overlay);
+      doc.body.appendChild(panel);
+      positionChips();
+      refreshDirtyUI();
+      window.addEventListener("resize", requestReposition);
+    }
+
+    function teardownUI() {
+      closeModal();
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+      window.removeEventListener("resize", requestReposition);
+      regions.forEach(function (r) { r.chip = null; r.row = null; });
+      overlay = panel = panelList = viewBtn = null;
+    }
+
+    /* ---------------- modal ---------------- */
+    function wrapSelection(before, after) {
+      var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value;
+      ta.value = v.slice(0, s) + before + v.slice(s, e) + after + v.slice(e);
+      ta.focus();
+      if (s === e) { ta.selectionStart = ta.selectionEnd = s + before.length; }
+      else { ta.selectionStart = s; ta.selectionEnd = e + before.length + after.length; }
+    }
+    function insertAtCursor(txt) {
+      var s = ta.selectionStart, v = ta.value;
+      ta.value = v.slice(0, s) + txt + v.slice(ta.selectionEnd);
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = s + txt.length;
+    }
+
+    var TOOLS = [
+      ["B", "bold (<strong>)", function () { wrapSelection("<strong>", "</strong>"); }],
+      ["I", "italic (<em>)", function () { wrapSelection("<em>", "</em>"); }],
+      ["Link", "link (<a class=\"textlink\">)", function () {
+        var url = window.prompt("Link URL:", "https://");
+        if (url) wrapSelection('<a class="textlink" href="' + url + '" target="_blank" rel="noopener">', "</a>");
+      }],
+      ["BR", "line break", function () { insertAtCursor("<br />"); }],
+      ["x²", "superscript", function () { wrapSelection("<sup>", "</sup>"); }],
+      ["x₂", "subscript", function () { wrapSelection("<sub>", "</sub>"); }],
+      ["xs", "size: extra small", function () { wrapSelection('<span class="text-xs">', "</span>"); }],
+      ["sm", "size: small", function () { wrapSelection('<span class="text-sm">', "</span>"); }],
+      ["lg", "size: large", function () { wrapSelection('<span class="text-lg">', "</span>"); }],
+      ["xl", "size: extra large", function () { wrapSelection('<span class="text-xl">', "</span>"); }]
+    ];
+
+    function status(msg) { if (modalStatus) modalStatus.textContent = msg || ""; }
+
+    function buildModal() {
+      scrim = doc.createElement("div");
+      scrim.className = "ced-scrim";
+      modal = doc.createElement("div");
+      modal.className = "ced-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+
+      modalTitle = doc.createElement("div");
+      modalTitle.className = "ced-modal__head";
+      modal.appendChild(modalTitle);
+
+      var tools = doc.createElement("div");
+      tools.className = "ced-modal__tools";
+      TOOLS.forEach(function (t) {
+        var b = doc.createElement("button");
+        b.type = "button"; b.className = "ced-tool";
+        b.textContent = t[0]; b.title = t[1];
+        b.addEventListener("click", t[2]);
+        tools.appendChild(b);
+      });
+      modal.appendChild(tools);
+
+      ta = doc.createElement("textarea");
+      ta.spellcheck = false;
+      modal.appendChild(ta);
+
+      modalStatus = doc.createElement("div");
+      modalStatus.className = "ced-modal__status";
+      modal.appendChild(modalStatus);
+
+      var btns = doc.createElement("div");
+      btns.className = "ced-modal__btns";
+      function btn(label, cls, fn) {
+        var b = doc.createElement("button");
+        b.type = "button"; b.className = "ced-btn" + (cls ? " " + cls : "");
+        b.textContent = label;
+        b.addEventListener("click", fn);
+        btns.appendChild(b);
+        return b;
+      }
+      btn("Apply", "ced-btn--accent", applyModal);
+      btn("Revert", "", revertModal);
+      btn("Cancel", "", closeModal);
+      var sp = doc.createElement("span"); sp.className = "ced-spacer"; btns.appendChild(sp);
+      btn("Quicksave", "", quicksave);
+      btn("Restore", "", restore);
+      modal.appendChild(btns);
+
+      doc.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && openRegion) { e.preventDefault(); closeModal(); }
+      });
+    }
+
+    function openModal(r) {
+      if (viewing === "before") api.after();   /* never edit on top of the before view */
+      if (!modal) buildModal();
+      openRegion = r;
+      modalTitle.innerHTML = '<span class="ced-b">' + r.badge + '</span>' +
+        '<span class="ced-slug">' + r.slug + "</span>" +
+        (r.visible ? "" : ' <span class="ced-hidden" style="color:var(--dim);font-size:.7rem">(hidden: not rendered on the page right now)</span>');
+      ta.value = r.el.innerHTML;
+      status("");
+      doc.body.appendChild(scrim);
+      doc.body.appendChild(modal);
+      ta.focus();
+    }
+
+    function closeModal() {
+      if (!openRegion) return;
+      openRegion = null;
+      if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
+      if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    }
+
+    /* tag-balance sanity check: catches the typo that would eat half the page */
+    function tagCheck(html) {
+      var body = html.replace(/<!--[\s\S]*?-->/g, "");
+      var re = /<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+      var stack = [], m;
+      while ((m = re.exec(body))) {
+        var closing = m[1], name = m[2].toLowerCase(), attrs = m[3];
+        if (VOID_TAGS[name]) continue;
+        /* '/>' only truly self-closes inside inline SVG; on an HTML element the
+           browser ignores it and opens the tag anyway, so treat it as open. */
+        if (!closing && /\/\s*$/.test(attrs) && stack.indexOf("svg") !== -1) continue;
+        if (closing) {
+          if (!stack.length || stack[stack.length - 1] !== name) {
+            return "unexpected </" + name + ">" + (stack.length ? " (open: <" + stack.join("> <") + ">)" : "");
+          }
+          stack.pop();
+        } else stack.push(name);
+      }
+      if (stack.length) return "unclosed <" + stack.join(">, <") + ">";
+      return null;
+    }
+
+    function applyModal() {
+      if (!openRegion) return;
+      var problem = tagCheck(ta.value);
+      if (problem && !window.confirm("Tag check: " + problem + "\n\nApply anyway?")) {
+        status("Not applied - " + problem);
+        return;
+      }
+      var r = openRegion;
+      r.el.innerHTML = ta.value;
+      r.current = r.el.innerHTML;          /* normalized by the browser */
+      r.edited = r.current !== r.original;
+      if (r.edited) exportedClean = false;
+      ta.value = r.current;
+      refreshDirtyUI();
+      requestReposition();
+      status(r.edited ? "Applied - page updated. Export when you're done." : "Applied - matches published content.");
+    }
+
+    function revertModal() {
+      if (!openRegion) return;
+      var r = openRegion;
+      r.el.innerHTML = r.original;
+      r.current = r.original;
+      r.edited = false;
+      ta.value = r.original;
+      refreshDirtyUI();
+      requestReposition();
+      status("Reverted to published content.");
+    }
+
+    /* one universal quicksave slot - a panic backup for the current textarea */
+    function quicksave() {
+      if (!openRegion) return;
+      try {
+        localStorage.setItem(QS_KEY, JSON.stringify({
+          slug: openRegion.slug, badge: openRegion.badge,
+          when: Date.now(), text: ta.value
+        }));
+        status("Quicksaved (" + openRegion.slug + "). One slot - a new quicksave overwrites it.");
+      } catch (err) { status("Quicksave failed: " + err.message); }
+    }
+    function age(ms) {
+      var s = Math.round(ms / 1000);
+      if (s < 90) return s + "s ago";
+      if (s < 5400) return Math.round(s / 60) + " min ago";
+      if (s < 129600) return Math.round(s / 3600) + " h ago";
+      return Math.round(s / 86400) + " days ago";
+    }
+    function restore() {
+      if (!openRegion) return;
+      var raw = null;
+      try { raw = localStorage.getItem(QS_KEY); } catch (err) {}
+      if (!raw) { status("No quicksave stored."); return; }
+      var q;
+      try { q = JSON.parse(raw); } catch (err) { status("Quicksave is unreadable."); return; }
+      if (!q || typeof q.text !== "string" || typeof q.when !== "number") {
+        status("Quicksave is unreadable."); return;
+      }
+      var note = "Quicksave from '" + q.slug + "' (" + age(Date.now() - q.when) + ").";
+      if (!window.confirm(note + "\n\nPaste it into this textarea? (Nothing is applied until you press Apply.)")) return;
+      ta.value = q.text;
+      status(note + " Pasted - review, then Apply.");
+    }
+
+    /* ---------------- export: fetch pristine source, splice innerHTMLs ---------------- */
+    function spliceRegion(src, slug, inner) {
+      var open = "<!--[edit:" + slug + "]-->";
+      var close = "<!--[/edit:" + slug + "]-->";
+      var a = src.indexOf(open);
+      if (a < 0) return null;
+      var start = a + open.length;
+      var b = src.indexOf(close, start);
+      if (b < 0) return null;
+      var span = src.slice(start, b);
+      var lt = span.indexOf("<");
+      if (lt < 0) return null;
+      /* attribute-aware end of the opening tag: '>' may appear inside a quoted
+         attribute value, so a plain indexOf('>') could split the tag open */
+      var openTag = /^<[a-zA-Z][\w-]*(?:[^>"']|"[^"]*"|'[^']*')*>/.exec(span.slice(lt));
+      if (!openTag) return null;
+      var gt = lt + openTag[0].length - 1;
+      var lastClose = span.lastIndexOf("</");
+      if (lastClose <= gt) return null;
+      return src.slice(0, start) + span.slice(0, gt + 1) + inner + span.slice(lastClose) + src.slice(b);
+    }
+
+    /* ---------------- public api ---------------- */
+    var api = function () {
+      injectStyles();
+      scan();
+      armGuard();
+      active = !active;
+      if (active) {
+        buildUI();
+        console.info("[copy editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
+      } else {
+        if (viewing === "before") api.after();   /* never leave the page showing the before view */
+        teardownUI();
+        console.info("[copy editor] OFF" + (dirty() ? " - you still have unexported edits (edit.export())." : "."));
+      }
+      return active ? "editor mode ON" : "editor mode OFF";
+    };
+
+    api.list = function () {
+      scan();
+      console.table(regions.map(function (r) {
+        return { badge: r.badge, slug: r.slug, visible: r.visible, edited: r.edited };
+      }));
+      return regions.length + " regions, " +
+        regions.filter(function (r) { return r.edited; }).length + " edited.";
+    };
+
+    api.before = function () {
+      scan();
+      if (viewing === "before") return "already viewing BEFORE";
+      viewing = "before";
+      regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.original; });
+      refreshDirtyUI(); requestReposition();
+      return "viewing BEFORE (published content) - edit.after() to switch back";
+    };
+    api.after = function () {
+      scan();
+      if (viewing === "after") return "already viewing AFTER";
+      viewing = "after";
+      regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.current; });
+      refreshDirtyUI(); requestReposition();
+      return "viewing AFTER (with your edits)";
+    };
+
+    api.revertAll = function () {
+      scan();
+      var n = regions.filter(function (r) { return r.edited; }).length;
+      if (!n) return "nothing to revert";
+      if (!window.confirm("Revert ALL " + n + " edited region(s) to published content? This cannot be undone.")) {
+        return "cancelled";
+      }
+      if (viewing === "before") viewing = "after";
+      regions.forEach(function (r) {
+        if (r.edited || r.current !== r.original) {
+          r.el.innerHTML = r.original;
+          r.current = r.original; r.edited = false;
+        }
+      });
+      refreshDirtyUI(); requestReposition();
+      return "reverted " + n + " region(s)";
+    };
+
+    api.clear = function () {
+      try { localStorage.removeItem(QS_KEY); } catch (err) {}
+      return "quicksave slot cleared";
+    };
+
+    api.export = function () {
+      scan();
+      if (viewing === "before") api.after();
+      var edited = regions.filter(function (r) { return r.edited; });
+      if (!edited.length) { console.warn("[copy editor] no edits to export."); return "no edits to export"; }
+      console.info("[copy editor] exporting " + edited.length + " edited region(s)…");
+      fetch(location.pathname, { cache: "no-store" })   /* pathname: immune to ?query variants */
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.text();
+        })
+        .then(function (src) {
+          var failed = [];
+          edited.forEach(function (r) {
+            var out = spliceRegion(src, r.slug, r.current);
+            if (out === null) failed.push(r.slug);
+            else src = out;
+          });
+          if (failed.length) {
+            throw new Error("markers not found / unsliceable for: " + failed.join(", "));
+          }
+          var blob = new Blob([src], { type: "text/html" });
+          var a = doc.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "index.html";
+          doc.body.appendChild(a);
+          a.click();
+          doc.body.removeChild(a);
+          window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+          exportedClean = true;
+          console.info("[copy editor] exported index.html with " + edited.length + " region(s) spliced in.");
+        })
+        .catch(function (err) {
+          console.error("[copy editor] export failed: " + err.message +
+            (location.protocol === "file:" ? " (export needs the page served over HTTP, not file://)" : ""));
+        });
+      return "export started (check downloads)";
+    };
+
+    api.help = function () {
+      console.info(
+        "edit()            toggle editor mode\n" +
+        "edit.list()       table of all editable regions\n" +
+        "edit.export()     download index.html with your edits\n" +
+        "edit.before()     view page as published\n" +
+        "edit.after()      view page with your edits\n" +
+        "edit.revertAll()  discard every applied edit\n" +
+        "edit.clear()      wipe the quicksave slot");
+      return "see console output above";
+    };
+
+    /* refuse to silently lose applied-but-unexported edits on close/refresh.
+       Registered lazily on first activation: an always-present beforeunload
+       listener would cost every casual visitor the back/forward cache. */
+    var guardArmed = false;
+    function armGuard() {
+      if (guardArmed) return;
+      guardArmed = true;
+      window.addEventListener("beforeunload", function (e) {
+        if (dirty()) { e.preventDefault(); e.returnValue = ""; }
+      });
+    }
+
+    window.edit = api;
   })();
   </script>
 </body>
