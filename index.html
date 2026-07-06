@@ -3755,9 +3755,15 @@
       ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
       "width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--panel);" +
       "border:1px solid var(--line);border-radius:14px;box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
-      ".ced-modal__head{padding:.8rem 1.1rem .6rem;display:flex;align-items:baseline;gap:.6rem;}" +
+      ".ced-modal__head{padding:.8rem 3rem .6rem 1.1rem;display:flex;align-items:baseline;gap:.6rem;}" +
       ".ced-modal__head .ced-b{color:var(--accent-bright);font:700 12px/1 Consolas,monospace;}" +
       ".ced-modal__head .ced-slug{font-weight:800;color:var(--text);}" +
+      ".ced-modal__x{position:absolute;top:.6rem;right:.7rem;width:30px;height:30px;padding:0;" +
+      "display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;" +
+      "background:var(--bg-deep);color:var(--text-soft);cursor:pointer;" +
+      "transition:border-color .2s,color .2s,background .2s;}" +
+      ".ced-modal__x:hover{border-color:var(--accent);color:var(--text);background:var(--panel-2);}" +
+      ".ced-modal__x svg{width:15px;height:15px;display:block;}" +
       ".ced-modal__tools{display:flex;flex-wrap:wrap;gap:.3rem;padding:0 1.1rem .55rem;}" +
       ".ced-tool{min-width:30px;padding:.28rem .5rem;border-radius:7px;border:1px solid var(--line);" +
       "background:var(--bg-deep);color:var(--text-soft);font:600 .72rem var(--font);cursor:pointer;}" +
@@ -3931,6 +3937,19 @@
       modalTitle.className = "ced-modal__head";
       modal.appendChild(modalTitle);
 
+      /* (X) close — top-right, on the modal (not the header, which is re-rendered
+         each open). Guarded: prompts only when the textarea has unapplied changes. */
+      var xBtn = doc.createElement("button");
+      xBtn.type = "button";
+      xBtn.className = "ced-modal__x";
+      xBtn.setAttribute("aria-label", "Close editor");
+      xBtn.title = "Close";
+      xBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+        '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+      xBtn.addEventListener("click", requestClose);
+      modal.appendChild(xBtn);
+
       var tools = doc.createElement("div");
       tools.className = "ced-modal__tools";
       TOOLS.forEach(function (t) {
@@ -3992,6 +4011,17 @@
       openRegion = null;
       if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
       if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    }
+
+    /* the (X) close path: unlike Cancel/Esc (which discard silently), this asks
+       first, but only when the box holds text you changed and never Applied.
+       openRegion.current is the region's currently-applied innerHTML, kept in
+       sync by Apply/Revert, so this equals "unapplied edits in the textarea". */
+    function requestClose() {
+      if (openRegion && ta && ta.value !== openRegion.current) {
+        if (!window.confirm("You changed the text in this box but haven't applied it.\n\nClose and discard those changes?")) return;
+      }
+      closeModal();
     }
 
     /* tag-balance sanity check: catches the typo that would eat half the page */
