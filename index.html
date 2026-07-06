@@ -1956,6 +1956,7 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:fr3-gallery]-->
             <div class="gallery">
               <img src="img/seed/forerunner-01.jpg" loading="lazy"
                    alt="Forerunner 3 live satellite scene (placeholder)."
@@ -1966,6 +1967,7 @@
                    alt="Forerunner 3 Google Earth tile fusion (placeholder)."
                    data-caption="Google Earth tile fusion" />
             </div>
+            <!--[/edit:fr3-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2031,11 +2033,12 @@
                       data-subtitle="HarrisXR LLC, in collaboration with Space Interactions Inc.">
               <p>Forerunner 3 is built and maintained by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I took on the build ourselves to help get the platform off the ground: he leads the engine and systems code as senior developer, while I own the architecture, UI, design, and project direction.</p>
               <p>The rebuild was fast-tracked with AI as a genuine collaborator, not a shortcut. We shepherded Claude Code and Codex together across the codebase, migrating a pure WebGL 2.0 renderer onto BabylonJS and TypeScript and modernizing it in weeks rather than months, with everything tuned for clarity under heavy live data.</p>
-              <figure class="dd-figure">
-                <img src="img/seed/forerunner-02.jpg" loading="lazy"
-                     alt="Forerunner 3 live orbital scene over Google Earth terrain (placeholder)." />
-                <figcaption>Live orbital scene over Google Earth terrain (placeholder image).</figcaption>
-              </figure>
+              <!--[edit:fr3-dd-gallery]-->
+              <div class="gallery">
+                <img src="img/seed/forerunner-02.jpg" loading="lazy" alt="Forerunner 3 live orbital scene over Google Earth terrain (placeholder)."
+                     data-caption="Live orbital scene over Google Earth terrain (placeholder image)" />
+              </div>
+              <!--[/edit:fr3-dd-gallery]-->
               <p>The goal is to be the definitive place to see where things are in orbit: the "Google Earth" for satellites. It renders 30,000+ tracked objects at 30+ fps on mid-range phones, holds proper SGP4 propagation and real geopositioning accuracy, and feels at home on both phone and desktop. Satellite catalogs are drawn from Space-Track.org and Jonathan's Space Report, layered over live Google Earth terrain.</p>
               <h4>What I owned</h4>
               <ul class="dd-points">
@@ -2062,6 +2065,7 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:fr2-gallery]-->
             <div class="gallery">
               <img src="img/seed/forerunner-02.jpg" loading="lazy"
                    alt="Forerunner 2 time-traversable orbital scene (placeholder)."
@@ -2072,6 +2076,7 @@
                    alt="Forerunner 2 historical TLE catalog view (placeholder)."
                    data-caption="500,000+ TLE catalog" />
             </div>
+            <!--[/edit:fr2-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2135,11 +2140,12 @@
                       data-title="Forerunner 2"
                       data-subtitle="Space Interactions Inc. · Technical Lead">
               <p>When we came on, Forerunner 2 was an educational-style tool built on an older codebase. I led its conversion into a modern, developer-friendly TypeScript and Rust base that we cleaned up and modernized over several weeks, and I redesigned the interface from a cartoonish look into a utilitarian, engine-inspired aesthetic. TypeScript and Rust were both new to us at the time; we leaned on early-2024 AI to ramp up fast and met the challenge.</p>
-              <figure class="dd-figure">
-                <img src="img/seed/forerunner-01.jpg" loading="lazy"
-                     alt="Forerunner 2 modern utilitarian interface (placeholder)." />
-                <figcaption>The redesigned utilitarian interface (placeholder image).</figcaption>
-              </figure>
+              <!--[edit:fr2-dd-gallery]-->
+              <div class="gallery">
+                <img src="img/seed/forerunner-01.jpg" loading="lazy" alt="Forerunner 2 modern utilitarian interface (placeholder)."
+                     data-caption="The redesigned utilitarian interface (placeholder image)" />
+              </div>
+              <!--[/edit:fr2-dd-gallery]-->
               <p>In a later phase, brought in through HarrisXR LLC, I oversaw a full upgrade of the data-traversal engine. The system indexes more than 500,000 historical TLE records dating to the 1980s and lets you jump to any date and pull that moment's full satellite set from server to client in a couple of seconds on consumer hardware. Getting MongoDB traversal fast across a catalog that size was the core technical challenge.</p>
               <p>Low hardware requirements were a deliberate specialty. The software cold-loads in under ten seconds and runs well as host or client on light machines like a Surface Pro, and it is designed for local hosting with your own TLE data. I also wrote in-depth developer install and onboarding guides so new engineers could be productive quickly, and ran PM duties on the Jira board to keep the team aligned.</p>
               <h4>What I owned</h4>
@@ -2168,6 +2174,7 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:phl-gallery]-->
             <div class="gallery">
               <img src="img/seed/phillips-01.jpg" loading="lazy"
                    alt="Phillips Lifestyles dual-window scheduling UI (placeholder)."
@@ -2175,6 +2182,7 @@
               <img src="img/seed/phillips-02.jpg" loading="lazy"
                    alt="Phillips Lifestyles fleet tracking map (placeholder)." />
             </div>
+            <!--[/edit:phl-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2238,6 +2246,7 @@
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag.
                  (This project opts in: data-next-preview is set on the .gallery below.) -->
+            <!--[edit:aiw-gallery]-->
             <div class="gallery" data-next-preview>
               <img src="img/seed/aitooling-01.jpg" loading="lazy"
                    alt="AI-augmented tooling composite (placeholder)."
@@ -2253,6 +2262,7 @@
               <img src="img/seed/aitooling-05.jpg" loading="lazy"
                    alt="Mascot notifier icon (placeholder)." />
             </div>
+            <!--[/edit:aiw-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2317,6 +2327,7 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:cog-gallery]-->
             <div class="gallery">
               <img src="img/seed/planetarium-01.jpg" loading="lazy"
                    alt="COGNiTiON planetarium dome show (placeholder)."
@@ -2329,6 +2340,7 @@
               <img src="img/seed/planetarium-04.jpg" loading="lazy"
                    alt="COGNiTiON projector column detail (placeholder)." />
             </div>
+            <!--[/edit:cog-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2391,6 +2403,7 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:cvr-gallery]-->
             <div class="gallery">
               <img src="img/seed/cognition-vr-01.jpg" loading="lazy"
                    alt="COGNiTiON four-station commercial VR lab (placeholder)."
@@ -2402,6 +2415,7 @@
                    alt="COGNiTiON custom RTX-class PC station for VR operations (placeholder)."
                    data-caption="Custom RTX-class PC stations" />
             </div>
+            <!--[/edit:cvr-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -2464,11 +2478,13 @@
                  Add or remove a photo = add or remove one <img> line below.
                  Arrows + progress pips + lightbox auto-build; a single image hides them.
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
+            <!--[edit:br-gallery]-->
             <div class="gallery">
               <img src="img/seed/blockade-01.jpg" loading="lazy"
                    alt="Blockade Runner voxel ship construction (placeholder)."
                    data-caption="Voxel ship construction" />
             </div>
+            <!--[/edit:br-gallery]-->
 
           </div>
           <div class="project__body reveal d1">
@@ -3218,6 +3234,33 @@
 
         bodyEl.innerHTML = "";
         bodyEl.appendChild(tpl.content.cloneNode(true));
+        /* deep-dive galleries: a dd can carry the same .gallery block as the
+           project cards. The clone arrives un-built (template content is inert),
+           so build it now; an empty gallery (no photos) is removed entirely -
+           a text-only deep dive is legitimate. */
+        Array.prototype.forEach.call(bodyEl.querySelectorAll(".gallery"), function (g) {
+          if (!g.querySelector("img")) { g.parentNode.removeChild(g); }
+        });
+        buildGalleries();
+        /* drawer galleries: keep the keyboard/AT affordance the old dd figure
+           had - focusable, labelled, Enter/Space opens the lightbox - and give
+           the caption a transient reveal so touch users see it at least once
+           (a single-image gallery never fires the image-change reveal). */
+        Array.prototype.forEach.call(bodyEl.querySelectorAll(".gallery__holder"), function (h) {
+          h.setAttribute("tabindex", "0");
+          h.setAttribute("role", "button");
+          h.setAttribute("aria-label", "Project photo (enlarge)");
+          h.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+              e.preventDefault(); h.click();
+            }
+          });
+          var cap = h.querySelector(".gallery__caption");
+          if (cap && !cap.classList.contains("is-empty")) {
+            cap.classList.add("is-visible");
+            window.setTimeout(function () { cap.classList.remove("is-visible"); }, 3800);
+          }
+        });
         /* make single photos keyboard-focusable + labelled for zoom */
         Array.prototype.forEach.call(bodyEl.querySelectorAll("figure.dd-figure img"), function (im) {
           im.setAttribute("tabindex", "0");
@@ -3574,6 +3617,10 @@
       });
     }
     buildGalleries();
+    /* quiet hook for the built-in copy editor: it rebuilds a gallery after an
+       image edit by restoring the plain <img> list and re-running the builder.
+       Harmless for visitors; buildGalleries skips anything already built. */
+    window.__amhBuildGalleries = buildGalleries;
 
     /* ---- active nav link via section observation ---- */
     var navLinks = Array.prototype.slice.call(nav.querySelectorAll("a"));
@@ -3639,6 +3686,13 @@
        edit.clear()      wipe the quicksave slot
        edit.help()       print this list
 
+     Images: galleries (project carousels + deep-dive drawers) are
+     image regions. In editor mode, drag & drop a file from img/work/
+     onto a carousel to replace the visible photo, press the (+) chip
+     to add a slot, and click the IMG## chip to caption/alt/delete.
+     Seed images (img/seed/) are placeholder filler: they show only
+     while a gallery has no real images.
+
      How it works: copy regions are fenced in the HTML by
      [edit:slug] ... [/edit:slug] comment pairs, each wrapping exactly
      one element. Editing changes that element's innerHTML live;
@@ -3661,13 +3715,18 @@
                       input:1, link:1, meta:1, param:1, source:1, track:1, wbr:1 };
 
     var regions = [];          /* {slug, badge, el, original, current, edited, visible, chip, row} */
+    var gals = [];             /* gallery (image) regions - see IMAGE / GALLERY EDITING below */
+    var imgSeq = 0;            /* running IMG## counter */
     var scanned = false;
     var active = false;        /* editor mode on/off */
     var viewing = "after";     /* "after" = with edits, "before" = as published */
     var exportedClean = true;  /* false once an edit exists that hasn't been exported */
-    var overlay = null, panel = null, panelList = null, viewBtn = null;
+    var overlay = null, panel = null, panelList = null, viewBtn = null, imgRowsEl = null;
     var modal = null, scrim = null, ta = null, modalTitle = null, modalStatus = null;
-    var openRegion = null;
+    var altIn = null, srcLine = null;
+    var openRegion = null;     /* text region in the modal */
+    var openImage = null;      /* {g, index, entry} while the modal edits an image */
+    var drawerHooked = false;
     var styleEl = null;
 
     /* ---------------- scanning ---------------- */
@@ -3705,6 +3764,12 @@
           console.warn("[copy editor] marker '" + o.slug + "' has no matching close right after its element - skipped");
           return;
         }
+        /* galleries are image regions, not text regions: their live markup is
+           runtime-built, so they carry a {src, alt, caption} model instead */
+        if (el.classList && el.classList.contains("gallery")) {
+          registerGallery(o.slug, el, null);
+          return;
+        }
         var html = el.innerHTML;
         regions.push({
           slug: o.slug, badge: badgeFor(regions.length), el: el,
@@ -3713,11 +3778,342 @@
           chip: null, row: null
         });
       });
-      console.info("[copy editor] " + regions.length + " editable regions registered.");
+      /* deep-dive galleries: template content is a separate fragment the body
+         walker never enters, so walk each deepdive template explicitly */
+      regions.forEach(function (r) {
+        if (!r.el || r.el.tagName !== "TEMPLATE") return;
+        var w2 = doc.createTreeWalker(r.el.content, NodeFilter.SHOW_COMMENT, null, false);
+        var c2;
+        while ((c2 = w2.nextNode())) {
+          var m2 = /^\[edit:([\w-]+)\]$/.exec(c2.nodeValue.trim());
+          if (!m2) continue;
+          var el2 = c2.nextSibling;
+          while (el2 && el2.nodeType !== 1) el2 = el2.nextSibling;
+          if (el2 && el2.classList && el2.classList.contains("gallery")) {
+            registerGallery(m2[1], el2, r.el);
+          }
+        }
+      });
+      console.info("[copy editor] " + regions.length + " text regions and " +
+        gals.length + " galleries registered.");
     }
 
     function dirty() {
-      return !exportedClean && regions.some(function (r) { return r.edited; });
+      return !exportedClean &&
+        (regions.some(function (r) { return r.edited; }) || gals.some(galDirty));
+    }
+
+    /* ============================================================
+       IMAGE / GALLERY EDITING
+       Galleries (project cards + deep-dive drawers) are image regions.
+       Drag & drop replaces the visible photo, (+) adds an empty slot,
+       the IMG## chip opens a caption/alt modal with Delete. The editor
+       keeps a clean model per gallery ({src, alt, caption} entries) and
+       both the live preview and the export serialize from that model -
+       runtime gallery markup is never read back after the initial scan.
+       Seeds (img/seed/ paths) are placeholder filler: they show only
+       while a gallery has no real images and are never editable.
+       ============================================================ */
+    var EMPTY_TILE = "data:image/svg+xml," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900">' +
+      '<rect width="1600" height="900" fill="#101217"/>' +
+      '<rect x="30" y="30" width="1540" height="840" rx="26" fill="rgba(74,165,232,.06)" ' +
+      'stroke="#4aa5e8" stroke-width="5" stroke-dasharray="30 20"/>' +
+      '<text x="800" y="430" fill="#6fbcf2" font-family="Segoe UI,Arial,sans-serif" ' +
+      'font-size="66" font-weight="700" text-anchor="middle">Drop image here</text>' +
+      '<text x="800" y="505" fill="#969eaa" font-family="Segoe UI,Arial,sans-serif" ' +
+      'font-size="34" text-anchor="middle">drag a file from img/work/ onto this frame</text></svg>');
+
+    function nextImgId() {
+      imgSeq++;
+      return "IMG" + (imgSeq < 10 ? "0" + imgSeq : String(imgSeq));
+    }
+    function isSeedSrc(src) { return String(src).indexOf("img/seed/") === 0; }
+
+    function registerGallery(slug, el, tpl) {
+      /* project galleries are already runtime-built at scan time: the authored
+         imgs live inside .gallery__stage. Template (deep-dive) galleries are
+         inert and still hold their clean authored children. */
+      var stage = el.querySelector(".gallery__stage");
+      var imgs = stage ? stage.querySelectorAll("img") : el.querySelectorAll("img");
+      var entries = [];
+      Array.prototype.forEach.call(imgs, function (im) {
+        var src = im.getAttribute("src") || "";
+        var en = {
+          src: src, alt: im.getAttribute("alt") || "",
+          caption: im.getAttribute("data-caption") || "",
+          preview: src, empty: false, missing: false,
+          isSeed: isSeedSrc(src), imgId: null, orig: null
+        };
+        if (!en.isSeed) en.imgId = nextImgId();
+        en.orig = { caption: en.caption, alt: en.alt };
+        entries.push(en);
+      });
+      var g = {
+        slug: slug, el: el, tpl: tpl || null, dd: !!tpl,
+        seeds: entries.filter(function (e) { return e.isSeed; }),
+        model: entries.filter(function (e) { return !e.isSeed; }),
+        original: null,
+        live: tpl ? null : el,   /* dd galleries get a live element per drawer open */
+        chip: null, plusChip: null, observer: null
+      };
+      g.original = exportForm(g.model);
+      gals.push(g);
+    }
+
+    function exportForm(entries) {
+      return entries.filter(function (e) { return !e.empty; })
+        .map(function (e) { return { src: e.src, alt: e.alt, caption: e.caption }; });
+    }
+    function galDirty(g) {
+      return JSON.stringify(exportForm(g.model)) !== JSON.stringify(g.original);
+    }
+    function displayedEntries(g) { return g.model.length ? g.model : g.seeds; }
+    function origEntries(g) {
+      return g.original.map(function (o) {
+        return { src: o.src, alt: o.alt, caption: o.caption, preview: o.src,
+                 empty: false, missing: false, isSeed: isSeedSrc(o.src),
+                 imgId: null, orig: { caption: o.caption, alt: o.alt } };
+      });
+    }
+
+    function liveHolder(g) {
+      if (!g.live || !g.live.isConnected) return null;
+      if (g.dd && !doc.body.classList.contains("dd-open")) return null;
+      return g.live.querySelector(".gallery__holder");
+    }
+    function activeIndex(g) {
+      if (!g.live || !g.live.isConnected) return 0;
+      var imgs = g.live.querySelectorAll(".gallery__stage img");
+      for (var i = 0; i < imgs.length; i++) {
+        if (imgs[i].classList.contains("is-active")) return i;
+      }
+      return 0;
+    }
+
+    function setGalleryImgs(el, entries, preview) {
+      el.innerHTML = "";
+      entries.forEach(function (en) {
+        var im = doc.createElement("img");
+        im.src = en.empty ? EMPTY_TILE : ((preview && en.preview) ? en.preview : en.src);
+        im.alt = en.alt || "";
+        im.setAttribute("loading", "lazy");
+        if (en.caption) im.setAttribute("data-caption", en.caption);
+        el.appendChild(im);
+      });
+    }
+
+    /* re-render one gallery from its model: restore a plain <img> list, then
+       let the page's own builder re-enhance it. showIndex navigates the rebuilt
+       carousel (rebuilds always land on photo 0). */
+    function renderGallery(g, viewEntries, showIndex) {
+      var list = viewEntries || displayedEntries(g);
+      /* note: template-content nodes always report isConnected false - a bare
+         null check is the right guard for the dd gallery inside the template */
+      if (g.dd && g.el) {
+        /* the template stays in clean export form (no blob previews, no slots) */
+        setGalleryImgs(g.el, list.filter(function (e) { return !e.empty; })
+          .map(function (e) { return { src: e.src, alt: e.alt, caption: e.caption,
+                                       preview: e.src, empty: false }; }), false);
+      }
+      var live = g.live;
+      if (live && live.isConnected) {
+        if (g.observer) { g.observer.disconnect(); g.observer = null; }
+        if (g.dd && !list.length) {
+          /* empty deep-dive gallery: a text-only dd is legitimate - remove it */
+          if (live.parentNode) live.parentNode.removeChild(live);
+          g.live = null;
+        } else {
+          setGalleryImgs(live, list, true);
+          live.classList.remove("is-ready", "gallery--single");
+          if (window.__amhBuildGalleries) window.__amhBuildGalleries();
+          if (showIndex > 0) {
+            var dots = live.querySelectorAll(".gallery__dot");
+            if (dots[showIndex]) dots[showIndex].click();
+          }
+          attachGalleryRuntime(g);
+        }
+      }
+      refreshImageRows();
+      requestReposition();
+    }
+
+    /* drop handling + chip-follows-active-photo wiring; holder is recreated on
+       every rebuild, so this runs after each one (listeners dedupe by flag) */
+    function attachGalleryRuntime(g) {
+      var holder = liveHolder(g);
+      if (!holder) return;
+      if (!holder.__cedDrop) {
+        holder.__cedDrop = true;
+        holder.addEventListener("dragover", function (e) {
+          if (!active) return;
+          e.preventDefault(); e.stopPropagation();
+          e.dataTransfer.dropEffect = "copy";
+          holder.classList.add("ced-dropping");
+        });
+        holder.addEventListener("dragleave", function () {
+          holder.classList.remove("ced-dropping");
+        });
+        holder.addEventListener("drop", function (e) {
+          if (!active) return;
+          e.preventDefault(); e.stopPropagation();
+          holder.classList.remove("ced-dropping");
+          var files = Array.prototype.filter.call(
+            (e.dataTransfer && e.dataTransfer.files) || [],
+            function (f) { return /^image\//.test(f.type); });
+          if (files.length) handleDrop(g, files);
+        });
+      }
+      var stage = g.live.querySelector(".gallery__stage");
+      if (stage && window.MutationObserver) {
+        if (g.observer) g.observer.disconnect();   /* drawer reopens re-attach; don't stack */
+        g.observer = new MutationObserver(function () { updateGalleryChip(g); });
+        g.observer.observe(stage, { attributes: true, attributeFilter: ["class"], subtree: true });
+      }
+      updateGalleryChip(g);
+    }
+
+    function humanize(name) {
+      return String(name).replace(/\.[a-z0-9]+$/i, "").replace(/[-_]+/g, " ").trim();
+    }
+    function entryFromFile(file, carry) {
+      var en = {
+        src: "img/work/" + file.name,
+        alt: carry && carry.alt ? carry.alt : humanize(file.name),
+        caption: carry ? carry.caption : "",
+        preview: URL.createObjectURL(file),
+        empty: false, missing: null /* null = HEAD check pending */, isSeed: false,
+        imgId: nextImgId(), orig: null
+      };
+      en.orig = { caption: en.caption, alt: en.alt };
+      /* served over HTTP, so we can quietly verify the file is really there */
+      fetch(en.src, { method: "HEAD", cache: "no-store" }).then(function (res) {
+        en.missing = !res.ok;
+        if (en.missing) {
+          console.warn("[copy editor] " + en.src + " not found on the server - " +
+            "copy the file into img/work/ before uploading the export.");
+        }
+        if (openImage && openImage.entry === en) updateSrcLine(en);
+      }).catch(function () { en.missing = true; });
+      return en;
+    }
+    function revokePreview(en) {
+      if (en && en.preview && en.preview.indexOf("blob:") === 0) {
+        var url = en.preview;
+        /* deferred: an <img> or open lightbox may still be painting this URL
+           for a beat after the model entry is replaced */
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      }
+    }
+
+    /* drop = replace what you are looking at; extra files append as new photos.
+       A seed-showing gallery flips to real mode with the first drop (seeds are
+       all-or-nothing filler, not slots to fill one by one). */
+    function handleDrop(g, files) {
+      if (viewing === "before") api.after();
+      var idx;
+      if (!g.model.length) {
+        g.model.push(entryFromFile(files[0], null));
+        idx = 0;
+      } else {
+        idx = activeIndex(g);
+        if (idx >= g.model.length) idx = g.model.length - 1;
+        var old = g.model[idx];
+        g.model[idx] = entryFromFile(files[0], old.empty ? null : old);
+        revokePreview(old);
+      }
+      for (var i = 1; i < files.length; i++) g.model.push(entryFromFile(files[i], null));
+      exportedClean = false;
+      renderGallery(g, null, idx);
+      refreshDirtyUI();
+      openImageModal(g, idx);
+    }
+
+    function addSlot(g) {
+      if (viewing === "before") api.after();
+      g.model.push({ src: "", alt: "", caption: "", preview: "", empty: true,
+                     missing: false, isSeed: false, imgId: null, orig: null });
+      renderGallery(g, null, g.model.length - 1);
+      refreshDirtyUI();
+    }
+
+    function updateGalleryChip(g) {
+      if (!g.chip) return;
+      var en = displayedEntries(g)[activeIndex(g)] || null;
+      g.chip.textContent = !en ? "IMG" : (en.empty ? "DROP" : (en.isSeed ? "SEED" : en.imgId));
+      g.chip.title = g.slug + (en && en.isSeed ? " - placeholder; drop a real image to replace" :
+        (en && en.empty ? " - empty slot; drop an image here" : ""));
+      g.chip.classList.toggle("ced-chip--seed", !!(en && en.isSeed));
+      g.chip.classList.toggle("ced-edited", galDirty(g));
+    }
+
+    function refreshImageRows() {
+      if (!imgRowsEl) return;
+      imgRowsEl.innerHTML = "";
+      gals.forEach(function (g) {
+        var isDirty = galDirty(g);
+        function addRow(label, i, openable) {
+          var row = doc.createElement("button");
+          row.type = "button";
+          row.className = "ced-panel__row ced-panel__row--img" + (isDirty ? " ced-edited" : "");
+          row.innerHTML = '<span class="ced-b">' + label + "</span><span>" + g.slug +
+            "</span>" + (g.dd ? ' <span class="ced-hidden">(dd)</span>' : "") +
+            '<span class="ced-dot"></span>';
+          row.addEventListener("click", function () {
+            revealGallery(g, i);
+            if (openable) openImageModal(g, i);
+          });
+          imgRowsEl.appendChild(row);
+        }
+        if (!g.model.length) { addRow("SEED", 0, false); return; }
+        g.model.forEach(function (en, i) {
+          addRow(en.empty ? "SLOT" : en.imgId, i, true);
+        });
+      });
+    }
+    function revealGallery(g, i) {
+      if (g.live && g.live.isConnected && (!g.dd || doc.body.classList.contains("dd-open"))) {
+        g.live.scrollIntoView({ block: "center" });
+        var dots = g.live.querySelectorAll(".gallery__dot");
+        if (dots[i]) dots[i].click();
+      }
+    }
+
+    /* the deep-dive drawer clones its template on every open; catch the open
+       (via the Learn more button) and adopt the clone's gallery as g.live */
+    function hookOpenDrawer() {
+      if (!doc.body.classList.contains("dd-open")) return;
+      var t = doc.querySelector(".dd__title");
+      var body2 = doc.querySelector(".dd__body");
+      if (!t || !body2) return;
+      var liveG = body2.querySelector(".gallery");
+      gals.forEach(function (g) {
+        if (!g.dd || !g.tpl) return;
+        if ((g.tpl.getAttribute("data-title") || "") === t.textContent) {
+          g.live = liveG;
+          if (g.live) attachGalleryRuntime(g);
+        }
+      });
+      requestReposition();
+    }
+
+    /* a text apply on a deepdive region replaces the template's children, which
+       orphans our reference to the gallery inside it - re-resolve it */
+    function relinkTplGalleries(r) {
+      if (!r.el || r.el.tagName !== "TEMPLATE") return;
+      gals.forEach(function (g) {
+        if (g.tpl !== r.el) return;
+        g.el = r.el.content.querySelector(".gallery");
+        if (!g.el) {
+          console.warn("[copy editor] " + g.slug +
+            " gallery markup was removed by a text edit - image edits for it are disabled until revert.");
+          return;
+        }
+        /* the text apply reset the template to its snapshot; if the image model
+           is dirty it is the source of truth - write it back into the template
+           so preview, drawer, and export all agree */
+        if (galDirty(g)) renderGallery(g);
+      });
     }
 
     /* ---------------- styles (injected only on first activation) ---------------- */
@@ -3774,7 +4170,27 @@
       ".ced-modal textarea:focus-visible{outline:2px solid var(--accent);}" +
       ".ced-modal__status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
       ".ced-modal__btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;}" +
-      ".ced-modal__btns .ced-spacer{flex:1 1 auto;}";
+      ".ced-modal__btns .ced-spacer{flex:1 1 auto;}" +
+      /* image / gallery editing */
+      ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
+      ".ced-chip--plus{font-size:14px;font-weight:800;}" +
+      ".ced-chip--seed{border-color:var(--dim);color:var(--muted);box-shadow:none;cursor:default;}" +
+      ".ced-dropping{outline:3px dashed var(--accent);outline-offset:-3px;border-radius:10px;}" +
+      ".ced-modal__alt{display:flex;align-items:center;gap:.6rem;margin:.5rem 1.1rem 0;}" +
+      ".ced-modal__alt span{font-size:.66rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);}" +
+      ".ced-modal__alt input{flex:1;background:var(--bg-deep);color:var(--text);border:1px solid var(--line);" +
+      "border-radius:8px;padding:.45rem .7rem;font:12.5px Consolas,'Courier New',monospace;}" +
+      ".ced-modal__alt input:focus-visible{outline:2px solid var(--accent);}" +
+      ".ced-modal__src{margin:.45rem 1.1rem 0;font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
+      ".ced-modal__src--missing{color:var(--c-orange);}" +
+      ".ced-btn--danger{border-color:rgba(240,136,62,.5);color:var(--c-orange);}" +
+      ".ced-btn--danger:hover{border-color:var(--c-orange);color:#fff;background:rgba(240,136,62,.15);}" +
+      ".ced-modal--image .ced-modal__tools{display:none;}" +
+      ".ced-modal--image textarea{min-height:84px;}" +
+      ".ced-modal:not(.ced-modal--image) .ced-modal__alt{display:none;}" +
+      ".ced-modal:not(.ced-modal--image) .ced-modal__src{display:none;}" +
+      ".ced-modal:not(.ced-modal--image) .ced-btn--danger{display:none;}" +
+      ".ced-panel__row--img .ced-b{color:var(--c-yellow);}";
 
     function injectStyles() {
       if (styleEl) return;
@@ -3800,6 +4216,22 @@
         r.chip.style.display = "";
         r.chip.style.left = (rects[i].left + sx) + "px";
         r.chip.style.top = (rects[i].top + sy) + "px";
+      });
+      /* gallery chips: IMG## + (+) pinned to each built carousel's top-left */
+      var gRects = gals.map(function (g) {
+        if (viewing === "before") return null;   /* image chips only make sense on the after view */
+        var holder = liveHolder(g);
+        return (holder && g.live.classList.contains("is-ready"))
+          ? holder.getBoundingClientRect() : null;
+      });
+      gals.forEach(function (g, i) {
+        if (!g.chip) return;
+        if (!gRects[i]) { g.chip.style.display = "none"; g.plusChip.style.display = "none"; return; }
+        g.chip.style.display = ""; g.plusChip.style.display = "";
+        g.chip.style.left = (gRects[i].left + sx + 16) + "px";
+        g.chip.style.top = (gRects[i].top + sy) + "px";
+        g.plusChip.style.left = (gRects[i].left + sx + 58) + "px";
+        g.plusChip.style.top = (gRects[i].top + sy) + "px";
       });
     }
     var repoTimer = 0;
@@ -3848,6 +4280,9 @@
         r.row = row;
         panelList.appendChild(row);
       });
+      imgRowsEl = doc.createElement("div");
+      panelList.appendChild(imgRowsEl);
+      refreshImageRows();
       panel.appendChild(panelList);
 
       var foot = doc.createElement("div");
@@ -3876,6 +4311,50 @@
         overlay.appendChild(chip);
       });
 
+      /* gallery chips: IMG## (opens the image modal for the visible photo)
+         and (+) (adds an empty slot) */
+      gals.forEach(function (g) {
+        var chip = doc.createElement("button");
+        chip.type = "button";
+        chip.className = "ced-chip ced-chip--img";
+        chip.textContent = "IMG";
+        chip.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var i = activeIndex(g), en = displayedEntries(g)[i];
+          if (!en || en.isSeed) return;   /* seeds aren't editable - drop to replace */
+          openImageModal(g, i);
+        });
+        g.chip = chip;
+        overlay.appendChild(chip);
+        var plus = doc.createElement("button");
+        plus.type = "button";
+        plus.className = "ced-chip ced-chip--plus";
+        plus.textContent = "+";
+        plus.title = g.slug + " - add an image slot";
+        plus.addEventListener("click", function (e) { e.stopPropagation(); addSlot(g); });
+        g.plusChip = plus;
+        overlay.appendChild(plus);
+        attachGalleryRuntime(g);
+      });
+
+      if (!drawerHooked) {
+        drawerHooked = true;
+        /* adopt the deep-dive drawer's cloned gallery whenever a drawer opens */
+        doc.addEventListener("click", function (e) {
+          if (!active) return;
+          var more = e.target && e.target.closest ? e.target.closest(".project__more") : null;
+          if (more) window.setTimeout(hookOpenDrawer, 120);
+        });
+        /* the drawer body scrolls internally; chips must follow */
+        doc.addEventListener("scroll", function (e) {
+          if (!active) return;
+          if (e.target && e.target.classList && e.target.classList.contains("dd__body")) {
+            requestReposition();
+          }
+        }, true);
+      }
+      hookOpenDrawer();   /* in case the drawer is already open right now */
+
       doc.body.appendChild(overlay);
       doc.body.appendChild(panel);
       positionChips();
@@ -3889,7 +4368,11 @@
       if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
       window.removeEventListener("resize", requestReposition);
       regions.forEach(function (r) { r.chip = null; r.row = null; });
-      overlay = panel = panelList = viewBtn = null;
+      gals.forEach(function (g) {
+        if (g.observer) { g.observer.disconnect(); g.observer = null; }
+        g.chip = null; g.plusChip = null;
+      });
+      overlay = panel = panelList = viewBtn = imgRowsEl = null;
     }
 
     /* ---------------- modal ---------------- */
@@ -3965,6 +4448,21 @@
       ta.spellcheck = false;
       modal.appendChild(ta);
 
+      /* image mode only (hidden for text regions via .ced-modal--image CSS) */
+      var altRow = doc.createElement("div");
+      altRow.className = "ced-modal__alt";
+      var altLabel = doc.createElement("span");
+      altLabel.textContent = "alt";
+      altIn = doc.createElement("input");
+      altIn.type = "text";
+      altIn.spellcheck = false;
+      altRow.appendChild(altLabel);
+      altRow.appendChild(altIn);
+      modal.appendChild(altRow);
+      srcLine = doc.createElement("div");
+      srcLine.className = "ced-modal__src";
+      modal.appendChild(srcLine);
+
       modalStatus = doc.createElement("div");
       modalStatus.className = "ced-modal__status";
       modal.appendChild(modalStatus);
@@ -3979,6 +4477,7 @@
         btns.appendChild(b);
         return b;
       }
+      btn("Delete", "ced-btn--danger", deleteImage);   /* image mode only (CSS-hidden for text) */
       btn("Quicksave", "", quicksave);
       btn("Restore", "", restore);
       var sp = doc.createElement("span"); sp.className = "ced-spacer"; btns.appendChild(sp);
@@ -3988,13 +4487,16 @@
       modal.appendChild(btns);
 
       doc.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && openRegion) { e.preventDefault(); closeModal(); }
+        if (e.key === "Escape" && (openRegion || openImage)) { e.preventDefault(); closeModal(); }
       });
     }
 
     function openModal(r) {
       if (viewing === "before") api.after();   /* never edit on top of the before view */
       if (!modal) buildModal();
+      openImage = null;
+      modal.classList.remove("ced-modal--image");
+      ta.disabled = false;
       openRegion = r;
       modalTitle.innerHTML = '<span class="ced-b">' + r.badge + '</span>' +
         '<span class="ced-slug">' + r.slug + "</span>" +
@@ -4006,22 +4508,87 @@
       ta.focus();
     }
 
-    function closeModal() {
-      if (!openRegion) return;
+    function openImageModal(g, index) {
+      if (viewing === "before") api.after();
+      if (!modal) buildModal();
+      var en = g.model[index];
+      if (!en) return;
       openRegion = null;
+      openImage = { g: g, index: index, entry: en };
+      modal.classList.add("ced-modal--image");
+      modalTitle.innerHTML = '<span class="ced-b">' + (en.empty ? "SLOT" : en.imgId) + '</span>' +
+        '<span class="ced-slug">' + g.slug + "</span>" +
+        (g.dd ? ' <span class="ced-hidden" style="color:var(--dim);font-size:.7rem">(deep-dive gallery)</span>' : "");
+      ta.value = en.caption;
+      altIn.value = en.alt || "";
+      ta.disabled = altIn.disabled = !!en.empty;
+      updateSrcLine(en);
+      status(en.empty
+        ? "Empty slot - drop an image onto the carousel to fill it, or Delete to remove the slot."
+        : "Caption above, alt text below. Apply updates the page; export writes it to the file.");
+      doc.body.appendChild(scrim);
+      doc.body.appendChild(modal);
+      if (!en.empty) ta.focus();
+    }
+    function updateSrcLine(en) {
+      if (!srcLine) return;
+      srcLine.textContent = en.empty ? "(no file yet)" :
+        en.src + (en.missing ? "  -  NOT FOUND on server: copy the file into img/work/" : "");
+      srcLine.classList.toggle("ced-modal__src--missing", !!en.missing);
+    }
+
+    function closeModal() {
+      if (!openRegion && !openImage) return;
+      openRegion = null;
+      openImage = null;
+      if (modal) modal.classList.remove("ced-modal--image");
+      if (ta) ta.disabled = false;
+      if (altIn) altIn.disabled = false;
       if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
       if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
     }
 
     /* the (X) close path: unlike Cancel/Esc (which discard silently), this asks
-       first, but only when the box holds text you changed and never Applied.
-       openRegion.current is the region's currently-applied innerHTML, kept in
-       sync by Apply/Revert, so this equals "unapplied edits in the textarea". */
+       first, but only when the box holds changes that were never Applied. */
     function requestClose() {
-      if (openRegion && ta && ta.value !== openRegion.current) {
-        if (!window.confirm("You changed the text in this box but haven't applied it.\n\nClose and discard those changes?")) return;
+      var unapplied = false;
+      if (openRegion && ta) {
+        unapplied = ta.value !== openRegion.current;
+      } else if (openImage && ta && !openImage.entry.empty) {
+        unapplied = ta.value !== openImage.entry.caption ||
+                    altIn.value !== (openImage.entry.alt || "");
       }
+      if (unapplied &&
+          !window.confirm("You changed the text in this box but haven't applied it.\n\nClose and discard those changes?")) return;
       closeModal();
+    }
+
+    function deleteImage() {
+      if (!openImage) return;
+      var g = openImage.g, i = openImage.index, en = openImage.entry;
+      var lastReal = !en.empty &&
+        g.model.filter(function (e) { return !e.empty; }).length === 1;
+      var warn = "";
+      if (lastReal) {
+        warn = g.dd
+          ? "\n\nThis is the last image: the deep-dive gallery will show nothing."
+          : (g.seeds.length ? "\n\nThis is the last image: the seed placeholders will return."
+                            : "\n\nThis is the last image: the gallery will be empty.");
+      }
+      var what = en.empty ? "this empty slot" : en.imgId + " (" + en.src + ")";
+      if (!window.confirm("Delete " + what + " from " + g.slug + "?" + warn)) return;
+      revokePreview(en);
+      g.model.splice(i, 1);
+      /* no images and no seed fallback would leave nothing to rebuild - keep a
+         drop target alive so the gallery stays recoverable from the UI */
+      if (!g.model.length && !g.seeds.length) {
+        g.model.push({ src: "", alt: "", caption: "", preview: "", empty: true,
+                       missing: false, isSeed: false, imgId: null, orig: null });
+      }
+      exportedClean = false;
+      closeModal();
+      renderGallery(g, null, 0);
+      refreshDirtyUI();
     }
 
     /* tag-balance sanity check: catches the typo that would eat half the page */
@@ -4047,6 +4614,18 @@
     }
 
     function applyModal() {
+      if (openImage) {
+        var en = openImage.entry;
+        if (en.empty) { status("Nothing to apply - fill the slot first (drop an image on the carousel)."); return; }
+        en.caption = ta.value.trim();
+        en.alt = altIn.value.trim();
+        exportedClean = false;
+        renderGallery(openImage.g, null, openImage.index);
+        refreshDirtyUI();
+        status(galDirty(openImage.g) ? "Applied - export when you're done."
+                                     : "Applied - matches published content.");
+        return;
+      }
       if (!openRegion) return;
       var problem = tagCheck(ta.value);
       if (problem && !window.confirm("Tag check: " + problem + "\n\nApply anyway?")) {
@@ -4059,32 +4638,51 @@
       r.edited = r.current !== r.original;
       if (r.edited) exportedClean = false;
       ta.value = r.current;
+      relinkTplGalleries(r);               /* a template rewrite orphans its dd gallery */
       refreshDirtyUI();
       requestReposition();
       status(r.edited ? "Applied - page updated. Export when you're done." : "Applied - matches published content.");
     }
 
     function revertModal() {
+      if (openImage) {
+        var en = openImage.entry;
+        if (en.empty) { status("Nothing to revert on an empty slot."); return; }
+        en.caption = en.orig.caption;
+        en.alt = en.orig.alt;
+        ta.value = en.caption;
+        altIn.value = en.alt;
+        renderGallery(openImage.g, null, openImage.index);
+        refreshDirtyUI();
+        status("Caption and alt reverted. (Reverting the image file itself = Delete, or drop the old file back.)");
+        return;
+      }
       if (!openRegion) return;
       var r = openRegion;
       r.el.innerHTML = r.original;
       r.current = r.original;
       r.edited = false;
       ta.value = r.original;
+      relinkTplGalleries(r);
       refreshDirtyUI();
       requestReposition();
       status("Reverted to published content.");
     }
 
     /* one universal quicksave slot - a panic backup for the current textarea */
+    function quicksaveLabel() {
+      if (openRegion) return openRegion.slug;
+      if (openImage) return openImage.g.slug + "/" + (openImage.entry.imgId || "slot");
+      return "?";
+    }
     function quicksave() {
-      if (!openRegion) return;
+      if (!openRegion && !openImage) return;
       try {
         localStorage.setItem(QS_KEY, JSON.stringify({
-          slug: openRegion.slug, badge: openRegion.badge,
+          slug: quicksaveLabel(),
           when: Date.now(), text: ta.value
         }));
-        status("Quicksaved (" + openRegion.slug + "). One slot - a new quicksave overwrites it.");
+        status("Quicksaved (" + quicksaveLabel() + "). One slot - a new quicksave overwrites it.");
       } catch (err) { status("Quicksave failed: " + err.message); }
     }
     function age(ms) {
@@ -4095,7 +4693,7 @@
       return Math.round(s / 86400) + " days ago";
     }
     function restore() {
-      if (!openRegion) return;
+      if (!openRegion && !openImage) return;
       var raw = null;
       try { raw = localStorage.getItem(QS_KEY); } catch (err) {}
       if (!raw) { status("No quicksave stored."); return; }
@@ -4132,6 +4730,38 @@
       return src.slice(0, start) + span.slice(0, gt + 1) + inner + span.slice(lastClose) + src.slice(b);
     }
 
+    function escAttr(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    /* serialize a gallery's model into tidy authored <img> lines and splice
+       them between the gallery's own tags. Indentation is read from the source
+       span so the output matches the file's hand-written style. An empty
+       project gallery falls back to its seed placeholders; an empty deep-dive
+       gallery exports a bare <div class="gallery"> (the drawer removes it). */
+    function spliceGallery(src, g) {
+      var open = "<!--[edit:" + g.slug + "]-->";
+      var a = src.indexOf(open);
+      if (a < 0) return null;
+      var start = a + open.length;
+      var b = src.indexOf("<!--[/edit:" + g.slug + "]-->", start);
+      if (b < 0) return null;
+      var im = /\n([ \t]*)</.exec(src.slice(start, b));
+      var ind = im ? im[1] : "            ";
+      var entries = exportForm(g.model);
+      if (!entries.length && !g.dd && g.seeds.length) entries = exportForm(g.seeds);
+      if (!entries.length && !g.dd) {
+        console.warn("[copy editor] " + g.slug + " exports EMPTY - no images and no seed fallback.");
+      }
+      var lines = entries.map(function (en) {
+        return ind + '  <img src="' + escAttr(en.src) + '" loading="lazy"\n' +
+               ind + '       alt="' + escAttr(en.alt) + '"' +
+               (en.caption ? '\n' + ind + '       data-caption="' + escAttr(en.caption) + '"' : "") +
+               " />";
+      });
+      var inner = lines.length ? "\n" + lines.join("\n") + "\n" + ind : "\n" + ind;
+      return spliceRegion(src, g.slug, inner);
+    }
+
     /* ---------------- public api ---------------- */
     var api = function () {
       injectStyles();
@@ -4143,6 +4773,14 @@
         console.info("[copy editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
       } else {
         if (viewing === "before") api.after();   /* never leave the page showing the before view */
+        /* unfilled (+) slots are editor scaffolding - never leave their
+           "Drop image here" tiles in the visitor-facing carousels */
+        gals.forEach(function (g) {
+          if (g.model.some(function (e) { return e.empty; })) {
+            g.model = g.model.filter(function (e) { return !e.empty; });
+            renderGallery(g);
+          }
+        });
         teardownUI();
         console.info("[copy editor] OFF" + (dirty() ? " - you still have unexported edits (edit.export())." : "."));
       }
@@ -4154,8 +4792,21 @@
       console.table(regions.map(function (r) {
         return { badge: r.badge, slug: r.slug, visible: r.visible, edited: r.edited };
       }));
-      return regions.length + " regions, " +
-        regions.filter(function (r) { return r.edited; }).length + " edited.";
+      var imgRows = [];
+      gals.forEach(function (g) {
+        if (!g.model.length) {
+          imgRows.push({ badge: "SEED", gallery: g.slug, src: "(placeholders)", caption: "", edited: galDirty(g) });
+          return;
+        }
+        g.model.forEach(function (en) {
+          imgRows.push({ badge: en.empty ? "SLOT" : en.imgId, gallery: g.slug,
+                         src: en.src || "(empty)", caption: en.caption, edited: galDirty(g) });
+        });
+      });
+      console.table(imgRows);
+      return regions.length + " text regions (" +
+        regions.filter(function (r) { return r.edited; }).length + " edited), " +
+        gals.length + " galleries (" + gals.filter(galDirty).length + " edited).";
     };
 
     api.before = function () {
@@ -4163,6 +4814,11 @@
       if (viewing === "before") return "already viewing BEFORE";
       viewing = "before";
       regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.original; });
+      gals.forEach(function (g) {
+        if (!galDirty(g)) return;
+        var before = origEntries(g);
+        renderGallery(g, before.length ? before : g.seeds);
+      });
       refreshDirtyUI(); requestReposition();
       return "viewing BEFORE (published content) - edit.after() to switch back";
     };
@@ -4171,6 +4827,7 @@
       if (viewing === "after") return "already viewing AFTER";
       viewing = "after";
       regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.current; });
+      gals.forEach(function (g) { if (galDirty(g)) renderGallery(g); });
       refreshDirtyUI(); requestReposition();
       return "viewing AFTER (with your edits)";
     };
@@ -4178,8 +4835,10 @@
     api.revertAll = function () {
       scan();
       var n = regions.filter(function (r) { return r.edited; }).length;
-      if (!n) return "nothing to revert";
-      if (!window.confirm("Revert ALL " + n + " edited region(s) to published content? This cannot be undone.")) {
+      var gn = gals.filter(galDirty).length;
+      if (!n && !gn) return "nothing to revert";
+      if (!window.confirm("Revert ALL edits (" + n + " text region(s), " + gn +
+          " gallery/ies) to published content? This cannot be undone.")) {
         return "cancelled";
       }
       if (viewing === "before") viewing = "after";
@@ -4187,10 +4846,18 @@
         if (r.edited || r.current !== r.original) {
           r.el.innerHTML = r.original;
           r.current = r.original; r.edited = false;
+          relinkTplGalleries(r);
         }
       });
+      gals.forEach(function (g) {
+        if (!galDirty(g)) return;
+        g.model.forEach(revokePreview);
+        g.model = origEntries(g);
+        g.model.forEach(function (en) { en.imgId = nextImgId(); });
+        renderGallery(g);
+      });
       refreshDirtyUI(); requestReposition();
-      return "reverted " + n + " region(s)";
+      return "reverted " + n + " text region(s) and " + gn + " gallery/ies";
     };
 
     api.clear = function () {
@@ -4202,8 +4869,26 @@
       scan();
       if (viewing === "before") api.after();
       var edited = regions.filter(function (r) { return r.edited; });
-      if (!edited.length) { console.warn("[copy editor] no edits to export."); return "no edits to export"; }
-      console.info("[copy editor] exporting " + edited.length + " edited region(s)…");
+      var editedGals = gals.filter(galDirty);
+      if (!edited.length && !editedGals.length) {
+        console.warn("[copy editor] no edits to export.");
+        return "no edits to export";
+      }
+      var missing = [];
+      editedGals.forEach(function (g) {
+        g.model.forEach(function (en) {
+          if (en.empty) return;
+          if (en.missing === true) missing.push(en.src);
+          else if (en.missing === null) missing.push(en.src + " (existence not verified yet)");
+        });
+      });
+      if (missing.length) {
+        console.warn("[copy editor] these image files were NOT confirmed on the server - " +
+          "the export will reference them anyway, so make sure they exist in img/work/ before uploading:\n  " +
+          missing.join("\n  "));
+      }
+      console.info("[copy editor] exporting " + edited.length + " text region(s) and " +
+        editedGals.length + " gallery/ies…");
       fetch(location.pathname, { cache: "no-store" })   /* pathname: immune to ?query variants */
         .then(function (res) {
           if (!res.ok) throw new Error("HTTP " + res.status);
@@ -4211,9 +4896,17 @@
         })
         .then(function (src) {
           var failed = [];
+          /* text regions first: a deepdive splice carries its template markup
+             wholesale, then the nested dd-gallery splice corrects the image
+             list inside it, so galleries must come after text */
           edited.forEach(function (r) {
             var out = spliceRegion(src, r.slug, r.current);
             if (out === null) failed.push(r.slug);
+            else src = out;
+          });
+          editedGals.forEach(function (g) {
+            var out = spliceGallery(src, g);
+            if (out === null) failed.push(g.slug);
             else src = out;
           });
           if (failed.length) {
@@ -4228,7 +4921,8 @@
           doc.body.removeChild(a);
           window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
           exportedClean = true;
-          console.info("[copy editor] exported index.html with " + edited.length + " region(s) spliced in.");
+          console.info("[copy editor] exported index.html with " + edited.length +
+            " text region(s) and " + editedGals.length + " gallery/ies spliced in.");
         })
         .catch(function (err) {
           console.error("[copy editor] export failed: " + err.message +
