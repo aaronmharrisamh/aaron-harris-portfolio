@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!-- HAND-WRITTEN FIXTURE for e2e tests. Mirrors exactly what the blog
+     publish generator emits for a month file (see docs plan, section 1.3).
+     Used by the test harness: copied into a temp serve dir as blog/2607.html. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aaron M. Harris · Blog · July 2026</title>
+  <meta name="description" content="Thoughts, musings, and fun new developments from Aaron M. Harris" />
+  <link rel="canonical" href="https://aaronmichaelharris.com/blog/2607.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Aaron M. Harris" />
+  <meta property="og:title" content="Aaron M. Harris · Blog · July 2026" />
+  <meta property="og:description" content="Thoughts, musings, and fun new developments from Aaron M. Harris" />
+  <meta property="og:url" content="https://aaronmichaelharris.com/blog/2607.html" />
+  <meta property="og:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Aaron M. Harris — Technical Lead & Solutions Architect." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Aaron M. Harris · Blog · July 2026" />
+  <meta name="twitter:description" content="Thoughts, musings, and fun new developments from Aaron M. Harris" />
+  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../sitestyle.css" />
+</head>
+<body class="blog-month">
+  <div class="blog-wrap">
+    <header class="bm-head">
+      <a class="bm-head__brand" href="../index.html">AARON M. HARRIS</a>
+      <h1 class="bm-head__label">Blog · July 2026</h1>
+      <a class="textlink bm-head__stream" href="../index.html?b=2607">Read in the full stream</a>
+    </header>
+    <main>
+      <!-- ===== POST 0002 · 260710 ===== -->
+      <article class="blog-post" id="p0002" data-id="0002" data-date="260710" data-title="Second post, with a carousel">
+        <header>
+          <h2>Second post, with a carousel</h2>
+          <time datetime="2026-07-10">July 10, 2026</time>
+        </header>
+        <div class="blog-post__body">
+<p>This post carries an image run that becomes a carousel in the stream and stacked figures here.</p>
+<figure class="bp-fig"><img src="../blog/260710_img0002.jpg" loading="lazy" alt="Alt for the second image" /><figcaption>First of three</figcaption></figure>
+<figure class="bp-fig"><img src="../blog/260710_img0003.jpg" loading="lazy" alt="Second of three" /><figcaption>Second of three</figcaption></figure>
+<figure class="bp-fig"><img src="../blog/260710_img0004.jpg" loading="lazy" alt="Third of three" /><figcaption>Third of three</figcaption></figure>
+<h3>A subheading</h3>
+<p>Round-trip check: the sequence &lt;/script&gt; appears here as text.</p>
+        </div>
+        <script type="text/x-blog-source">
+&lt;p&gt;This post carries an image run that becomes a carousel in the stream and stacked figures here.&lt;/p&gt;
+[img0002,First of three|Alt for the second image][img0003,Second of three][img0004,Third of three]
+&lt;h3&gt;A subheading&lt;/h3&gt;
+&lt;p&gt;Round-trip check: the sequence &amp;lt;/script&amp;gt; appears here as text.&lt;/p&gt;
+</script>
+      </article>
+      <!-- ===== /POST 0002 ===== -->
+      <!-- ===== POST 0001 · 260708 ===== -->
+      <article class="blog-post" id="p0001" data-id="0001" data-date="260708" data-title="Hello, blog">
+        <header>
+          <h2>Hello, blog</h2>
+          <time datetime="2026-07-08">July 8, 2026</time>
+        </header>
+        <div class="blog-post__body">
+<p>Welcome to the blog. This is the very first post, written by hand as the reference fixture for the generator.</p>
+<figure class="bp-fig"><img src="../blog/260708_img0001.jpg" loading="lazy" alt="The planetarium dome at dusk" /><figcaption>Dome at dusk</figcaption></figure>
+<p>More text after the image, with a <span class="text-sm">small aside</span> in it.</p>
+        </div>
+        <script type="text/x-blog-source">
+&lt;p&gt;Welcome to the blog. This is the very first post, written by hand as the reference fixture for the generator.&lt;/p&gt;
+[img0001,Dome at dusk|The planetarium dome at dusk]
+&lt;p&gt;More text after the image, with a &lt;span class="text-sm"&gt;small aside&lt;/span&gt; in it.&lt;/p&gt;
+</script>
+      </article>
+      <!-- ===== /POST 0001 ===== -->
+    </main>
+    <footer class="bm-foot">© 2026 Aaron M. Harris · Traverse City, MI</footer>
+  </div>
+</body>
+</html>
