@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fixture page two</title>
+  <link rel="canonical" href="https://aaronmichaelharris.com/" />
+  <link rel="stylesheet" href="../../../site.css" />
+  <script defer src="../../../site.js"></script>
+  <script defer src="../../../work.js"></script>
+  <script defer src="../../../blog.js"></script>
+  <script defer src="../../../tool.js"></script>
+</head>
+<body>
+  <!-- A second managed page for the e2e suite. It exists so the multi-page
+       publish paths are exercised before gallery.html and blog.html do, and it
+       carries the chrome ids site.js expects. Not part of the site, not linked
+       from anywhere, not in the sitemap. -->
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <header class="site-header" id="header">
+    <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false">
+      <span></span>
+    </button>
+    <nav class="nav" id="nav"><div class="nav__links"><a href="#top">Top</a></div></nav>
+  </header>
+  <div class="nav-overlay" id="navOverlay"></div>
+
+  <main id="top">
+    <!--[edit:fx-one]-->
+    <p class="fx">Fixture region one.</p>
+    <!--[/edit:fx-one]-->
+
+    <!--[edit:fx-two]-->
+    <p class="fx">Fixture region two.</p>
+    <!--[/edit:fx-two]-->
+  </main>
+</body>
+</html>

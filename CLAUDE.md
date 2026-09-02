@@ -122,3 +122,77 @@ unnecessary process or conflict with these rules.
   then regenerate them.
 - Keep user documentation, code comments, and tests current. Remove or rewrite
   implementation-phase notes after the related work is complete.
+
+## Project Addendum: aaron-harris-portfolio
+
+**Addendum version:** 1.0  
+**Added:** 2026-09-01  
+
+The baseline above states the philosophy. This addendum states the facts of this
+project only. It does not repeat the baseline.
+
+### Delivery Constraints
+
+- No build step, no framework, no package manager, no bundler, no launcher.
+- Every file is a file that a browser reads directly. GitHub Pages serves the
+  repository as it is.
+- Use classic `<script src>` tags in a fixed, documented order. Do not use ES
+  modules. A browser refuses to load a module from disk, and the only repair for
+  that is a launcher.
+- The site must work when a person opens it from disk. Reading works offline.
+  The blog stream and the publish tool need HTTP or the file hand-off.
+
+### File Map
+
+This is the target state after Phase 4 of the expansion program. Files appear
+here before they exist on disk.
+
+| File | Job |
+| --- | --- |
+| `index.html` | Home page. Hero, work, about, and contact. |
+| `gallery.html` | Gallery page. The six-column tile grid. |
+| `blog.html` | Blog page. The reading engine and the post manifest. |
+| `site.css` | All page style. Replaces the inline style block. |
+| `site.js` | Shared page behavior for every page. |
+| `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
+| `blog.js` | The blog reading engine. `blog.html` only. |
+| `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
+| `tool.js` | The copy editor, image editing, and the export. |
+| `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
+| `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
+| `img/seed/`, `img/work/` | Placeholder images and real project images. |
+| `tools/e2e/` | The test harness. |
+
+Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
+sections only when a distinct job cannot merge into another section. Two files
+are at eight and say why in their own headers: `gallery.js`, which both decides
+a layout and is an editing surface, and `site.css`, whose gallery grid is a
+whole page's layout system with an invariant of its own.
+
+### The Self-Editing Laws
+
+- The site edits the site. Every page carries the editor. The tool writes the
+  change.
+- Export reads the pristine bytes of a page and splices only between markers.
+  Everything outside an edited region stays byte-identical. This is the reason
+  export never serializes the live DOM.
+- No database, no server, no CMS. Every generated file is standalone HTML that
+  works on its own.
+- Publish from a clean repository that matches the deployed site. One publish
+  for each page load.
+- Post ids and anchors are permanent. A rename, a new date, or the deletion of a
+  sibling must not change an existing `#p0007` link.
+- The tool proposes and the user decides. Nothing reaches the site except as a
+  difference that the user commits.
+- A machine-owned region is written again at each publish. Do not edit a
+  machine-owned region by hand.
+
+### Project Conventions
+
+- The version format is `V0NN`. The commit message carries it. There is no
+  version file. Current version: V035.
+- The user makes every commit and push. Claude never runs a Git write command.
+- `node tools/e2e/e2e_test.mjs` and `py -3 tools/e2e/check_markers.py` must both
+  pass before each commit.
+- Do not use em dashes in copy for the webpage.
+- `docs/` is in `.gitignore`. It holds the plans, the manual, and the mockups.

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- ============================================================
+     gallery.html - the gallery page.
+
+     The long form of the work: every project as a train of image
+     tiles, six columns wide.
+
+     Six sections. No hero and no about; this page is one job.
+
+       1. HEAD AND META      4. GALLERY
+       2. CHROME             5. CONTACT AND FOOTER
+       3. INTRO              6. DATA
+
+     The grid rules and the reason for each of them are in section 4
+     of site.css. The packer that arranges the tiles is Phase 4
+     Part 2; until then every train is authored to the invariant by
+     hand, and the page is correct with no script at all.
+     ============================================================ -->
+
+<head>
+  <!-- ============================================================
+       1. HEAD AND META
+       ------------------------------------------------------------
+       This page's own title, canonical and social cards. The
+       stylesheet and the script set are the site's.
+       ============================================================ -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gallery · Aaron M. Harris</title>
+  <meta name="description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
+  <link rel="canonical" href="https://aaronmichaelharris.com/gallery.html" />
+  <meta name="theme-color" content="#0d1014" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Aaron M. Harris" />
+  <meta property="og:title" content="Gallery · Aaron M. Harris" />
+  <meta property="og:description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
+  <meta property="og:url" content="https://aaronmichaelharris.com/gallery.html" />
+  <meta property="og:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Aaron M. Harris - Technical Lead &amp; Solutions Architect." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Gallery · Aaron M. Harris" />
+  <meta name="twitter:description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
+  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="site.css" />
+
+  <!-- The site's script, in a fixed order. defer keeps document order and runs
+       each file after parsing, so every trunk sees the whole page.
+       site.js creates window.AMH, the one namespace the trunks share.
+       work.js is here for the lightbox, which Phase 4 Part 4 hands the tiles.
+       gallery.js is the tile packer AND the editor's tile consumer, on this
+       page and nowhere else. It follows tool.js because it claims its region
+       with the editor kit at load, the way publish.js registers itself. -->
+  <script defer src="site.js"></script>
+  <script defer src="work.js"></script>
+  <script defer src="tool.js"></script>
+  <script defer src="gallery.js"></script>
+
+  <!-- Graceful degradation: without JS the reveal animations never fire, so
+       force all content visible. The tiles are static markup either way.
+       These rules stay inline. A <noscript> block applies only when scripting
+       is off, and a linked stylesheet cannot carry that condition. -->
+  <noscript>
+    <style>
+      .reveal, .reveal-hero > * { opacity: 1 !important; transform: none !important; }
+    </style>
+  </noscript>
+</head>
+
+<body>
+  <!-- ============================================================
+       2. CHROME
+       ------------------------------------------------------------
+       The scroll progress bar, the header, and the nav that doubles
+       as the mobile drawer. site.js owns their state.
+
+       The header is shared chrome: byte-identical on every managed
+       page, and held to that by the contract test. Its copy regions
+       are shared too - an edit to one is written to every page that
+       has it, in the same publish. See docs/README.md.
+       ============================================================ -->
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <header class="site-header" id="header">
+    <a class="brand" href="index.html#top" aria-label="Aaron M. Harris — home">
+      <!-- AMH monogram mark kept for reuse elsewhere; the inline-circle portrait
+           is the active header mark. To revert to the monogram, swap which of
+           these two spans is rendered (and see .brand .mark in the CSS). -->
+      <!-- <span class="mark" aria-hidden="true">AMH</span> -->
+      <span class="brand-portrait" aria-hidden="true">
+        <span class="portrait-bg" aria-hidden="true"></span>
+        <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512" alt="" />
+      </span>
+      <span class="brand__name">
+        <!--[edit:brand-title]-->
+        <span class="brand__title full">AARON M. HARRIS</span>
+        <!--[/edit:brand-title]-->
+        <!--[edit:brand-sub]-->
+        <span class="brand__sub">Technical Lead &amp; Solutions Architect</span>
+        <!--[/edit:brand-sub]-->
+      </span>
+    </a>
+
+    <button class="nav__toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav">
+      <span></span><span></span><span></span>
+    </button>
+
+    <!-- A nav link names the page it points into, so the same bytes work on
+         every page. site.js treats a link naming THIS page as an in-page
+         anchor, and marks the item whose href is this page as current.
+         "#contact" stays bare: every page has its own contact section. -->
+    <nav class="nav" id="nav" aria-label="Primary">
+      <div class="nav__links">
+        <!--[edit:nav-work]-->
+        <a href="index.html#work">Work</a>
+        <!--[/edit:nav-work]-->
+        <!--[edit:nav-gallery]-->
+        <a href="gallery.html">Gallery</a>
+        <!--[/edit:nav-gallery]-->
+        <!--[edit:nav-blog]-->
+        <a href="blog.html">Blog</a>
+        <!--[/edit:nav-blog]-->
+        <!--[edit:nav-about]-->
+        <a href="index.html#about">About</a>
+        <!--[/edit:nav-about]-->
+        <!--[edit:nav-contact]-->
+        <a href="#contact">Contact</a>
+        <!--[/edit:nav-contact]-->
+      </div>
+    </nav>
+  </header>
+
+  <!-- dim scrim behind the mobile nav drawer -->
+  <div class="nav-overlay" id="navOverlay" aria-hidden="true"></div>
+
+  <main id="top">
+
+    <!-- ============================================================
+         3. INTRO
+         ------------------------------------------------------------
+         What this page is, in two sentences. Editable copy.
+         ============================================================ -->
+    <section class="gal-intro" aria-label="About this gallery">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <!--[edit:gallery-eyebrow]-->
+          <span class="eyebrow">Gallery</span>
+          <!--[/edit:gallery-eyebrow]-->
+        </div>
+        <!--[edit:gallery-h2]-->
+        <h2>The work, at length.</h2>
+        <!--[/edit:gallery-h2]-->
+        <!--[edit:gallery-intro]-->
+        <p class="lede">Every project as its own train of images: interfaces, simulations, and the
+          quieter engineering behind them. The home page shows the highlights; this page shows the
+          rest.</p>
+        <!--[/edit:gallery-intro]-->
+        <!--[edit:gallery-note]-->
+        <p class="gal-note">This gallery is being filled. One project is up so far, with the others
+          following as their images are prepared.</p>
+        <!--[/edit:gallery-note]-->
+      </div>
+    </section>
+
+    <!-- ============================================================
+         4. GALLERY
+         ------------------------------------------------------------
+         One train per project. A train opens with its title band,
+         spanning all six columns and exactly one row tall, and then
+         its tiles.
+
+         The invariant the design rests on: every tile is exactly one
+         row tall, and the widths in a row add to exactly six. An
+         interior hole is therefore impossible rather than avoided.
+         Only the last row of a train may be short.
+
+         Each tile carries three numbers. data-w is the width the image
+         prefers, written for six columns. data-priority is the order
+         the author wants, lower first. data-span is the width the tile
+         is DRAWN at.
+
+         The packer in gallery.js reads the first two and writes the
+         third, as an inline style rather than into the markup: a span
+         is a decision about one viewport width, not a fact about the
+         image. The data-span authored here is that same packer's
+         answer at six columns, so a reader with no script sees the
+         layout a reader with one sees.
+         ============================================================ -->
+    <section class="gal" id="gallery" aria-label="Project galleries">
+      <div class="wrap">
+
+        <!--[edit:gal-br]-->
+        <div class="gal-train" data-project="br">
+          <header class="gal-train__head">
+            <span class="gal-train__n">01 / Project</span>
+            <h3 class="gal-train__title">Blockade Runner</h3>
+            <span class="gal-train__rule" aria-hidden="true"></span>
+            <span class="gal-train__meta">2024 · 8 images</span>
+          </header>
+          <figure class="gal-tile" data-w="2" data-priority="1" data-span="2">
+            <img src="img/seed/blockade-01.jpg" alt="Bridge interior" loading="lazy" decoding="async"
+                 width="1600" height="900" />
+            <figcaption class="gal-tile__cap">Bridge interior</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="2" data-priority="1" data-span="2">
+            <img src="img/seed/forerunner-01.jpg" alt="Approach vector" loading="lazy" decoding="async"
+                 width="1600" height="900" />
+            <figcaption class="gal-tile__cap">Approach vector</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="2" data-priority="2" data-span="2">
+            <img src="img/seed/phillips-01.jpg" alt="Instrument column" loading="lazy" decoding="async"
+                 width="1600" height="900" />
+            <figcaption class="gal-tile__cap">Instrument column</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="3" data-priority="1" data-span="3">
+            <img src="img/seed/planetarium-02.jpg" alt="Star field calibration" loading="lazy" decoding="async"
+                 width="1500" height="500" />
+            <figcaption class="gal-tile__cap">Star field calibration</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="3" data-priority="2" data-span="3">
+            <img src="img/seed/planetarium-01.jpg" alt="Dome projection test" loading="lazy" decoding="async"
+                 width="1600" height="900" />
+            <figcaption class="gal-tile__cap">Dome projection test</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="4" data-priority="2" data-span="4">
+            <img src="img/seed/cognition-vr-03.jpg" alt="Orbital debris traversal" loading="lazy" decoding="async"
+                 width="1600" height="800" />
+            <figcaption class="gal-tile__cap">Orbital debris traversal</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="2" data-priority="3" data-span="2">
+            <img src="img/seed/forerunner-03.jpg" alt="Timeline scrub" loading="lazy" decoding="async"
+                 width="1200" height="1200" />
+            <figcaption class="gal-tile__cap">Timeline scrub</figcaption>
+          </figure>
+          <figure class="gal-tile" data-w="3" data-priority="3" data-span="3">
+            <img src="img/seed/aitooling-01.jpg" alt="Engine chic UI" loading="lazy" decoding="async"
+                 width="1600" height="900" />
+            <figcaption class="gal-tile__cap">Engine chic UI</figcaption>
+          </figure>
+        </div>
+        <!--[/edit:gal-br]-->
+
+      </div>
+    </section>
+
+    <!-- ============================================================
+         5. CONTACT AND FOOTER
+         ------------------------------------------------------------
+         Shared chrome, like the header: byte-identical with the other
+         pages, and its copy regions are shared.
+         ============================================================ -->
+    <section class="contact" id="contact" aria-label="Contact">
+      <div class="wrap">
+        <div class="reveal">
+          <!-- Contact is a deliberately centered closing CTA (eyebrow + heading
+               + email + buttons all centered). To left-align the eyebrow like
+               the Work/About sections instead, remove the "eyebrow--center" class. -->
+          <!--[edit:contact-eyebrow]-->
+          <span class="eyebrow eyebrow--center">Contact</span>
+          <!--[/edit:contact-eyebrow]-->
+          <!--[edit:contact-h2]-->
+          <h2>Let's talk.</h2>
+          <!--[/edit:contact-h2]-->
+          <!--[edit:contact-email]-->
+          <a class="email" href="mailto:contact@aaronmichaelharris.com">contact@aaronmichaelharris.com</a>
+          <!--[/edit:contact-email]-->
+        </div>
+        <div class="contact__actions reveal d1">
+          <div class="contact__row">
+            <!--[edit:contact-btn-email]-->
+            <a class="contact-btn contact-btn--call" href="mailto:contact@aaronmichaelharris.com" aria-label="Email Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v.4l8 5 8-5V6H4zm16 2.7-7.47 4.67a1 1 0 0 1-1.06 0L4 8.7V18h16V8.7z"/></svg>
+              Email
+            </a>
+            <!--[/edit:contact-btn-email]-->
+            <!--[edit:contact-btn-call]-->
+            <a class="contact-btn contact-btn--call" href="tel:+16162168641" aria-label="Call Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.25 1z"/></svg>
+              Call
+            </a>
+            <!--[/edit:contact-btn-call]-->
+            <!--[edit:contact-btn-txt]-->
+            <a class="contact-btn contact-btn--call" href="sms:+16162168641" aria-label="Text Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2zm3 6h10v1.6H7zm0 3.4h7V14H7z"/></svg>
+              TXT
+            </a>
+            <!--[/edit:contact-btn-txt]-->
+          </div>
+          <!--[edit:contact-btn-resume]-->
+          <a class="contact-btn" href="Aaron_Harris_Resume.pdf" target="_blank" rel="noopener" aria-label="Download résumé (PDF)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 1.5L18.5 8H14zM8 13h8v1.6H8zm0 3.2h8V18H8zm0-6.4h4v1.6H8z"/></svg>
+            Résumé (PDF)
+          </a>
+          <!--[/edit:contact-btn-resume]-->
+        </div>
+
+        <div class="social-mini reveal d2">
+          <a href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener" aria-label="LinkedIn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM3 9h4v12H3zM9 9h3.8v1.7h.05c.53-1 1.83-2.06 3.77-2.06 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.4c0-1.29-.02-2.95-1.8-2.95-1.8 0-2.08 1.4-2.08 2.85V21H9z"/></svg>
+          </a>
+          <a href="https://github.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.71-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05A9.4 9.4 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          </a>
+          <a href="https://x.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="X (Twitter)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.53 3H20.5l-6.5 7.43L21.75 21h-6.02l-4.71-6.16L5.6 21H2.63l6.95-7.95L2.25 3h6.17l4.26 5.63zm-1.06 16.2h1.65L7.6 4.72H5.83z"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <!--[edit:endbar]-->
+      <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
+      <!--[/edit:endbar]-->
+    </section>
+
+  </main>
+
+  <!-- ============================================================
+       6. DATA
+       ------------------------------------------------------------
+       Inert content the scripts read. Nothing here renders.
+
+       The tile model lives in the markup above, on each figure, not
+       in a manifest: a tile is an image with a width and a caption,
+       and the page has to be meaningful with no script at all.
+       ============================================================ -->
+
+  <!-- ╔══════════════════════════════════════════════════════════════════════╗
+       ║  BUILT-IN COPY EDITOR (hidden) · activate from the F12 console: edit()  ║
+       ║  Copy regions are fenced by [edit:slug] comment pairs. Edits live       ║
+       ║  in memory; edit.export() downloads this file with them applied.        ║
+       ║  The editor lives in tool.js; docs: docs/README.md.                     ║
+       ╚══════════════════════════════════════════════════════════════════════╝ -->
+</body>
+</html>

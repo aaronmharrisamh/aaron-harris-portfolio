@@ -1,0 +1,2051 @@
+/* ============================================================
+   site.css - every style rule the site uses.
+
+   One stylesheet for every page and for the generated blog month
+   pages. The editor injects its own rules into <head> at runtime,
+   after this file, so the editor always wins on equal specificity.
+
+   Rule: do not reorder a block to tidy the file. CSS resolves ties
+   by source order, so a moved block can change the page without
+   changing a single declaration.
+
+   Eight sections, one more than the usual seven. The gallery grid is
+   a whole page's layout system with an invariant of its own, and it
+   merges honestly with nothing here: not WORK, which is the home
+   page's carousels, and not OVERLAYS, which is the lightbox and the
+   drawer. So it is its own section rather than a guest in one.
+
+   Sections:
+     1. FOUNDATION AND CHROME       5. OVERLAYS
+     2. HERO                        6. LATEST, ABOUT AND CONTACT
+     3. WORK                        7. SHARED EFFECTS AND BLOG CHROME
+     4. GALLERY                     8. RESPONSIVE
+   ============================================================ */
+
+/* ============================================================
+   1. FOUNDATION AND CHROME
+   ------------------------------------------------------------
+   The custom properties, the reset, and the parts of the page that
+   sit outside any one section: the progress bar, the header and nav,
+   and the shared button and link styles.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   DESIGN SYSTEM — soft-charcoal / azure
+   ------------------------------------------------------------ */
+:root {
+  /* surfaces */
+  --bg:        #16181d;   /* soft charcoal — page floor              */
+  --bg-deep:   #101217;   /* deepest pockets                          */
+  --panel:     #1e2128;   /* lifted panel                             */
+  --panel-2:   #23262f;   /* lifted panel, hover                      */
+  --line:      rgba(255,255,255,.08);   /* hairline borders          */
+  --line-soft: rgba(255,255,255,.05);
+
+  /* text */
+  --text:      #ebeef4;   /* near-white primary                       */
+  --text-soft: #c3c9d4;
+  --muted:     #969eaa;   /* secondary / meta                         */
+  --dim:       #6b7280;   /* faintest                                 */
+
+  /* accent — azure is the only ACTIVE accent */
+  --accent:        #4aa5e8;
+  --accent-bright: #6fbcf2;
+  --accent-deep:   #2e87cf;
+  --accent-glow:   rgba(74,165,232,.35);
+  --accent-faint:  rgba(74,165,232,.10);
+
+  /* staged accents — dormant, ready when we want them */
+  --c-orange: #f0883e;
+  --c-yellow: #f2c14e;
+  --c-lime:   #b5e853;
+
+  /* type */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+
+  /* spacing rhythm */
+  --section-pad: clamp(4rem, 9.5vw, 8rem);
+  --gutter:      clamp(1.25rem, 5vw, 3rem);
+  --maxw:        1180px;
+
+  /* shape + motion */
+  --radius:    16px;
+  --radius-sm: 10px;
+  --ease:      cubic-bezier(.22, 1, .36, 1);   /* easeOutExpo-ish      */
+  --ease-soft: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ------------------------------------------------------------
+   RESET + BASE
+   ------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; }
+
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: clamp(1rem, .55vw + .9rem, 1.125rem);
+  font-feature-settings: "cv05" 1, "ss01" 1, "cv02" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* a faint, fixed astral grid behind everything for depth */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(1200px 800px at 78% -10%, rgba(74,165,232,.08), transparent 60%),
+    radial-gradient(900px 700px at -10% 110%, rgba(74,165,232,.06), transparent 55%),
+    var(--bg);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .35;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+          mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+}
+
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; text-decoration: none; }
+
+::selection { background: var(--accent); color: #06121d; }
+
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* layout helpers */
+.wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: var(--gutter); }
+section { scroll-margin-top: 84px; }
+
+.eyebrow {
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: .65rem;
+}
+.eyebrow::before {
+  content: "";
+  width: 30px; height: 2px;
+  background: var(--accent);
+  display: inline-block;
+}
+/* centered variant — used by the Contact closing CTA */
+.eyebrow--center { justify-content: center; }
+
+/* ------------------------------------------------------------
+   SCROLL PROGRESS BAR
+   ------------------------------------------------------------ */
+.progress {
+  position: fixed; top: 0; left: 0;
+  height: 3px; width: 100%;
+  transform: scaleX(0); transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-bright));
+  z-index: 1000;
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------
+   HEADER / NAV
+   ------------------------------------------------------------ */
+.site-header {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 900;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.1rem var(--gutter);
+  transition: padding .4s var(--ease-soft);
+}
+/* Blur/background live on a pseudo-element so the header box itself carries
+   no filter — a filtered ancestor would otherwise trap the fixed mobile
+   drawer inside the (short) header box instead of the viewport. */
+.site-header::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: rgba(18,20,25,.72);
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  border-bottom: 1px solid transparent;
+  opacity: 0; pointer-events: none;
+  transition: opacity .4s var(--ease-soft);
+}
+.site-header.scrolled::before { opacity: 1; border-bottom-color: var(--line); }
+.site-header.scrolled { padding-block: .8rem; }
+
+.brand {
+  display: inline-flex; align-items: center; gap: 0;
+  font-weight: 800; letter-spacing: .04em; font-size: .95rem;
+}
+.brand .mark {
+  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  display: grid; place-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--accent);
+  font-size: .72rem; font-weight: 900; letter-spacing: -.04em;
+  transition: transform .5s var(--ease), border-color .4s, color .4s;
+}
+.brand:hover .mark { transform: rotate(-6deg) scale(1.05); border-color: var(--accent); }
+/* Desktop: name + summary on ONE line, separated by a pipe.
+   Mobile: stacked (two lines, no pipe) — see the 880px media query. */
+.brand__name { display: flex; align-items: baseline; line-height: 1.1; }
+/* The name starts LARGE (hero treatment, using the space the hidden portrait
+   leaves) and shrinks to its compact size once the header is `scrolled`. */
+.brand__title {
+  color: var(--text); font-weight: 800;
+  font-size: 1.4rem;
+  transition: font-size .45s var(--ease-soft);
+}
+.site-header.scrolled .brand__title { font-size: .95rem; }
+.brand__sub {
+  color: var(--muted); font-weight: 600;
+  font-size: .98rem; letter-spacing: .02em;
+  transition: font-size .45s var(--ease-soft);
+}
+.site-header.scrolled .brand__sub { font-size: .8rem; }
+.brand__sub::before {
+  content: "|"; color: var(--line);
+  margin: 0 .6rem; font-weight: 400;
+}
+
+/* brand portrait — inline circle. Hidden at the top of the page (so it
+   doesn't duplicate the hero portrait); fades + scales + expands in when
+   the header becomes `scrolled` (i.e. once the hero portrait is ~50% gone). */
+.brand-portrait {
+  position: relative;
+  flex: none; width: 48px; height: 48px; border-radius: 50%;
+  border: 1px solid var(--line); overflow: hidden;
+  /* Always full size (no scaling). At the top it's tucked off to the left
+     (negative margin cancels its footprint so the name sits flush); when
+     scrolled it pushes into place via the margin, fading in as it slides. */
+  opacity: 0;
+  margin-left: -48px; margin-right: 0;
+  transition: margin-left .45s var(--ease-soft), margin-right .45s var(--ease-soft),
+              opacity .5s var(--ease-soft), border-color .4s;
+}
+.site-header.scrolled .brand-portrait {
+  opacity: 1; margin-left: 0; margin-right: .7rem;
+}
+.brand-portrait img {
+  position: relative; z-index: 1;
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.site-header.scrolled .brand:hover .brand-portrait { transform: scale(1.05); border-color: var(--accent); }
+
+.nav { display: flex; align-items: center; gap: clamp(2rem, 4vw, 4rem); }
+.nav a {
+  position: relative;
+  font-size: .82rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted);
+  padding: .35rem .5rem;
+  transition: color .3s var(--ease-soft);
+}
+.nav a::after {
+  content: ""; position: absolute; left: .5rem; bottom: -2px;
+  width: calc(100% - 1rem); height: 2px; background: var(--accent);
+  transform: scaleX(0); transform-origin: 0 50%;
+  transition: transform .4s var(--ease);
+}
+.nav a:hover, .nav a.active { color: var(--text); }
+.nav a:hover::after, .nav a.active::after { transform: scaleX(1); }
+
+.nav__toggle { display: none; }
+
+/* dim scrim behind the open mobile drawer */
+.nav-overlay {
+  position: fixed; inset: 0; z-index: 880;
+  background: rgba(0,0,0,.5);
+  opacity: 0; pointer-events: none;
+  transition: opacity .45s var(--ease-soft);
+}
+.nav-overlay.open { opacity: 1; pointer-events: auto; }
+body.nav-open { overflow: hidden; }
+
+/* ------------------------------------------------------------
+   BUTTONS / LINKS
+   ------------------------------------------------------------ */
+.btn {
+  --b: var(--accent);
+  display: inline-flex; align-items: center; gap: .7rem;
+  font-weight: 700; font-size: .95rem; letter-spacing: .02em;
+  padding: .9rem 1.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform .4s var(--ease), border-color .4s, background .4s, box-shadow .4s;
+  will-change: transform;
+}
+.btn:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: 0 14px 36px -16px var(--accent-glow);
+}
+.btn--ghost { background: transparent; }
+.btn .arrow { transition: transform .5s var(--ease); }
+.btn:hover .arrow { transform: translateY(3px); }
+
+.textlink {
+  display: inline-flex; align-items: center; gap: .45rem;
+  color: var(--accent); font-weight: 600;
+  border-bottom: 1px solid transparent;
+  transition: border-color .3s, gap .3s var(--ease), color .3s;
+  width: fit-content;
+}
+.textlink:hover { border-bottom-color: var(--accent); gap: .75rem; color: var(--accent-bright); }
+.textlink svg { width: 1em; height: 1em; }
+
+/* text-size utilities — the copy sizes this page already uses, exposed as
+   named classes for inline <span> wraps (the built-in copy editor's toolbar
+   inserts these; safe to hand-author anywhere). em-based, so each step is
+   relative to the text it sits inside:
+     xs ≈ chip size (.76rem on body copy) · sm ≈ meta/eyebrow (.85rem)
+     lg ≈ lede step-up (1.15×)            · xl ≈ full lede (1.4×) */
+.text-xs { font-size: .76em; }
+.text-sm { font-size: .85em; }
+.text-lg { font-size: 1.15em; }
+.text-xl { font-size: 1.4em; }
+
+/* ============================================================
+   2. HERO
+   ------------------------------------------------------------
+   The opening statement, the portrait and its rings, and the
+   two-column desktop layout that takes over at 881px.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   HERO
+   ------------------------------------------------------------ */
+.hero {
+  position: relative;
+  min-height: clamp(620px, 92vh, 920px);
+  display: flex; align-items: center;
+  /* Headroom above the eyebrow/headline: base 6rem + ~50px (3.125rem) so the
+     hero content sits lower beneath the fixed header. Mobile gets a smaller
+     bump (see the ≤880px block) so it doesn't push the figure too far down. */
+  padding-top: 9.125rem;
+  overflow: hidden;
+}
+/* Option: drifting ambient glows behind the hero, off by default.
+   The halo in .hero__stage is the one that ships. To swap them, remove
+   the display:none here and set .hero__stage { display: none }. */
+.hero__glow {
+  display: none;
+  position: absolute; inset: -20% -10% 0 -10%;
+  z-index: -1; pointer-events: none;
+}
+.hero__glow span {
+  position: absolute; border-radius: 50%;
+  filter: blur(70px); opacity: .55;
+  will-change: transform;
+}
+.hero__glow .g1 {
+  width: 46vmax; height: 46vmax; top: -16vmax; right: -8vmax;
+  background: radial-gradient(circle, rgba(74,165,232,.5), transparent 65%);
+  animation: drift1 22s var(--ease-soft) infinite alternate;
+}
+.hero__glow .g2 {
+  width: 34vmax; height: 34vmax; bottom: -14vmax; left: -6vmax;
+  background: radial-gradient(circle, rgba(46,135,207,.4), transparent 65%);
+  animation: drift2 26s var(--ease-soft) infinite alternate;
+}
+.hero__glow .g3 {
+  width: 22vmax; height: 22vmax; top: 30%; left: 40%;
+  background: radial-gradient(circle, rgba(111,188,242,.22), transparent 70%);
+  animation: drift3 30s var(--ease-soft) infinite alternate;
+}
+@keyframes drift1 { to { transform: translate3d(-6vmax, 5vmax, 0) scale(1.12); } }
+@keyframes drift2 { to { transform: translate3d(7vmax, -4vmax, 0) scale(1.08); } }
+@keyframes drift3 { to { transform: translate3d(-5vmax, -6vmax, 0) scale(1.18); } }
+
+/* The hero backdrop that ships: one concentrated blue halo. The rings
+   below it are off. Position and size come from --halo-x, --halo-y and
+   --halo-size, so a breakpoint can move the halo without new rules. */
+.hero__stage {
+  position: absolute; inset: 0;
+  z-index: -1; pointer-events: none;
+  --halo-x: 74%; --halo-y: 50%;
+  --halo-size: 634px;
+}
+.hero__halo {
+  position: absolute; left: var(--halo-x); top: var(--halo-y);
+  transform: translate(-50%, -50%);
+  width: var(--halo-size); height: var(--halo-size);
+  border-radius: 50%;
+  background: radial-gradient(circle,
+      rgba(74,165,232,.55) 0%,
+      rgba(56,150,220,.34) 28%,
+      rgba(40,120,200,.13) 52%,
+      transparent 70%);
+  filter: blur(16px);
+  animation: haloPulse 9s var(--ease-soft) infinite alternate;
+}
+@keyframes haloPulse {
+  from { transform: translate(-50%, -50%) scale(1);    opacity: .9; }
+  to   { transform: translate(-50%, -50%) scale(1.07); opacity: 1; }
+}
+/* ----- CONCENTRIC RINGS — soft, faint "steps" ------------------------
+   Tiered concentric rings, kept very faint and slightly blurred so they
+   read as gentle steps rather than bright 1px outlines. */
+.hero__rings {
+  position: absolute; left: var(--halo-x); top: var(--halo-y);
+  width: 0; height: 0;
+  filter: blur(.6px);
+}
+.hero__rings i {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(130,195,240,.12);
+}
+.hero__rings i:nth-child(1) { width: 360px;  height: 360px;  opacity: 1;   }
+.hero__rings i:nth-child(2) { width: 580px;  height: 580px;  opacity: .72; }
+.hero__rings i:nth-child(3) { width: 820px;  height: 820px;  opacity: .5;  }
+.hero__rings i:nth-child(4) { width: 1080px; height: 1080px; opacity: .32; }
+/* ----- /CONCENTRIC RINGS --------------------------------------------- */
+
+.hero__inner { max-width: 980px; }
+.hero h1 {
+  font-size: clamp(2.5rem, 4.8vw, 3.6rem);
+  line-height: 1.07;
+  letter-spacing: -.025em;
+  font-weight: 800;
+  margin-top: 1.4rem;
+  text-wrap: balance;
+}
+.hero h1 .hl { color: var(--accent); }
+.hero__sub {
+  font-size: clamp(1.12rem, 1.8vw, 1.5rem);
+  color: var(--text-soft);
+  font-weight: 400;
+  max-width: 46ch;
+  margin-top: 1.7rem;
+  line-height: 1.5;
+}
+.hero__note {
+  font-style: italic;
+  color: var(--muted);
+  margin-top: 1.1rem;
+  max-width: 44ch;
+}
+.hero__cta { margin-top: 2.6rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+
+/* keep the hero text above the portrait + glows */
+.hero .wrap { position: relative; z-index: 2; }
+
+/* full-color portrait — desktop: contained right-of-center figure, head near
+   the top, torso fading off the bottom (framed by the halo). The fade is
+   baked into the PNG, so this image carries no CSS mask. */
+.hero__portrait {
+  position: absolute;
+  bottom: 0;
+  /* on wide screens align the figure to the content column's right edge so it
+     stays tied to the text instead of drifting to the viewport edge */
+  right: max(16px, calc(50vw - var(--maxw) / 2 + 8px));
+  height: clamp(430px, 66vh, 760px);
+  width: auto;
+  z-index: 1;            /* above stage (-1)/sparks (0), below text (2) */
+  pointer-events: none;
+}
+/* ------------------------------------------------------------
+   DESKTOP HERO (V3) — true two-column layout (≥881px)
+   ------------------------------------------------------------
+   Eyebrow sits in its own full-width row; below it a two-column grid holds
+   the text (left, ~66%) and the portrait (right, ~34%). The portrait lives
+   in its OWN column and is TOP-ALIGNED with the headline, so it can never
+   cross behind the words. Mobile (≤880px) keeps the stacked/overlapping
+   layout untouched.
+   ------------------------------------------------------------ */
+@media (min-width: 881px) {
+  /* shared on .hero so BOTH the grid (.wrap) and the backdrop (.hero__stage,
+     a sibling of .wrap) can read the column gap — the halo math below needs
+     it to locate the portrait column's center. */
+  .hero {
+    --hero-col-gap: clamp(2rem, 4vw, 4rem);
+    /* HEIGHT POLICY (desktop): the old `min-height: clamp(620px, 92vh, 920px)`
+       reserved up to 920px and, with `align-items:center`, floated the content
+       in the middle — dumping a big empty band below the CTA buttons on tall
+       windows. Now the hero is content-driven: a modest min-height floor plus
+       TOP alignment, so the height tracks the text column and the next section
+       follows right after it. The portrait (below) is taken out of row sizing
+       so it can't re-inflate this. */
+    min-height: clamp(480px, 62vh, 620px);
+    align-items: start;
+  }
+
+  /* the hero content box becomes the two-column grid */
+  .hero .wrap {
+    display: grid;
+    grid-template-columns: 2fr 1fr;          /* ≈ 66% text / 34% portrait */
+    column-gap: var(--hero-col-gap);
+    align-items: start;                       /* top-sync both columns */
+  }
+  /* eyebrow: its own full-width row above the two columns */
+  .hero .wrap > .eyebrow { grid-column: 1 / -1; }
+  /* text block: left column, full column width (drop the old narrow cap) */
+  .hero .wrap > .hero__inner { grid-column: 1; max-width: none; }
+
+  /* portrait: right column, SAME row as the text block. It's height-driven
+     with width:auto, so the whole image is shown with NO cropping. Its size is
+     governed by the max-height clamp below (top-anchored so the head lines up
+     with the headline). justify-self:start anchors it to the column's LEFT
+     edge, so it can never cross into the text; at this size it sits within the
+     column at typical widths. min-height:0 stops the intrinsic height from
+     inflating the grid row. */
+  .hero .wrap > .hero__portrait {
+    grid-column: 2;
+    grid-row: 2;                  /* row 1 is the eyebrow; row 2 is the text */
+    /* ABSOLUTE inside the grid: because `.hero .wrap` is `position:relative`,
+       an absolutely-positioned grid item is laid out against its GRID AREA
+       (column 2 / row 2) — but it does not contribute to track sizing. A
+       tall portrait therefore cannot stretch row 2, so the row, and with it
+       the hero height, follows the left text column. The figure still sits
+       in the right column, top-aligned with the headline. */
+    position: absolute;
+    align-self: start;            /* top-aligned with the headline */
+    justify-self: start;          /* anchor left — never cross into the text */
+    top: 0; bottom: auto; right: auto; left: 0;
+    /* FIT-TO-SPACE sizing (keeps the WHOLE figure on-screen, only shrinking
+       when the desktop view gets tight):
+         • width/height auto + max-height + max-width  → the browser scales the
+           image to fit BOTH caps while preserving its 616×598 aspect ratio
+           (no distortion — that only happens if you pin one dimension and cap
+           the other).
+         • max-height sets the wide-screen size — the whole clamp was scaled
+           down 25% from the original 420/52vh/560 so the portrait reads as a
+           figure rather than overwhelming the headline.
+         • max-width = the horizontal room from the portrait's LEFT anchor
+           (column-2's left edge) to the viewport's right edge, minus a small
+           gap — so the figure can never run off the right edge and get the
+           hard straight clip that looked "creepy".
+       --portrait-fit derivation (all from the grid geometry below):
+           col1     = (contentW - 2·gutter - gap) · 2/3
+           col2Left = (100vw - contentW)/2 + gutter + col1 + gap
+           room     = 100vw - col2Left  =  50vw - contentW/6 + gutter/3 - gap/3
+         where contentW = min(100vw, --maxw). On wide screens this room exceeds
+         the figure's natural width, so max-height governs and nothing changes;
+         as the window narrows, room shrinks below it and the figure scales down
+         to stay fully visible. */
+    --portrait-fit: calc(
+      50vw
+      - min(100vw, var(--maxw)) / 6
+      + var(--gutter) / 3
+      - var(--hero-col-gap) / 3
+      - 24px            /* breathing gap from the viewport edge */
+    );
+    width: auto;
+    height: auto;
+    max-height: clamp(315px, 39vh, 420px);
+    max-width: var(--portrait-fit);
+    min-width: 0;
+    min-height: 0;
+    object-fit: contain;          /* belt-and-suspenders: never stretch */
+    /* No CSS mask — the fade is baked into the PNG. */
+  }
+
+  /* halo: centered EXACTLY on the portrait column's center X, tracked at
+     every desktop width (no tuned %). It stays a full-bleed background plate
+     behind BOTH columns (.hero__stage, z-index:-1) — never inside either one.
+
+     Geometry (all in viewport px):
+       • content box .wrap = min(100vw, --maxw), centered, with --gutter padding
+       • inside that: grid is [2fr | gap | 1fr]; the portrait sits in the 1fr
+       • so the portrait column's center, measured from the viewport's left:
+           half the empty margin either side of .wrap   → (100vw - wrapW)/2
+         + the wrap's left padding                       → + --gutter
+         + 5/6 of the track span (col1 + half of col2)   → + (tracks)*5/6
+         + the column gap                                → + --hero-col-gap
+         where wrapW   = min(100vw, --maxw)
+               tracks  = wrapW - 2*--gutter - --hero-col-gap */
+  .hero__stage {
+    --halo-x: calc(
+      (100vw - min(100vw, var(--maxw))) / 2
+      + var(--gutter)
+      + (min(100vw, var(--maxw)) - 2 * var(--gutter) - var(--hero-col-gap)) * 5 / 6
+      + var(--hero-col-gap)
+    );
+  }
+}
+
+/* twinkling "+" accents — thin & subtle */
+.hero__sparks { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.hero__sparks span {
+  position: absolute;
+  width: 11px; height: 11px;
+  color: var(--accent);
+  opacity: .2;
+  animation: twinkle 6s var(--ease-soft) infinite alternate;
+}
+.hero__sparks span::before,
+.hero__sparks span::after {
+  content: ""; position: absolute; background: currentColor;
+}
+.hero__sparks span::before { left: 50%; top: 0; width: .75px; height: 100%; transform: translateX(-50%); }
+.hero__sparks span::after  { top: 50%; left: 0; height: .75px; width: 100%; transform: translateY(-50%); }
+.hero__sparks span:nth-child(2) { animation-delay: 1.4s; opacity: .13; transform: scale(.7); }
+.hero__sparks span:nth-child(3) { animation-delay: 2.6s; opacity: .16; }
+.hero__sparks span:nth-child(4) { animation-delay: .8s;  opacity: .1;  transform: scale(1.25); }
+.hero__sparks span:nth-child(5) { animation-delay: 3.4s; opacity: .18; transform: scale(.6); }
+@keyframes twinkle { from { opacity: .06; } to { opacity: .24; } }
+
+/* hero entrance animation (plays on load) */
+.reveal-hero > * { opacity: 0; transform: translateY(26px); }
+.loaded .reveal-hero > * {
+  animation: heroUp .9s var(--ease) forwards;
+}
+.loaded .reveal-hero > *:nth-child(1) { animation-delay: .05s; }
+.loaded .reveal-hero > *:nth-child(2) { animation-delay: .16s; }
+.loaded .reveal-hero > *:nth-child(3) { animation-delay: .28s; }
+.loaded .reveal-hero > *:nth-child(4) { animation-delay: .40s; }
+.loaded .reveal-hero > *:nth-child(5) { animation-delay: .52s; }
+@keyframes heroUp { to { opacity: 1; transform: none; } }
+
+/* eyebrow now sits in its own row above the columns (outside .reveal-hero),
+   so it gets its own matching entrance, slightly ahead of the headline. */
+.hero .wrap > .eyebrow { opacity: 0; transform: translateY(26px); }
+.loaded .hero .wrap > .eyebrow { animation: heroUp .9s var(--ease) .02s forwards; }
+
+/* portrait rises in alongside the text */
+.hero__portrait { opacity: 0; transform: translateY(34px); }
+.loaded .hero__portrait { animation: heroUp 1s var(--ease) .35s forwards; }
+
+/* ============================================================
+   3. WORK
+   ------------------------------------------------------------
+   Section headings, the project blocks, and the image carousel
+   that work.js builds from a plain list of <img>.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   SECTION HEADINGS
+   ------------------------------------------------------------ */
+.section-head { max-width: 60ch; margin-bottom: clamp(2.5rem, 6vw, 4.5rem); }
+.section-head h2 {
+  font-size: clamp(2rem, 4.4vw, 2.9rem);
+  letter-spacing: -.02em; font-weight: 800; line-height: 1.08;
+  margin-top: 1rem;
+}
+.section-head p {
+  color: var(--muted); margin-top: 1rem;
+  font-size: clamp(1rem, 1.4vw, 1.18rem);
+}
+
+/* ------------------------------------------------------------
+   PROJECTS
+   ------------------------------------------------------------ */
+.work { padding-block: var(--section-pad); counter-reset: project; }
+
+.project {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: clamp(1.8rem, 4vw, 4rem);
+  align-items: start;   /* top-align both columns; image is nudged to title level below */
+  padding-block: clamp(3rem, 7vw, 6rem);
+  border-top: 1px solid var(--line-soft);
+  counter-increment: project;     /* drives the automatic 01, 02, 03… index */
+}
+.project:first-of-type { border-top: 0; }
+
+/* AUTO LEFT/RIGHT — projects alternate sides by position, so reordering or
+   pasting a block needs no class change. Odd projects use the base rule above
+   (image left); even projects flip (image right). :nth-of-type counts only
+   <article> siblings, so the non-article .section-head doesn't throw it off. */
+.project:nth-of-type(even) { grid-template-columns: 1fr 1.35fr; }
+.project:nth-of-type(even) .project__media { order: 2; }
+.project:nth-of-type(even) .project__body  { order: 1; }
+
+/* media column (the .gallery holder lives here; see PROJECT IMAGE GALLERY).
+   min-width:0 lets this grid track size by its fr share rather than growing to
+   fit content, so a long no-wrap caption clips with an ellipsis instead of
+   widening the column. */
+/* Nudge the image down so its top sits at the project TITLE, leaving the
+   "01" index above it (the header stands out). ~= the eyebrow's height;
+   zeroed out in the ≤880px stacked layout where the image is on top. */
+.project__media { position: relative; min-width: 0; margin-top: 2.2rem; }
+
+/* body column */
+.project__index {
+  font-size: .8rem; font-weight: 800; letter-spacing: .2em;
+  color: var(--accent); display: block; margin-bottom: .9rem;
+}
+/* AUTO NUMBER — the index span is left empty in the HTML; this prints the
+   running count as 01, 02, 03… so a reordered or pasted block self-numbers. */
+.project__index::before { content: counter(project, decimal-leading-zero); }
+.project__title {
+  font-size: clamp(1.6rem, 3vw, 2.15rem);
+  font-weight: 800; letter-spacing: -.02em; line-height: 1.1;
+}
+.project__meta {
+  font-size: .85rem; color: var(--muted); margin-top: .5rem;
+  letter-spacing: .04em;
+}
+.project__lead { margin-top: 1.2rem; color: var(--text-soft); }
+.project__desc { margin-top: 1rem; color: var(--muted); font-size: .98rem; }
+
+.stats { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.4rem; }
+.stat {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: .4rem .9rem;
+  font-size: .82rem; font-weight: 600; color: var(--text-soft);
+}
+.stat b { color: var(--accent); font-weight: 800; }
+
+.specs { margin-top: 1.5rem; display: grid; gap: .55rem; }
+.spec { display: grid; grid-template-columns: 84px 1fr; gap: 1rem; font-size: .88rem; }
+.spec dt {
+  color: var(--dim); text-transform: uppercase; letter-spacing: .12em;
+  font-size: .72rem; font-weight: 700; padding-top: .15rem;
+}
+.spec dd { color: var(--text-soft); }
+
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip {
+  font-size: .76rem; color: var(--muted);
+  border: 1px solid var(--line-soft); border-radius: 7px;
+  padding: .22rem .6rem; background: rgba(255,255,255,.02);
+}
+
+.highlights { margin-top: 1.4rem; display: grid; gap: .5rem; list-style: none; }
+.highlights li {
+  position: relative; padding-left: 1.4rem; color: var(--text-soft); font-size: .92rem;
+}
+.highlights li::before {
+  content: ""; position: absolute; left: 0; top: .62em;
+  width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
+  transform: rotate(45deg);
+}
+
+/* AUTO-HIDE empty optional sections — every project block keeps its optional
+   bits (stats, highlights) as tags for a uniform copy-paste shape; when one is
+   left empty it vanishes. The JS sweep at the bottom of the file also
+   removes any left with stray whitespace (which would defeat :empty), so an
+   empty box never shows on the page. */
+.project .stats:empty,
+.project .highlights:empty { display: none; }
+
+/* ------------------------------------------------------------
+   PROJECT IMAGE GALLERY
+   Authoring stays simple: each project owns a plain `.gallery`
+   list of <img> tags. JS turns that into a restrained, cinematic
+   image stage with an in-frame HUD, progress timeline, swipe,
+   and lightbox support.
+   ------------------------------------------------------------ */
+
+/* Fallback for a gallery work.js has not built yet, or never will.
+   Show the first image only. All of them would stack down the page. */
+.gallery:not(.is-ready) > img { display: none; width: 100%; border-radius: var(--radius); }
+.gallery:not(.is-ready) > img:first-of-type { display: block; }
+
+.gallery.is-ready { display: block; width: 100%; min-width: 0; }
+
+/* Fixed 16:9 showcase. The frame owns all chrome now: image, ambient
+   backdrop, HUD, progress timeline, and optional preview chip. */
+.gallery__holder {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  isolation: isolate;
+  cursor: zoom-in;          /* the image area opens the lightbox */
+  touch-action: pan-y;      /* vertical scroll stays native; horizontal = swipe */
+}
+
+/* Glassy media surface. The active image is also mirrored into a blurred
+   ambience layer, so screenshots/photos color the frame without extra assets. */
+.gallery__frame {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.11);
+  background:
+    radial-gradient(140% 120% at 50% 0%, rgba(255,255,255,.06), rgba(255,255,255,0) 56%),
+    #090c12;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.10),
+    inset 0 -1px 0 rgba(0,0,0,.52),
+    0 28px 80px -44px rgba(0,0,0,1);
+}
+.gallery__frame::before,
+.gallery__frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gallery__frame::before {
+  z-index: 0;
+  background:
+    radial-gradient(80% 80% at 18% 12%, rgba(74,165,232,.16), rgba(74,165,232,0) 58%),
+    radial-gradient(64% 72% at 88% 88%, rgba(255,255,255,.07), rgba(255,255,255,0) 62%),
+    linear-gradient(120deg, rgba(255,255,255,.055), transparent 28%, transparent 72%, rgba(255,255,255,.035));
+}
+.gallery__frame::after {
+  z-index: 4;
+  background:
+    linear-gradient(180deg, rgba(5,8,12,.16), transparent 28%, transparent 54%, rgba(4,7,12,.66)),
+    linear-gradient(90deg, rgba(0,0,0,.20), transparent 22%, transparent 78%, rgba(0,0,0,.18));
+}
+.gallery__ambient {
+  position: absolute;
+  inset: -16%;
+  width: 132%;
+  height: 132%;
+  object-fit: cover;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(34px) saturate(1.16) brightness(.72);
+  transform: scale(1.05);
+  transition: opacity .52s var(--ease), transform .75s var(--ease);
+}
+.gallery__ambient.is-active {
+  opacity: .46;
+  transform: scale(1.02);
+}
+
+/* The active work image stays contained and inspectable. */
+.gallery__stage {
+  position: absolute;
+  inset: clamp(14px, 2.45%, 26px);
+  z-index: 2;
+  border-radius: 7px;
+}
+
+/* each photo: contained (any ratio fits, never stretched), centered,
+   floating on the holder with a faint drop shadow, cross-faded. */
+.gallery__img {
+  position: absolute; inset: 0; margin: auto;       /* centered in the stage */
+  max-width: 100%; max-height: 100%;
+  width: auto; height: auto;        /* shrink large photos to fit; never upscale
+                                       a small one to mush (it stays crisp + centered) */
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 6px;
+  transform: translateZ(0) scale(.985);
+  transition: opacity .46s var(--ease), transform .5s var(--ease), filter .5s var(--ease);
+  filter: drop-shadow(0 20px 34px rgba(0,0,0,.46));
+}
+.gallery__img.is-active { opacity: 1; transform: translateZ(0) scale(1); }
+
+.gallery__hud {
+  position: absolute;
+  inset: clamp(10px, 2.2%, 18px);
+  z-index: 7;
+  pointer-events: none;
+}
+
+/* Lower-left editorial label. The caption becomes a quiet annotation instead
+   of part of a control bar, so the image keeps breathing room. */
+.gallery__caption {
+  position: absolute;
+  left: 0;
+  bottom: clamp(12px, 2vw, 18px);
+  max-width: min(62%, 420px);
+  pointer-events: none;     /* a quiet label; taps fall through to swipe / lightbox */
+  display: flex;
+  align-items: center;
+  min-height: 2.18rem;
+  padding: .48rem .78rem;
+  border-left: 2px solid rgba(111,188,242,.76);
+  border-radius: 0 8px 8px 0;
+  background:
+    linear-gradient(90deg, rgba(6,9,14,.84), rgba(6,9,14,.54) 74%, rgba(6,9,14,0));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 18px 44px -30px rgba(0,0,0,.95);
+  -webkit-backdrop-filter: blur(14px) saturate(1.14);
+          backdrop-filter: blur(14px) saturate(1.14);
+  /* Hidden at rest on every device; it glides in only at the right moment
+     (desktop: hover / focus below; touch: a transient .is-visible on change). */
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .62s var(--ease-soft), transform .62s var(--ease-soft);
+}
+.gallery__caption.is-empty { display: none; }
+/* Desktop pointer: the subtitle only whispers in while hovering or focused. */
+@media (hover: hover) and (pointer: fine) {
+  .gallery__holder:hover .gallery__caption,
+  .gallery__holder:focus-within .gallery__caption {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Touch: JS adds .is-visible on each image change, then drops it after a
+   gracious beat so the frame settles back to pure minimalism. */
+.gallery__caption.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.gallery__caption::before {
+  content: "";
+  flex: 0 0 auto;
+  width: .42rem;
+  height: .42rem;
+  margin-right: .52rem;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 18px rgba(74,165,232,.35);
+}
+/* Blank images get a non-breaking space (set in JS); long captions clip to
+   one line with an ellipsis. */
+.gallery__caption-text {
+  min-width: 0;
+  text-align: left;
+  color: rgba(235,238,244,.94);
+  font-size: .75rem;
+  font-weight: 780;
+  letter-spacing: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 12px rgba(0,0,0,.5);
+}
+.gallery__counter {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 3.7rem;
+  padding: .46rem .58rem;
+  text-align: center;
+  color: rgba(235,238,244,.92);
+  font-size: .66rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 1px solid rgba(255,255,255,.105);
+  border-radius: 999px;
+  background: rgba(8,12,18,.52);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 14px 36px -28px rgba(0,0,0,.9);
+  -webkit-backdrop-filter: blur(14px) saturate(1.14);
+          backdrop-filter: blur(14px) saturate(1.14);
+  text-shadow: 0 0 16px rgba(74,165,232,.18);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  /* Slow, soft fade so the count glides in on a change and dissolves back out
+     (the JS reveal timer holds it visible in between). */
+  transition: opacity .62s var(--ease-soft), transform .62s var(--ease-soft);
+}
+.gallery__counter.is-visible,
+.gallery__holder:focus-within .gallery__counter {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (hover: hover) and (pointer: fine) {
+  .gallery__holder:hover .gallery__counter {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.gallery__nav-cluster {
+  position: absolute;
+  right: 0;
+  bottom: clamp(12px, 2vw, 18px);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: .18rem;
+  padding: .24rem;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 999px;
+  background: rgba(8,12,18,.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 18px 42px -28px rgba(0,0,0,.95);
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
+          backdrop-filter: blur(16px) saturate(1.18);
+}
+.gallery__nav-cluster::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: .58rem;
+  bottom: .58rem;
+  width: 1px;
+  background: rgba(255,255,255,.09);
+  transform: translateX(-50%);
+}
+
+/* PREV / NEXT ARROWS — built once per used location (image / bar / dots) and
+   placed there in the DOM; hidden by default and shown for the chosen
+   placement per breakpoint via the body.ga-d-<mode> / .ga-m-<mode> classes.
+   Base look is a minimal inline-SVG chevron; image mode overrides it below. */
+.gallery__nav {
+  display: none; place-items: center;   /* becomes grid when shown */
+  border: 1px solid transparent;
+  background: none;
+  padding: 0;
+  color: var(--muted); cursor: pointer;
+  transition: color .2s, background .25s, border-color .25s, opacity .25s, transform .25s;
+}
+.gallery__nav svg { width: 15px; height: 15px; display: block; }
+.gallery__nav:hover { color: var(--text); }
+
+/* show the chosen placement for each breakpoint */
+@media (min-width: 881px) {
+  body.ga-d-image .gallery__nav--image { display: grid; }
+  body.ga-d-bar   .gallery__nav--bar   { display: grid; }
+  body.ga-d-dots  .gallery__nav--dots  { display: grid; }
+}
+@media (max-width: 880px) {
+  body.ga-m-image .gallery__nav--image { display: grid; }
+  body.ga-m-bar   .gallery__nav--bar   { display: grid; }
+  body.ga-m-dots  .gallery__nav--dots  { display: grid; }
+}
+
+/* BAR placement: a floating two-button nav rocker. */
+.gallery__nav--bar {
+  flex: 0 0 auto;
+  width: 2.18rem;
+  height: 2.18rem;
+  border-radius: 999px;
+  color: rgba(235,238,244,.78);
+  border-color: transparent;
+  background: transparent;
+}
+.gallery__nav--bar:hover {
+  color: #fff;
+  background: rgba(74,165,232,.18);
+  border-color: rgba(74,165,232,.20);
+  transform: scale(1.04);
+}
+
+/* DOTS placement: chevrons flanking the centered progress rail if selected. */
+.gallery__nav--dots { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 999px; }
+.gallery__nav--dots.gallery__nav--prev { margin-right: .15rem; }
+.gallery__nav--dots.gallery__nav--next { margin-left: .15rem; }
+
+/* IMAGE placement: circular overlay button on the photo's edges, revealed on
+   hover / focus (and always shown on touch), like the original style. */
+.gallery__nav--image {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 42px; height: 42px; z-index: 3; opacity: 0;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(8,12,20,.55); color: var(--text-soft);
+}
+.gallery__nav--image.gallery__nav--prev { left: 12px; }
+.gallery__nav--image.gallery__nav--next { right: 12px; }
+.gallery__holder:hover .gallery__nav--image,
+.gallery__nav--image:focus-visible { opacity: 1; }
+.gallery__nav--image:hover { background: rgba(8,12,20,.85); border-color: var(--accent); color: #fff; }
+@media (hover: none) { .gallery__nav--image { opacity: 1; } }
+
+/* Full-width timeline at the bottom of the frame. Each segment remains a real
+   button, but the visual reads like an integrated media scrub line. */
+.gallery__dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: stretch;
+  align-items: stretch;
+  gap: 2px;
+  margin: 0;
+  height: 3px;
+  pointer-events: auto;
+}
+.gallery__dot {
+  position: relative;
+  flex: 1 1 0;
+  width: auto;
+  height: 3px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: rgba(255,255,255,.16);
+  cursor: pointer;
+  opacity: 1;
+  transition: background .25s, box-shadow .25s;
+}
+.gallery__dot img {
+  display: none;
+}
+.gallery__dot:hover { background: rgba(255,255,255,.34); }
+.gallery__dot.is-active {
+  background: linear-gradient(90deg, var(--accent-bright), var(--accent-deep));
+  box-shadow: 0 0 20px rgba(74,165,232,.34);
+}
+
+/* Optional next-image teaser, now a restrained top-right preview chip. */
+.gallery__preview {
+  position: absolute;
+  left: clamp(12px, 2.35%, 20px);
+  top: clamp(12px, 2.35%, 20px);
+  width: 19%;
+  max-width: 118px;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  z-index: 7;
+  opacity: .62;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(10,13,18,.62);
+  box-shadow: 0 18px 42px -24px rgba(0,0,0,.95);
+  border-radius: 8px;
+  transform: translateY(-3px) scale(.98);
+  transition: transform .28s var(--ease), border-color .28s, opacity .28s;
+  -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(12px);
+}
+.gallery__holder:hover .gallery__preview,
+.gallery__preview:focus-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.gallery__preview:hover { border-color: rgba(74,165,232,.55); }
+.gallery__preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* keyboard focus rings on the gallery controls (the arrow also reveals
+   itself on focus via the rule above). */
+.gallery__nav:focus-visible,
+.gallery__dot:focus-visible,
+.gallery__preview:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* single-image galleries: no arrows, no dots, no preview. */
+.gallery--single .gallery__nav,
+.gallery--single .gallery__dots,
+.gallery--single .gallery__preview { display: none; }
+
+@media (hover: none) {
+  .gallery__preview { opacity: .86; transform: none; }
+}
+
+@media (max-width: 880px) {
+  .gallery__stage { inset: clamp(10px, 2.8%, 18px); }
+  .gallery__hud { inset: 9px; }
+  .gallery__caption {
+    max-width: 58%;
+    min-height: 2.08rem;
+    padding: .4rem .62rem;
+  }
+  .gallery__caption-text { font-size: .72rem; }
+  .gallery__counter { min-width: 3rem; font-size: .62rem; }
+  .gallery__nav-cluster { padding: .2rem; }
+  .gallery__nav--bar { width: 1.82rem; height: 1.82rem; }
+  .gallery__preview { width: 22%; max-width: 96px; }
+}
+
+@media (max-width: 440px) {
+  .gallery__caption { max-width: 56%; padding-inline: .54rem; }
+  .gallery__caption::before { width: .34rem; height: .34rem; margin-right: .42rem; }
+  .gallery__caption-text { font-size: .68rem; }
+  .gallery__counter { min-width: 2.72rem; font-size: .58rem; }
+  .gallery__nav--bar { width: 1.66rem; height: 1.66rem; }
+  .gallery__nav--bar svg { width: 13px; height: 13px; }
+  .gallery__preview { width: 25%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter, .gallery__caption { transition: none; }
+}
+
+/* ============================================================
+   4. GALLERY
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   THE SIX-COLUMN TRAIN GRID
+   ------------------------------------------------------------
+   One project is one train. A train opens with its title band,
+   spanning all six columns and exactly one row tall, and then its
+   tiles.
+
+   The invariant: every tile is exactly one row tall, and the widths
+   in a row add to exactly six. An interior hole is therefore
+   impossible rather than avoided, which is why the packer in Phase 4
+   Part 2 is a small problem instead of a large one. Only the last row
+   of a train may be short.
+
+   The row height is one value for the whole grid. A tile that is
+   wider is more panoramic, not taller, and that is the look.
+
+   data-span is the width a tile is DRAWN at. data-w, on the same
+   element, is the width the image PREFERS. They are equal in authored
+   markup; the packer changes only the first. */
+.gal { padding: 0 0 var(--section-pad); }
+.gal-intro { padding: var(--section-pad) 0 clamp(1.6rem, 3vw, 2.6rem); }
+.gal-note { margin-top: 1rem; color: var(--muted); font-size: .88rem; }
+
+.gal-train {
+  display: grid;
+  /* The column count, declared as well as applied. gallery.js reads this
+     rather than counting the computed tracks: once it has written an inline
+     span, a tile wider than the grid creates implicit tracks and the computed
+     value no longer describes the breakpoint. Keep the two in step. */
+  --gal-cols: 6;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--gal-gap, 14px);
+  margin-bottom: clamp(2rem, 4vw, 3.2rem);
+  /* One height for every tile in the grid. It is set on the tile and not as
+     grid-auto-rows, because the title band is a grid item too and has to size
+     to its own text: a band a tile tall is a hole with a heading in it. */
+  --gal-row: clamp(150px, 14vw, 230px);
+}
+
+/* The title band. One row tall, all six columns, hairline under it. */
+.gal-train__head {
+  grid-column: 1 / -1;
+  display: flex; align-items: baseline; gap: 1rem;
+  padding: .9rem .25rem;
+  border-bottom: 1px solid var(--line);
+}
+.gal-train__n {
+  flex: none;
+  font-size: .66rem; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700;
+}
+.gal-train__title { margin: 0; font-size: clamp(1.3rem, 2.4vw, 2rem); letter-spacing: -.02em; }
+.gal-train__rule { flex: 1; height: 1px; background: var(--line); }
+.gal-train__meta { flex: none; font-size: .72rem; color: var(--muted); letter-spacing: .05em; }
+
+/* A tile. The figure is the slot; the image fills it. */
+.gal-tile {
+  position: relative; margin: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel);
+  height: var(--gal-row);
+}
+.gal-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gal-tile__cap {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 1.4rem .75rem .55rem;
+  font-size: .72rem; color: #fff; letter-spacing: .01em;
+  background: linear-gradient(to top, rgba(8, 10, 14, .86), rgba(8, 10, 14, 0));
+}
+
+/* The widths. Authored as an attribute rather than a class because the
+   packer rewrites one value per tile, and a value is easier to be sure
+   about than a set of classes that must not overlap. */
+.gal-tile[data-span="1"] { grid-column: span 1; }
+.gal-tile[data-span="2"] { grid-column: span 2; }
+.gal-tile[data-span="3"] { grid-column: span 3; }
+.gal-tile[data-span="4"] { grid-column: span 4; }
+.gal-tile[data-span="6"] { grid-column: span 6; }
+
+/* A tile opens the shared lightbox. gallery.js gives it the role and the
+   tabindex; these are the two states that go with them. */
+.gal-tile { cursor: zoom-in; }
+.gal-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .gal-tile img { transition: transform .5s var(--ease); }
+  .gal-tile:hover img { transform: scale(1.03); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gal-tile img, .gal-tile:hover img { transition: none; transform: none; }
+}
+
+/* ------------------------------------------------------------
+   THE COLLAPSE
+   ------------------------------------------------------------
+   These rules live here, beside the grid, and not in the RESPONSIVE
+   section. A grid whose collapse is written somewhere else cannot be
+   reasoned about, and this one has an invariant to keep. That is a
+   deliberate exception to the one-place-for-responsive rule, and this
+   comment is the record of it.
+
+   Six columns cannot survive a phone, and the spans cannot be scaled:
+   three columns have no room for an x4. So each width is mapped to a
+   new one explicitly.
+
+   Mapped widths do not add to the new column count the way the
+   authored ones add to six, so the browser is asked to close the gaps
+   with dense packing. That is the same job the packer does at full
+   width, done by the layout engine, and it needs no script - which is
+   what keeps the page correct with scripting off. */
+@media (max-width: 880px) {
+  .gal-train {
+    --gal-cols: 3;
+    grid-template-columns: repeat(3, 1fr);
+    grid-auto-flow: dense;
+    --gal-row: clamp(140px, 22vw, 200px);
+  }
+  .gal-tile[data-span="1"], .gal-tile[data-span="2"] { grid-column: span 1; }
+  .gal-tile[data-span="3"] { grid-column: span 2; }
+  .gal-tile[data-span="4"], .gal-tile[data-span="6"] { grid-column: span 3; }
+}
+
+@media (max-width: 560px) {
+  .gal-train {
+    --gal-cols: 1;
+    grid-template-columns: 1fr;
+    grid-auto-flow: row;
+    --gal-row: clamp(180px, 52vw, 260px);
+  }
+  .gal-tile[data-span] { grid-column: 1 / -1; }
+  .gal-train__head { flex-wrap: wrap; gap: .35rem .8rem; }
+  .gal-train__rule { display: none; }
+}
+
+/* ============================================================
+   5. OVERLAYS
+   ------------------------------------------------------------
+   The two surfaces that cover the page: the fullscreen lightbox
+   and the deep-dive drawer. Both lock body scroll while open.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   LIGHTBOX
+   One reusable fullscreen viewer. Desktop: image fit to the
+   page (no zoom). Touch devices: pinch-zoom + clamped pan + drag-to-change
+   photos (added in the JS). Plus (X) close, prev/next arrows, a lower-left
+   subtitle that glides in then idle-fades, and Esc / backdrop close. Sits
+   above the header (z 1000).
+   ------------------------------------------------------------ */
+body.lb-open { overflow: hidden; }
+
+.lightbox {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(4,6,10,.93);
+  animation: lb-fade .25s var(--ease-soft) both;
+}
+.lightbox[hidden] { display: none; }
+@keyframes lb-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* the stage centers the image and reserves margins so the photo never
+   collides with the close button, arrows, or caption bar. */
+/* explicit inset rectangle (not padding) defines the safe area, so the photo
+   never collides with the close button, arrows, or caption bar, and the box
+   stays symmetric at any width. */
+.lightbox__stage {
+  position: absolute;
+  top: clamp(48px, 8vh, 76px);
+  right: clamp(44px, 8vw, 96px);
+  bottom: clamp(52px, 9vh, 84px);
+  left: clamp(44px, 8vw, 96px);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  touch-action: none;       /* the JS owns touch gestures on mobile */
+}
+/* Two stacked layers: the active image, and an incoming layer revealed beneath
+   it during a touch drag (so the lightbox slides photo-to-photo exactly like
+   the main gallery). Both are absolutely centered + contained. */
+.lightbox__img {
+  position: absolute; inset: 0; margin: auto;       /* centered within the stage */
+  max-width: 100%; max-height: 100%;
+  width: auto; height: auto;
+  min-width: 0; min-height: 0;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none; -webkit-user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 22px 50px rgba(0,0,0,.55));
+}
+.lightbox__img--active   { z-index: 1; }
+.lightbox__img--incoming { z-index: 0; opacity: 0; pointer-events: none; }   /* hidden until a drag reveals it */
+.lightbox__img.is-zoomed { cursor: grab; }
+
+.lightbox__close,
+.lightbox__nav {
+  position: absolute; z-index: 2; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(12,16,24,.6); color: #fff; cursor: pointer;
+  border-radius: 50%;
+  transition: background .25s, border-color .25s, transform .2s;
+}
+.lightbox__close:hover,
+.lightbox__nav:hover { background: rgba(12,16,24,.95); border-color: var(--accent); }
+.lightbox__close:focus-visible,
+.lightbox__nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.lightbox__close { top: 16px; right: 18px; width: 46px; height: 46px; }
+.lightbox__close svg { width: 20px; height: 20px; }
+.lightbox__nav { top: 50%; transform: translateY(-50%); width: 50px; height: 50px; }
+.lightbox__nav svg { width: 22px; height: 22px; }
+.lightbox__nav--prev { left: 16px; }
+.lightbox__nav--next { right: 16px; }
+.lightbox__nav:hover { transform: translateY(-50%) scale(1.05); }
+
+/* Editorial subtitle, mirroring the in-frame gallery caption: a quiet glass
+   chip with an accent dot, anchored near the image's lower-left (not pinned to
+   the very bottom). Hidden at rest; it glides in on an image change / mouse
+   movement (desktop) or a drag (touch), then fades back out. */
+.lightbox__caption {
+  position: absolute;
+  left: clamp(20px, 8vw, 96px);
+  bottom: clamp(58px, 10vh, 96px);
+  right: auto; top: auto;
+  z-index: 3;
+  max-width: min(72%, 540px);
+  display: flex; align-items: center;
+  padding: .5rem .9rem;
+  border-left: 2px solid rgba(111,188,242,.78);
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(90deg, rgba(6,9,14,.86), rgba(6,9,14,.5) 76%, rgba(6,9,14,0));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 18px 44px -30px rgba(0,0,0,.95);
+  -webkit-backdrop-filter: blur(14px) saturate(1.14);
+          backdrop-filter: blur(14px) saturate(1.14);
+  color: rgba(235,238,244,.95);
+  font-size: .9rem; font-weight: 700; letter-spacing: 0; line-height: 1.3;
+  text-shadow: 0 1px 12px rgba(0,0,0,.5);
+  pointer-events: none;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .6s var(--ease-soft), transform .6s var(--ease-soft);
+}
+.lightbox__caption::before {
+  content: ""; flex: 0 0 auto;
+  width: .46rem; height: .46rem; margin-right: .55rem;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 18px rgba(74,165,232,.4);
+}
+.lightbox__caption.is-empty { display: none; }
+.lightbox__caption.is-visible { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 560px) {
+  .lightbox__close { width: 42px; height: 42px; top: 10px; right: 10px; }
+  .lightbox__nav { width: 44px; height: 44px; }
+  .lightbox__nav--prev { left: 8px; }
+  .lightbox__nav--next { right: 8px; }
+  .lightbox__caption {
+    left: clamp(14px, 5vw, 28px);
+    bottom: clamp(64px, 12vh, 96px);
+    max-width: 80%;
+    padding: .42rem .72rem;
+    font-size: .8rem;
+  }
+  .lightbox__caption::before { width: .4rem; height: .4rem; margin-right: .46rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lightbox { animation: none; }
+  .lightbox__nav, .lightbox__close, .lightbox__caption, .lightbox__img { transition: none; }
+}
+
+/* ------------------------------------------------------------
+   DEEP-DIVE DRAWER  ("Learn more")
+   A right-side slide-over that swaps in a longer write-up for one
+   project: a few paragraphs, single photos (each opens the shared
+   lightbox on click / Enter for zoom), and bullet-point blocks.
+   Built once in JS and filled from that project's
+   <template class="deepdive" data-title data-subtitle>. Sits above
+   the header (z 1000) and below the lightbox (z 2000), so a zoomed
+   photo overlays the panel.
+
+   AUTHORING a deep dive (all plain HTML, like the rest of the page):
+     1. Drop a trigger button in the .project__body:
+          <button class="project__more" type="button">Learn more …</button>
+     2. Add a sibling template holding the expanded content:
+          <template class="deepdive" data-title="…" data-subtitle="…">
+            <p>…paragraph…</p>
+            <figure class="dd-figure">
+              <img src="…" alt="…" /><figcaption>…</figcaption>
+            </figure>
+            <h4>Section label</h4>
+            <ul class="dd-points"><li>…</li></ul>
+            <p class="dd-note">…quiet footer / attribution…</p>
+          </template>
+   A project with no trigger and no template has no drawer.
+   ------------------------------------------------------------ */
+body.dd-open { overflow: hidden; }
+
+.dd {
+  position: fixed; inset: 0; z-index: 1500;
+  visibility: hidden;
+  transition: visibility 0s linear .5s;   /* hold visible through the slide-out */
+}
+.dd.is-open { visibility: visible; transition: visibility 0s; }
+
+.dd__scrim {
+  position: absolute; inset: 0;
+  background: rgba(4,6,10,.66);
+  opacity: 0;
+  transition: opacity .45s var(--ease-soft);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.dd.is-open .dd__scrim { opacity: 1; }
+
+/* the panel slides in from the right */
+.dd__panel {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(560px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -30px 0 80px -40px rgba(0,0,0,.9);
+  transform: translateX(100%);
+  transition: transform .5s var(--ease);
+  will-change: transform;
+}
+.dd.is-open .dd__panel { transform: translateX(0); }
+
+.dd__head {
+  position: relative; flex: 0 0 auto;
+  padding: clamp(1.6rem, 4vw, 2.4rem) clamp(1.4rem, 4vw, 2.4rem) 1.2rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dd__eyebrow {
+  font-size: .72rem; font-weight: 800; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--accent);
+}
+.dd__title {
+  margin-top: .6rem; padding-right: 3rem;   /* clear the close button */
+  font-size: clamp(1.5rem, 3.4vw, 2rem);
+  font-weight: 800; letter-spacing: -.02em; line-height: 1.12;
+}
+.dd__subtitle {
+  margin-top: .5rem; color: var(--muted);
+  font-size: .84rem; letter-spacing: .02em;
+}
+.dd__subtitle:empty { display: none; }
+
+.dd__close {
+  position: absolute; top: 1rem; right: 1rem;
+  width: 42px; height: 42px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(12,16,24,.5); color: var(--text-soft); cursor: pointer;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.dd__close:hover { background: var(--panel-2); border-color: var(--accent); color: #fff; }
+.dd__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dd__close svg { width: 18px; height: 18px; }
+
+/* scrollable body — the cloned template content lands here */
+.dd__body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  padding: clamp(1.4rem, 4vw, 2.4rem);
+  -webkit-overflow-scrolling: touch;
+}
+.dd__body > * + * { margin-top: 1.15rem; }
+.dd__body p { color: var(--text-soft); font-size: .96rem; line-height: 1.7; }
+.dd__body h4 {
+  font-size: .78rem; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--dim); margin-top: 1.9rem;
+}
+
+/* a single photo; click / Enter opens the shared lightbox (zoom) */
+figure.dd-figure { margin: 1.5rem 0 0; }
+figure.dd-figure img {
+  width: 100%; display: block; border-radius: var(--radius);
+  border: 1px solid var(--line); cursor: zoom-in;
+  transition: border-color .25s;
+}
+figure.dd-figure img:hover { border-color: rgba(74,165,232,.55); }
+figure.dd-figure img:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+figure.dd-figure figcaption {
+  margin-top: .55rem; color: var(--muted);
+  font-size: .78rem; letter-spacing: .02em;
+}
+figure.dd-figure figcaption:empty { display: none; }
+
+/* bullet block — mirrors the card .highlights diamond markers */
+ul.dd-points { margin-top: 1.2rem; display: grid; gap: .6rem; list-style: none; padding: 0; }
+ul.dd-points li {
+  position: relative; padding-left: 1.4rem;
+  color: var(--text-soft); font-size: .92rem; line-height: 1.55;
+}
+ul.dd-points li::before {
+  content: ""; position: absolute; left: 0; top: .55em;
+  width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
+  transform: rotate(45deg);
+}
+
+/* a quiet attribution / footer line inside a deep dive */
+.dd-note {
+  margin-top: 1.8rem; padding-top: 1.2rem;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted); font-size: .82rem; letter-spacing: .01em;
+}
+
+/* the card trigger button */
+.project__more {
+  margin-top: 1.7rem;
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .58rem 1.1rem;
+  font: inherit; font-size: .85rem; font-weight: 700; letter-spacing: .02em;
+  color: var(--text); cursor: pointer;
+  background: rgba(74,165,232,.08);
+  border: 1px solid rgba(74,165,232,.35); border-radius: 999px;
+  transition: background .25s, border-color .25s;
+}
+.project__more:hover { background: rgba(74,165,232,.16); border-color: var(--accent); }
+.project__more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.project__more svg { width: 15px; height: 15px; transition: transform .25s var(--ease); }
+.project__more:hover svg { transform: translateX(3px); }
+
+@media (max-width: 560px) {
+  .dd__panel { width: 100%; border-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dd, .dd__scrim, .dd__panel, .project__more svg { transition: none; }
+}
+
+/* ============================================================
+   6. LATEST, ABOUT AND CONTACT
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   LATEST FROM THE BLOG (home page)
+   ------------------------------------------------------------
+   The list itself is written by the publisher, so these rules have
+   to hold for an empty block, for one post, and for five. */
+.latest { padding: 0 0 clamp(3rem, 7vw, 6rem); }
+.latest__list { margin-top: 1.4rem; border-top: 1px solid var(--line); }
+.latest__item { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem 1.1rem;
+  padding: .85rem .2rem; border-bottom: 1px solid var(--line); color: var(--text);
+  text-decoration: none; transition: color .18s ease, background .18s ease; }
+.latest__item:hover, .latest__item:focus-visible { color: var(--accent-bright);
+  background: rgba(74, 165, 232, .05); }
+.latest__item time { flex: none; width: 13ch; color: var(--dim); font-size: .78rem;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.latest__title { flex: 1 1 16ch; font-weight: 600; }
+.latest__all { display: inline-block; margin-top: 1.1rem; }
+.latest__empty { padding: 1.1rem .2rem; color: var(--muted); }
+
+/* ------------------------------------------------------------
+   ABOUT
+   ------------------------------------------------------------ */
+.about { padding-block: var(--section-pad); }
+.about__grid {
+  display: grid; grid-template-columns: 300px 1fr;
+  gap: clamp(2rem, 6vw, 5rem); align-items: start;
+}
+.portrait {
+  position: relative; width: 240px; aspect-ratio: 1; margin-inline: auto;
+}
+.portrait img {
+  position: relative; z-index: 1;
+  width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+  border: 1px solid var(--line);
+}
+.portrait::before {
+  content: ""; position: absolute; inset: -10px; border-radius: 50%;
+  border: 1px solid var(--accent-faint);
+  background: conic-gradient(from 200deg, transparent, var(--accent-glow), transparent 70%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  animation: spin 18s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.about__body p { color: var(--text-soft); }
+.about__body p + p { margin-top: 1.1rem; }
+.about__body .lede { font-size: clamp(1.15rem, 1.8vw, 1.4rem); color: var(--text); }
+.about__body .place { color: var(--muted); margin-top: 1.3rem; }
+.about__body .textlink { margin-top: 1.6rem; }
+
+/* ------------------------------------------------------------
+   CONTACT / FOOTER
+   ------------------------------------------------------------ */
+.contact {
+  padding-block: var(--section-pad);
+  text-align: center;
+  position: relative;
+}
+.contact h2 {
+  font-size: clamp(2.6rem, 8vw, 5rem);
+  font-weight: 900; letter-spacing: -.03em; line-height: 1;
+}
+.contact .email {
+  display: inline-block; margin-top: 1.6rem;
+  font-size: clamp(1.3rem, 3.4vw, 2.1rem);
+  font-weight: 700; color: var(--accent);
+  border-bottom: 2px solid transparent;
+  transition: border-color .3s, color .3s, transform .4s var(--ease);
+}
+.contact .email:hover { border-bottom-color: var(--accent); color: var(--accent-bright); transform: translateY(-2px); }
+
+/* primary contact actions: Call + Text row, then Résumé below */
+.contact__actions {
+  margin-top: 2.4rem;
+  display: flex; flex-direction: column; align-items: center; gap: .9rem;
+}
+.contact__row { display: flex; flex-wrap: wrap; justify-content: center; gap: .9rem; }
+.contact-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .6rem;
+  min-width: 150px;
+  padding: .85rem 1.7rem; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font-weight: 700; font-size: .95rem;
+  transition: transform .4s var(--ease), border-color .4s, color .4s, background .4s, box-shadow .4s;
+}
+.contact-btn:hover {
+  transform: translateY(-3px); border-color: var(--accent);
+  background: var(--panel-2); box-shadow: 0 14px 36px -20px var(--accent-glow);
+}
+.contact-btn svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+.contact-btn--call { color: var(--accent); border-color: var(--accent-faint); }
+
+/* chic, understated icon-only chips for LinkedIn / GitHub / X */
+.social-mini {
+  margin-top: 2rem;
+  display: flex; justify-content: center; align-items: center; gap: .9rem;
+}
+.social-mini a {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--line); background: transparent;
+  color: var(--muted);
+  transition: transform .4s var(--ease), border-color .4s, color .4s, background .4s;
+}
+.social-mini a:hover {
+  transform: translateY(-3px); border-color: var(--accent);
+  color: var(--accent); background: var(--panel);
+}
+.social-mini svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+
+/* quiet finishing line at the very bottom */
+.endbar {
+  margin-top: clamp(3.5rem, 8vw, 6rem);
+  padding-block: 1.5rem 1.8rem;
+  text-align: center;
+  font-size: .78rem; letter-spacing: .05em; color: var(--dim);
+}
+
+/* ============================================================
+   7. SHARED EFFECTS AND BLOG CHROME
+   ------------------------------------------------------------
+   Styles that more than one surface uses: the fill behind both
+   portrait cutouts, the reduced-motion rules, the reveal utility,
+   and the blog chrome that the generated month pages link.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   PORTRAIT BACKGROUNDS  (behind the transparent-PNG portraits)
+   ------------------------------------------------------------
+   The portraits are transparent cutouts; .portrait-bg is the fill
+   painted behind each one (header circle + About circle). The active
+   fill is selected by [data-portrait-bg="N"] on <html>. One option
+   ships: 1, Azure Spotlight. To try another, add a matching
+   [data-portrait-bg="N"] block here and set that value on <html>.
+   ------------------------------------------------------------ */
+.portrait-bg {
+  position: absolute; inset: 0; z-index: 0;
+  border-radius: 50%; overflow: hidden;
+  pointer-events: none;
+  background: var(--panel);            /* fallback if no option matches */
+}
+.portrait-bg::before,
+.portrait-bg::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit;
+}
+
+/* 1 — Azure Spotlight: soft top-down glow that gently breathes */
+[data-portrait-bg="1"] .portrait-bg {
+  background: radial-gradient(115% 115% at 50% 22%, var(--accent-glow), var(--panel) 68%);
+}
+[data-portrait-bg="1"] .portrait-bg::before {
+  background: radial-gradient(58% 55% at 50% 28%, rgba(111,188,242,.5), transparent 70%);
+  animation: pbgPulse 6s var(--ease-soft) infinite alternate;
+}
+
+@keyframes pbgPulse { from { opacity: .5; transform: scale(.96); } to { opacity: 1; transform: scale(1.06); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .portrait-bg, .portrait-bg::before, .portrait-bg::after { animation: none !important; }
+  .hero__sparks span, .hero__halo { animation: none !important; }
+  .hero__halo { transform: translate(-50%, -50%) !important; }
+}
+
+/* ------------------------------------------------------------
+   SCROLL REVEAL
+   ------------------------------------------------------------ */
+.reveal { opacity: 0; transform: translateY(34px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
+.reveal.in { opacity: 1; transform: none; }
+.reveal.d1 { transition-delay: .08s; }
+.reveal.d2 { transition-delay: .16s; }
+.reveal.d3 { transition-delay: .24s; }
+
+/* ------------------------------------------------------------
+   BLOG — shared chrome. Used by the in-site stream and by the
+   generated month pages, which link this file directly.
+   ------------------------------------------------------------ */
+.blog-wrap { width: 100%; max-width: 760px; margin-inline: auto; padding-inline: var(--gutter); }
+
+/* blog.html's own section. The stream that Phase 3 Part 2 puts inside it
+   brings its own styles; these two rules are the page around it. */
+.blog-page { padding-block: var(--section-pad); min-height: 46vh; }
+.blog-note {
+  margin-top: 1.4rem; padding: 1rem 1.2rem;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--muted); font-size: .9rem;
+}
+
+/* month-page top bar + footer (generated standalone pages) */
+.bm-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem 1rem;
+  padding: 1.3rem 0 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.bm-head__brand { font-weight: 800; letter-spacing: .04em; font-size: .95rem; color: var(--text); }
+.bm-head__brand:hover { color: var(--accent-bright); }
+.bm-head__label { margin: 0; color: var(--muted); font-weight: 600; font-size: .85rem; letter-spacing: .06em; }
+.bm-head__stream { margin-left: auto; font-size: .85rem; }
+.bm-foot {
+  margin-top: clamp(2.5rem, 6vw, 4rem);
+  padding: 1.4rem 0 1.8rem;
+  border-top: 1px solid var(--line-soft);
+  text-align: center;
+  font-size: .78rem; letter-spacing: .05em; color: var(--dim);
+}
+
+/* one post, on either surface */
+.blog-post { padding: clamp(1.8rem, 4vw, 2.6rem) 0; border-top: 1px solid var(--line-soft); }
+.blog-post:first-of-type { border-top: 0; }
+.blog-post > header h2 {
+  font-size: clamp(1.35rem, 2.6vw, 1.8rem);
+  font-weight: 800; letter-spacing: -.02em; line-height: 1.15;
+}
+.blog-post > header time {
+  display: block; margin-top: .35rem;
+  font-size: .78rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent);
+}
+.blog-post__body { margin-top: 1.1rem; color: var(--text-soft); }
+.blog-post__body > * + * { margin-top: 1rem; }
+.blog-post__body h3 {
+  margin-top: 1.7rem; font-size: 1.05rem; font-weight: 800;
+  letter-spacing: .01em; color: var(--text);
+}
+.blog-post__body a:not(.textlink) { color: var(--accent); }
+
+/* static image render: month pages show plain stacked figures (no JS);
+   the in-site stream upgrades tag RUNS to interactive carousels instead */
+figure.bp-fig { margin: 1.4rem 0 0; }
+figure.bp-fig img {
+  width: 100%; display: block; border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+figure.bp-fig figcaption {
+  margin-top: .5rem; color: var(--muted); font-size: .78rem; letter-spacing: .02em;
+}
+figure.bp-fig figcaption:empty { display: none; }
+
+/* ---- the blog stream, rendered into blog.html by blog.js ---- */
+.bs-months { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.1rem; }
+.bs-months button.on { border-color: var(--accent); color: var(--accent-bright); }
+.bs-month {
+  margin-top: clamp(2rem, 5vw, 3rem);
+  font-size: .8rem; font-weight: 800; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--accent);
+  display: flex; align-items: center; gap: .8rem;
+}
+.bs-month::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+.bs-note {
+  margin-top: 2rem; padding: 1rem 1.2rem;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--muted); font-size: .9rem;
+  display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
+}
+.bs-retry {
+  padding: .4rem .9rem; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg-deep); color: var(--text-soft);
+  font: 600 .8rem var(--font); cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.bs-retry:hover { border-color: var(--accent); color: var(--text); }
+.bs-end { margin-top: 2.5rem; text-align: center; color: var(--dim); font-size: .8rem; letter-spacing: .06em; }
+
+/* ============================================================
+   8. RESPONSIVE
+   ------------------------------------------------------------
+   Every breakpoint, gathered. Kept together so the full set of
+   overrides for a width can be read in one place.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   RESPONSIVE
+   ------------------------------------------------------------ */
+/* The nav becomes a drawer here, and not at the phone breakpoint below.
+   The line is where the header runs out of room, which is a measured number:
+   the brand lockup and five nav links stop fitting side by side at 1040. Move
+   it when the nav gains or loses an item, and measure again rather than
+   guessing - the two numbers are unrelated, which is why they are two rules. */
+@media (max-width: 1039px) {
+  /* Header bar stays pinned ON TOP; the drawer slides in BELOW it so the
+     AARON M. HARRIS lockup is always visible. Header sits above the panel. */
+  .site-header { z-index: 960; }
+
+  .nav {
+    position: fixed; top: var(--header-h, 64px); right: 0; bottom: 0;
+    width: min(82vw, 340px);
+    flex-direction: column; align-items: stretch; justify-content: flex-start;
+    gap: .15rem; padding: 1.4rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
+    background: rgba(18,20,25,.98);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border-left: 1px solid var(--line);
+    border-top: 1px solid var(--line);
+    box-shadow: -24px 0 60px -30px rgba(0,0,0,.8);
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform .5s var(--ease);
+    z-index: 940;
+  }
+  .nav.open { transform: translateX(0); }
+  .nav a {
+    font-size: 1.18rem; letter-spacing: .01em; text-transform: none;
+    color: var(--text-soft); padding: .7rem .2rem;
+  }
+  .nav a::after { display: none; }
+  .nav a:hover, .nav a.active { color: var(--accent); }
+
+  /* Work/About/Contact: take the open space and vertically center */
+  .nav__links {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; justify-content: center; gap: .3rem;
+  }
+
+  .nav__toggle {
+    display: inline-flex; flex-direction: column; gap: 5px;
+    width: 42px; height: 42px; align-items: center; justify-content: center;
+    margin-left: auto;   /* always pin to the right edge of the header */
+    background: rgba(35,38,47,.92); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 6px 18px -8px rgba(0,0,0,.7);
+    cursor: pointer; z-index: 970; position: relative;
+  }
+  .nav__toggle span { width: 18px; height: 2px; background: var(--text); transition: transform .35s var(--ease), opacity .25s; }
+  .nav__toggle.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .nav__toggle.open span:nth-child(2) { opacity: 0; }
+}
+
+@media (max-width: 880px) {
+  /* mobile: stack the name over the summary (no pipe).
+     Large at the top, compact once scrolled (see desktop rules). */
+  .brand__name { flex-direction: column; align-items: flex-start; }
+  .brand__title { font-size: 1.18rem; }
+  .site-header.scrolled .brand__title { font-size: .92rem; }
+  .brand__sub { font-size: .78rem; margin-top: .12rem; }
+  .site-header.scrolled .brand__sub { font-size: .68rem; }
+  .brand__sub::before { content: none; }
+
+  /* ===== MOBILE HERO (V2): portrait on top, text stacked below ========= */
+  /* plain block stacking (not flex) so the text column sizes to the viewport
+     cleanly — img block on top, .wrap block below. */
+  .hero {
+    display: block;
+    min-height: auto;
+    /* Headroom above the eyebrow: base 5.5rem + ~32px (2rem). Smaller bump
+       than desktop (which adds ~50px) so the stacked portrait still fits. */
+    padding-top: 7.5rem;
+    padding-bottom: 3rem;
+    /* portrait size, shared so the overlap can be a clean % of its height.
+       (aspect ratio of the source image: 598 / 616 ≈ 0.971)
+       The *0.8 makes the mobile portrait ~20% smaller; --fig-h and the
+       eyebrow overlap below both derive from --fig-w, so they scale with it. */
+    --fig-w: calc(min(82vw, 360px) * 0.8);
+    --fig-h: calc(var(--fig-w) * 0.971);
+  }
+  .hero__sub, .hero__note { max-width: 100%; }
+  /* keep all three hero CTAs (View Work / About / Get in Touch) on ONE row on
+     phones — same approach as the contact row below: nowrap + equal-width
+     flex items that can shrink (min-width:0), with trimmed padding/text. */
+  .hero__cta { flex-wrap: nowrap; gap: .55rem; width: 100%; }
+  .hero__cta .btn {
+    flex: 1 1 0; min-width: 0; justify-content: center;
+    padding: .8rem .6rem; gap: .4rem;
+    font-size: .9rem; white-space: nowrap;
+  }
+  /* portrait flows at the top, centered; the fade is baked into the PNG, so
+     the text can still rise into the faded lower portion (merged composition)
+     with no CSS mask. */
+  .hero__portrait {
+    position: static;
+    display: block;
+    height: auto;
+    width: var(--fig-w);
+    right: auto; bottom: auto;
+    margin: 0 auto;
+  }
+  /* The portrait now lives INSIDE .wrap as the first child, so we can't pull
+     the whole .wrap up (that would drag the portrait too). Instead pull the
+     eyebrow up — and with it everything that follows in flow (the text) —
+     ~37.5% of the portrait height, so the eyebrow/headline rise toward the
+     portrait's lower neck/chest. Same visual result as before. The text
+     paints over the portrait naturally (it comes later in the DOM).
+     The +32px eases that pull back a touch so the eyebrow/text sit a little
+     lower and cover less of the portrait. */
+  .hero .wrap { position: relative; z-index: 2; }
+  .hero .wrap > .eyebrow { margin-top: calc(var(--fig-h) * -0.375 + 32px); }
+  /* let the long eyebrow wrap to two lines like the mockup; subtle shadow
+     keeps it legible where it overlaps the portrait */
+  .hero .eyebrow {
+    display: block; line-height: 1.6;
+    font-size: .72rem; letter-spacing: .16em;
+    text-shadow: 0 1px 7px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.5);
+  }
+  .hero .eyebrow::before {
+    display: inline-block; vertical-align: middle; margin-right: .5rem;
+  }
+  /* re-center the halo on the top portrait, scaled down for phones. The blue
+     circle (halo + concentric rings) is ~20% smaller here to match the now
+     ~20%-smaller portrait — the *0.8 / reduced ring sizes keep the whole
+     circular motif in proportion with the figure. */
+  .hero__stage {
+    --halo-x: 50%; --halo-y: 24%;
+    --halo-size: calc(clamp(460px, 104vw, 680px) * 0.8);
+  }
+  .hero__rings i:nth-child(1) { width: 184px; height: 184px; }
+  .hero__rings i:nth-child(2) { width: 288px; height: 288px; }
+  .hero__rings i:nth-child(3) { width: 416px; height: 416px; }
+  .hero__rings i:nth-child(4) { width: 560px; height: 560px; }
+  /* ===== /MOBILE HERO (V2) ============================================= */
+
+  .project, .project:nth-of-type(even) { grid-template-columns: 1fr; gap: 1.8rem; }
+  .project:nth-of-type(even) .project__media { order: 0; }
+  .project:nth-of-type(even) .project__body  { order: 0; }
+  .project__media { margin-top: 0; }   /* stacked: image on top, no title-level nudge */
+
+  .about__grid { grid-template-columns: 1fr; }
+  .portrait { margin-bottom: .5rem; }
+
+  .spec { grid-template-columns: 72px 1fr; gap: .7rem; }
+
+  /* keep Email / Call / TXT on a single row on phones */
+  .contact__row { flex-wrap: nowrap; gap: .55rem; width: 100%; }
+  .contact__row .contact-btn {
+    flex: 1 1 0; min-width: 0; padding: .8rem .6rem; gap: .4rem;
+    font-size: .9rem;
+  }
+}
+
+@media (max-width: 400px) {
+  /* tighten the lockup on very narrow phones (large at top, compact scrolled) */
+  .brand__title { font-size: 1.02rem; }
+  .site-header.scrolled .brand__title { font-size: .82rem; }
+  .brand__sub { font-size: .66rem; }
+  .site-header.scrolled .brand__sub { font-size: .58rem; }
+  .brand .mark { width: 28px; height: 28px; }
+
+  /* shrink the contact buttons a touch more so 3 still fit */
+  .contact__row { gap: .4rem; }
+  .contact__row .contact-btn { padding: .75rem .35rem; font-size: .82rem; gap: .32rem; }
+  .contact__row .contact-btn svg { width: 16px; height: 16px; }
+
+  /* same tightening for the hero CTAs on very narrow phones */
+  .hero__cta { gap: .4rem; }
+  .hero__cta .btn { padding: .72rem .4rem; font-size: .8rem; gap: .3rem; }
+  .hero__cta .btn .arrow { display: none; }
+}

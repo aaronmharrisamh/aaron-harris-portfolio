@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     blog.html - the blog page.
+
+     Markup only. Style lives in site.css and behavior lives in the
+     four script trunks, loaded in a fixed order from the head.
+
+     Copy the editor can change is fenced by [edit:slug] comment
+     pairs, each wrapping exactly one element. Do not nest a pair
+     more than one level deep, and do not put two elements inside
+     one pair.
+
+     Sections:
+       1. HEAD AND META      4. CONTACT AND FOOTER
+       2. CHROME             5. DATA
+       3. BLOG
+
+     Five sections. There is no hero and no work section on this
+     page, and inventing them to reach seven would be structure
+     with nothing under it.
+     ============================================================ -->
+
+<html lang="en" data-portrait-bg="1">
+<head>
+  <!-- ============================================================
+       1. HEAD AND META
+       ------------------------------------------------------------
+       This page's own title, canonical and social cards. Every page
+       carries its own; they are not shared chrome.
+       ============================================================ -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Blog — Aaron M. Harris</title>
+  <meta name="description" content="Notes on shipping product: technical leadership, solutions architecture, and AI fluency across simulation, XR, and the web." />
+  <meta name="author" content="Aaron M. Harris" />
+  <meta name="theme-color" content="#16181d" />
+  <link rel="canonical" href="https://aaronmichaelharris.com/blog.html" />
+
+  <!-- Favicons -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+
+  <!-- Open Graph / social share -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Aaron M. Harris" />
+  <meta property="og:title" content="Blog — Aaron M. Harris" />
+  <meta property="og:description" content="Notes on shipping product: technical leadership, solutions architecture, and AI fluency across simulation, XR, and the web." />
+  <meta property="og:url" content="https://aaronmichaelharris.com/blog.html" />
+  <meta property="og:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Aaron M. Harris — Technical Lead &amp; Solutions Architect." />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Blog — Aaron M. Harris" />
+  <meta name="twitter:description" content="Notes on shipping product: technical leadership, solutions architecture, and AI fluency across simulation, XR, and the web." />
+  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta name="twitter:creator" content="@aaronmharrisamh" />
+
+  <!-- Inter via Google Fonts (with a robust system fallback in CSS) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="site.css" />
+
+  <!-- The site's script, in a fixed order. defer keeps document order and runs
+       each file after parsing, so every trunk sees the whole page.
+       site.js creates window.AMH, the one namespace the trunks share.
+       publish.js is the blog composer. It is on this page only, because the
+       manifest and the reading engine are, and it loads after tool.js because
+       it builds on the editor kit that tool.js publishes. -->
+  <script defer src="site.js"></script>
+  <script defer src="work.js"></script>
+  <script defer src="blog.js"></script>
+  <script defer src="tool.js"></script>
+  <script defer src="publish.js"></script>
+
+  <!-- Graceful degradation: without JS the reveal animations never fire, so
+       force all content visible.
+       These rules stay inline. A <noscript> block applies only when scripting
+       is off, and a linked stylesheet cannot carry that condition. -->
+  <noscript>
+    <style>
+      .reveal, .reveal-hero > * { opacity: 1 !important; transform: none !important; }
+    </style>
+  </noscript>
+</head>
+
+<body>
+  <!-- ============================================================
+       2. CHROME
+       ------------------------------------------------------------
+       The scroll progress bar, the header, and the nav that doubles
+       as the mobile drawer. site.js owns their state.
+
+       The header is shared chrome: byte-identical on every managed
+       page, and held to that by the contract test. Its copy regions
+       are shared too - an edit to one is written to every page that
+       has it, in the same publish. See docs/README.md.
+       ============================================================ -->
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <header class="site-header" id="header">
+    <a class="brand" href="index.html#top" aria-label="Aaron M. Harris — home">
+      <!-- AMH monogram mark kept for reuse elsewhere; the inline-circle portrait
+           is the active header mark. To revert to the monogram, swap which of
+           these two spans is rendered (and see .brand .mark in the CSS). -->
+      <!-- <span class="mark" aria-hidden="true">AMH</span> -->
+      <span class="brand-portrait" aria-hidden="true">
+        <span class="portrait-bg" aria-hidden="true"></span>
+        <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512" alt="" />
+      </span>
+      <span class="brand__name">
+        <!--[edit:brand-title]-->
+        <span class="brand__title full">AARON M. HARRIS</span>
+        <!--[/edit:brand-title]-->
+        <!--[edit:brand-sub]-->
+        <span class="brand__sub">Technical Lead &amp; Solutions Architect</span>
+        <!--[/edit:brand-sub]-->
+      </span>
+    </a>
+
+    <button class="nav__toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav">
+      <span></span><span></span><span></span>
+    </button>
+
+    <!-- A nav link names the page it points into, so the same bytes work on
+         every page. site.js treats a link naming THIS page as an in-page
+         anchor, and marks the item whose href is this page as current.
+         "#contact" stays bare: every page has its own contact section. -->
+    <nav class="nav" id="nav" aria-label="Primary">
+      <div class="nav__links">
+        <!--[edit:nav-work]-->
+        <a href="index.html#work">Work</a>
+        <!--[/edit:nav-work]-->
+        <!--[edit:nav-gallery]-->
+        <a href="gallery.html">Gallery</a>
+        <!--[/edit:nav-gallery]-->
+        <!--[edit:nav-blog]-->
+        <a href="blog.html">Blog</a>
+        <!--[/edit:nav-blog]-->
+        <!--[edit:nav-about]-->
+        <a href="index.html#about">About</a>
+        <!--[/edit:nav-about]-->
+        <!--[edit:nav-contact]-->
+        <a href="#contact">Contact</a>
+        <!--[/edit:nav-contact]-->
+      </div>
+    </nav>
+  </header>
+
+  <!-- dim scrim behind the mobile nav drawer -->
+  <div class="nav-overlay" id="navOverlay" aria-hidden="true"></div>
+
+  <main id="top">
+
+    <!-- ============================================================
+         3. BLOG
+         ------------------------------------------------------------
+         The heading is editable copy. The two containers below are
+         filled by blog.js: the months row comes straight from the
+         manifest with no fetches, and the feed loads one month at a
+         time as the reader scrolls.
+
+         blog.js does nothing at all on a page without #blogFeed, so
+         it is the presence of this container that makes a page the
+         blog page.
+         ============================================================ -->
+    <section class="blog-page" id="blogPage" aria-label="Blog">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <!--[edit:blog-eyebrow]-->
+          <span class="eyebrow">Blog</span>
+          <!--[/edit:blog-eyebrow]-->
+        </div>
+        <!--[edit:blog-h2]-->
+        <h2>Notes from the work.</h2>
+        <!--[/edit:blog-h2]-->
+        <div class="bs-months" id="blogMonths"></div>
+        <div id="blogFeed"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         4. CONTACT AND FOOTER
+         ------------------------------------------------------------
+         Shared chrome, like the header: byte-identical with the home
+         page, and its copy regions are shared.
+         ============================================================ -->
+    <section class="contact" id="contact" aria-label="Contact">
+      <div class="wrap">
+        <div class="reveal">
+          <!-- Contact is a deliberately centered closing CTA (eyebrow + heading
+               + email + buttons all centered). To left-align the eyebrow like
+               the Work/About sections instead, remove the "eyebrow--center" class. -->
+          <!--[edit:contact-eyebrow]-->
+          <span class="eyebrow eyebrow--center">Contact</span>
+          <!--[/edit:contact-eyebrow]-->
+          <!--[edit:contact-h2]-->
+          <h2>Let's talk.</h2>
+          <!--[/edit:contact-h2]-->
+          <!--[edit:contact-email]-->
+          <a class="email" href="mailto:contact@aaronmichaelharris.com">contact@aaronmichaelharris.com</a>
+          <!--[/edit:contact-email]-->
+        </div>
+        <div class="contact__actions reveal d1">
+          <div class="contact__row">
+            <!--[edit:contact-btn-email]-->
+            <a class="contact-btn contact-btn--call" href="mailto:contact@aaronmichaelharris.com" aria-label="Email Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v.4l8 5 8-5V6H4zm16 2.7-7.47 4.67a1 1 0 0 1-1.06 0L4 8.7V18h16V8.7z"/></svg>
+              Email
+            </a>
+            <!--[/edit:contact-btn-email]-->
+            <!--[edit:contact-btn-call]-->
+            <a class="contact-btn contact-btn--call" href="tel:+16162168641" aria-label="Call Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.25 1z"/></svg>
+              Call
+            </a>
+            <!--[/edit:contact-btn-call]-->
+            <!--[edit:contact-btn-txt]-->
+            <a class="contact-btn contact-btn--call" href="sms:+16162168641" aria-label="Text Aaron">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2zm3 6h10v1.6H7zm0 3.4h7V14H7z"/></svg>
+              TXT
+            </a>
+            <!--[/edit:contact-btn-txt]-->
+          </div>
+          <!--[edit:contact-btn-resume]-->
+          <a class="contact-btn" href="Aaron_Harris_Resume.pdf" target="_blank" rel="noopener" aria-label="Download résumé (PDF)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 1.5L18.5 8H14zM8 13h8v1.6H8zm0 3.2h8V18H8zm0-6.4h4v1.6H8z"/></svg>
+            Résumé (PDF)
+          </a>
+          <!--[/edit:contact-btn-resume]-->
+        </div>
+
+        <div class="social-mini reveal d2">
+          <a href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener" aria-label="LinkedIn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM3 9h4v12H3zM9 9h3.8v1.7h.05c.53-1 1.83-2.06 3.77-2.06 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.4c0-1.29-.02-2.95-1.8-2.95-1.8 0-2.08 1.4-2.08 2.85V21H9z"/></svg>
+          </a>
+          <a href="https://github.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.71-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05A9.4 9.4 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          </a>
+          <a href="https://x.com/aaronmharrisamh" target="_blank" rel="noopener" aria-label="X (Twitter)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.53 3H20.5l-6.5 7.43L21.75 21h-6.02l-4.71-6.16L5.6 21H2.63l6.95-7.95L2.25 3h6.17l4.26 5.63zm-1.06 16.2h1.65L7.6 4.72H5.83z"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <!--[edit:endbar]-->
+      <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
+      <!--[/edit:endbar]-->
+    </section>
+
+  </main>
+
+  <!-- ============================================================
+       5. DATA
+       ------------------------------------------------------------
+       Inert content the scripts read. Nothing here renders.
+       ============================================================ -->
+
+  <!-- BLOG MANIFEST · single source of truth for the blog (see docs/README.md).
+       Line 1/2: rolling counters (post ids, image numbers - never reused).
+       Line 3: pipe-separated entries, each = YYMMDD + 4-digit post id + title.
+       Month files are derived from dates (260315... -> blog/2603.html).
+       Updated by the blog composer's publish export; edit by hand only if you
+       know exactly what you're doing. data-ced="blog" keeps the copy editor
+       from treating it as a text region. -->
+  <!--[edit:blog-manifest]-->
+  <script id="blogManifest" type="text/plain" data-ced="blog">
+next-post:0001
+next-img:0001
+</script>
+  <!--[/edit:blog-manifest]-->
+</body>
+</html>
