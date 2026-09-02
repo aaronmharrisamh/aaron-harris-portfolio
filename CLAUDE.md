@@ -189,10 +189,13 @@ whole page's layout system with an invariant of its own.
 
 ### Project Conventions
 
-- The version format is `V0NN`. The commit message carries it. There is no
-  version file. Current version: V035.
+- The version format is `V0NN`. The commit message carries it, and nothing
+  else records it: there is no version file, and no file states a current
+  version. `git log` is the answer to "what version is this".
 - The user makes every commit and push. Claude never runs a Git write command.
 - `node tools/e2e/e2e_test.mjs` and `py -3 tools/e2e/check_markers.py` must both
   pass before each commit.
 - Do not use em dashes in copy for the webpage.
 - `docs/` is in `.gitignore`. It holds the plans, the manual, and the mockups.
+- `CLAUDE.md` is committed. It is not in `.gitignore`, because the rules ship
+  with the code they describe.
