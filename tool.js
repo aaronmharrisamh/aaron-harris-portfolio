@@ -1229,6 +1229,73 @@
     gals.forEach(function (g) { if (g.kind.render) renderGallery(g); });
   }
 
+
+  /* ---------------- the edit launcher ----------------
+
+     A quiet mark in a corner. It rests almost invisible, and opens on hover
+     or on focus to draw the word EDIT, which is what a click does.
+
+     Built here rather than authored into a page. It belongs on every page
+     this file is on, it does nothing without script, and markup would put it
+     into the marker inventory and into the chrome the three pages hold
+     byte-identical. Nothing built at runtime can reach an export.
+
+     Which corner is one value. site.css positions all four from the data
+     attribute, so moving it is a one-word change here and no CSS edit. */
+  var LAUNCH_CORNER = "bottom-left";   /* or bottom-right, top-left, top-right */
+
+  /* The letterforms, drawn as single strokes so each can be dashed on.
+     Both words share their metrics, so the button does not resize when the
+     editor is switched on and the label changes. */
+  var GLYPH = {
+    E: "M7 0 H0 V12 H7 M0 6 H5",
+    D: "M0 12 V0 H3 C7 0 8 3 8 6 C8 9 7 12 3 12 H0",
+    I: "M0 0 V12",
+    T: "M0 0 H8 M4 0 V12",
+    X: "M0 0 L8 12 M8 0 L0 12"
+  };
+  var ADVANCE = [0, 11, 23, 28];       /* where each letter starts */
+
+  function word(letters, cls) {
+    var paths = letters.split("").map(function (ch, i) {
+      return '<path transform="translate(' + ADVANCE[i] + ' 0)" d="' + GLYPH[ch] + '" />';
+    });
+    return '<svg class="amh-edit__word ' + cls + '" viewBox="0 0 36 12" ' +
+      'aria-hidden="true" focusable="false">' + paths.join("") + "</svg>";
+  }
+
+  var MARK_SVG =
+    '<svg class="amh-edit__mark" viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
+    '<path d="M2.2 11.8 L2.9 9.1 L9.7 2.3 A1.45 1.45 0 0 1 11.7 4.3 L4.9 11.1 Z" />' +
+    '<path d="M8.5 3.5 L10.5 5.5" />' +
+    "</svg>";
+
+  var launcher = null;
+
+  function buildLauncher() {
+    if (launcher || !doc.body) return;
+    launcher = doc.createElement("button");
+    launcher.type = "button";
+    launcher.className = "amh-edit";
+    launcher.setAttribute("data-corner", LAUNCH_CORNER);
+    launcher.innerHTML = MARK_SVG + word("EDIT", "amh-edit__word--edit") +
+      word("EXIT", "amh-edit__word--exit");
+    launcher.addEventListener("click", function () { api(); });
+    doc.body.appendChild(launcher);
+    syncLauncher();
+  }
+
+  /* Say what the button does now, not what it is called. The editor can also
+     be toggled from the console, so this runs from api() rather than from the
+     click, and the two ways in can never disagree. */
+  function syncLauncher() {
+    if (!launcher) return;
+    launcher.classList.toggle("is-on", active);
+    launcher.setAttribute("aria-pressed", active ? "true" : "false");
+    launcher.setAttribute("aria-label",
+      active ? "Close the copy editor" : "Open the copy editor");
+  }
+
   function teardownUI() {
     pendingChip = null;
     closeModal();
@@ -2215,6 +2282,7 @@
       teardownUI();
       console.info("[copy editor] OFF" + (dirty() ? " - you still have unexported edits (edit.export())." : "."));
     }
+    syncLauncher();
     return active ? "editor mode ON" : "editor mode OFF";
   };
 
@@ -2514,4 +2582,7 @@
   } else {
     window.setTimeout(pendingRestore, 0);
   }
+
+  /* The way in, for anyone who does not open a console. */
+  buildLauncher();
 })();

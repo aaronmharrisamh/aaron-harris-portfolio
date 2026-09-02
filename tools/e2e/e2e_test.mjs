@@ -576,6 +576,104 @@ async function main() {
   check("gallery: the packer marks the tiles it moved or widened",
     packedLive.packedAttr > 0, packedLive.packedAttr + " marked");
 
+  // ============ THE EDIT LAUNCHER ============
+  // The way into the editor for anyone who does not open a console. It is
+  // built at load by tool.js, so it is on every page tool.js is on and it is
+  // in no page's markup.
+  for (const page of MANAGED_PAGES) {
+    await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/${page}` });
+    await waitLoaded();
+    await sleep(1200);
+    const lx = await evaluate(`(() => {
+      const b = document.querySelector('.amh-edit');
+      if (!b) return { there: false };
+      const cs = getComputedStyle(b);
+      const r = b.getBoundingClientRect();
+      return {
+        there: true,
+        tag: b.tagName,
+        z: +cs.zIndex,
+        corner: b.getAttribute('data-corner'),
+        atLeft: Math.round(r.left) === 18,
+        atBottom: Math.round(innerHeight - r.bottom) === 18,
+        label: b.getAttribute('aria-label'),
+        pressed: b.getAttribute('aria-pressed'),
+        words: b.querySelectorAll('.amh-edit__word').length,
+        letters: b.querySelectorAll('.amh-edit__word--edit path').length,
+      };
+    })()`);
+    check("launcher: " + page + " carries it, bottom left and above everything",
+      lx.there && lx.tag === "BUTTON" && lx.z === 4000 &&
+      lx.corner === "bottom-left" && lx.atLeft && lx.atBottom,
+      JSON.stringify(lx));
+    // in the markup of no page: it is runtime scaffolding, like the chips
+    const src = readFileSync(join(REPO, page), "utf-8");
+    check("launcher: " + page + " does not carry it in the file",
+      !src.includes("amh-edit"),
+      src.includes("amh-edit") ? "the file mentions amh-edit" : "runtime only");
+  }
+
+  // it is above the editor's own layers, so the way out is never behind the
+  // thing it closes
+  const lxStack = await evaluate(`(() => {
+    const zOf = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? +getComputedStyle(el).zIndex : null;
+    };
+    window.edit();
+    return { launcher: zOf('.amh-edit'), panel: zOf('.ced-panel') };
+  })()`);
+  check("launcher: it sits above the editor panel it opens",
+    lxStack.launcher > lxStack.panel, JSON.stringify(lxStack));
+
+  // the console and the button are the same switch, so they cannot disagree
+  const lxToggle = await evaluate(`(() => {
+    const b = document.querySelector('.amh-edit');
+    const onNow = { pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label'),
+                    exit: getComputedStyle(b.querySelector('.amh-edit__word--exit')).display };
+    b.click();                       // the button turns it off
+    const offAfter = { pressed: b.getAttribute('aria-pressed'),
+                       label: b.getAttribute('aria-label'), panel: !!document.querySelector('.ced-panel') };
+    window.edit();                   // the console turns it back on
+    const onAgain = { pressed: b.getAttribute('aria-pressed'), panel: !!document.querySelector('.ced-panel') };
+    window.edit();
+    return { onNow, offAfter, onAgain };
+  })()`);
+  check("launcher: it reads EXIT and says so while the editor is on",
+    lxToggle.onNow.pressed === "true" && /Close/.test(lxToggle.onNow.label) &&
+    lxToggle.onNow.exit === "block", JSON.stringify(lxToggle.onNow));
+  check("launcher: clicking it closes the editor",
+    lxToggle.offAfter.pressed === "false" && /Open/.test(lxToggle.offAfter.label) &&
+    lxToggle.offAfter.panel === false, JSON.stringify(lxToggle.offAfter));
+  check("launcher: the console and the button never disagree",
+    lxToggle.onAgain.pressed === "true" && lxToggle.onAgain.panel === true,
+    JSON.stringify(lxToggle.onAgain));
+
+  // any corner, from one attribute
+  const lxCorners = await evaluate(`(() => {
+    const b = document.querySelector('.amh-edit');
+    const out = {};
+    // documentElement.clientWidth, not innerWidth: innerWidth counts the
+    // scrollbar and getBoundingClientRect does not, so a right-anchored
+    // element measured against innerWidth reads one scrollbar out.
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    for (const c of ['bottom-left', 'bottom-right', 'top-left', 'top-right']) {
+      b.setAttribute('data-corner', c);
+      const r = b.getBoundingClientRect();
+      out[c] = [
+        Math.round(r.left) === 18 ? 'L' : (Math.round(vw - r.right) === 18 ? 'R' : '?'),
+        Math.round(r.top) === 18 ? 'T' : (Math.round(vh - r.bottom) === 18 ? 'B' : '?'),
+      ].join("");
+    }
+    b.setAttribute('data-corner', 'bottom-left');
+    return out;
+  })()`);
+  check("launcher: every corner is positioned from the one attribute",
+    lxCorners["bottom-left"] === "LB" && lxCorners["bottom-right"] === "RB" &&
+    lxCorners["top-left"] === "LT" && lxCorners["top-right"] === "RT",
+    JSON.stringify(lxCorners));
+
   // ============ ONE PAGE CHANGED, ONE PAGE WRITTEN ============
   // The publish story, stated once for all three pages. An edit to a region
   // that belongs to one page downloads that page by itself: no zip, and no
