@@ -1849,6 +1849,34 @@
      Cleared by a reload, which is the same life as an unexported edit. */
   var handed = {};
 
+  /* The repo folder, when the user picked it through the File System Access
+     API. Kept for the page load, like a handed file: every later ask is
+     answered from it with no dialog, which is what "pick the folder once"
+     has to mean for a rebuild that learns its months only after the first
+     file is in hand. Null in a browser without the API, or until a pick. */
+  var repoDir = null;
+
+  /* Read one path from the kept folder. Walks the path one segment at a
+     time, so only the named file is opened: nothing is enumerated, and the
+     browser has no reason to count the folder or call it an upload.
+     Resolves with the text, or null when the file is not there. Any other
+     failure rejects with BLG-E04. */
+  function readFromRepo(path) {
+    var parts = path.split("/");
+    var name = parts.pop();
+    var dir = Promise.resolve(repoDir);
+    parts.forEach(function (seg) {
+      dir = dir.then(function (d) { return d.getDirectoryHandle(seg); });
+    });
+    return dir.then(function (d) { return d.getFileHandle(name); })
+      .then(function (fh) { return fh.getFile(); })
+      .then(readFile)
+      .then(null, function (err) {
+        if (err && err.name === "NotFoundError") return null;
+        throw errObj("BLG-E04", path + (err && err.message ? " (" + err.message + ")" : ""));
+      });
+  }
+
   /* Files the user said are not there. Only an optional file can be skipped,
      and a skip is remembered for the same reason a handed file is: a rebuild
      walks every month, and asking twice about one that does not exist is the
@@ -1934,6 +1962,43 @@
     if (skipped[path]) return Promise.resolve(null);
     var want = path.replace(/^.*\//, "");
     var mayBeAbsent = isOptional(path);
+    /* the folder is already in hand: read from it, and open the dialog only
+       for a required file it does not hold */
+    if (repoDir) {
+      return readFromRepo(path).then(function (text) {
+        if (text !== null) {
+          verifyWarn(path, want, text);
+          handed[path] = text;
+          console.info("[copy editor] " + path + " read from the repo folder.");
+          return text;
+        }
+        if (mayBeAbsent) {
+          skipped[path] = true;
+          errText("BLG-E09", "Wanted: " + want + ".");
+          return null;
+        }
+        console.info("[copy editor] " + path + " is not in the repo folder; asking for it.");
+        return handOffDialog(path, want, mayBeAbsent, netErr);
+      });
+    }
+    return handOffDialog(path, want, mayBeAbsent, netErr);
+  }
+
+  /* Warn about a file's contents, and keep going. A warning is not a
+     refusal: the editor holds edits that are not in the file yet, so it
+     cannot know from the bytes alone that a file is wrong. The splice is
+     the real gate, and it fails loudly and names what it could not find. */
+  function verifyWarn(path, want, text) {
+    var v = verifyFile(path, text);
+    if (v.warn) {
+      errText(v.code, v.detail
+        ? "Missing: " + v.detail + ". The export will report anything it cannot splice."
+        : 'The file is named "' + want + '" and holds no markers. Continuing anyway.');
+    }
+  }
+
+  /* The dialog itself: drop, choose, or pick the repo folder. */
+  function handOffDialog(path, want, mayBeAbsent, netErr) {
     if (netErr) errText("BLG-E01", "Wanted: " + want + ".");
 
     return new Promise(function (resolve, reject) {
@@ -1992,7 +2057,8 @@
       all.type = "button";
       all.className = "ced-btn";
       all.textContent = "Use my repo folder";
-      all.title = "Pick the folder once. Every file this publish needs is taken from it.";
+      all.title = "Pick the folder once. Only the files this publish needs are read from it, " +
+        "and it is not asked for again.";
       var spacer = doc.createElement("span");
       spacer.className = "ced-spacer";
       /* An optional file needs an answer that is not "give up". Cancel
@@ -2029,42 +2095,83 @@
           return;
         }
         readFile(file).then(function (text) {
-          /* Warn, and continue. A warning is not a refusal: the editor
-             holds edits that are not in the file yet, so it cannot know from
-             the bytes alone that a file is wrong. The splice is the real
-             gate, and it fails loudly and names what it could not find. */
-          var v = verifyFile(path, text);
+          verifyWarn(path, want, text);
           handed[path] = text;
-          if (v.warn) {
-            errText(v.code, v.detail
-              ? "Missing: " + v.detail + ". The export will report anything it cannot splice."
-              : 'The file is named "' + want + '" and holds no markers. Continuing anyway.');
-          }
           done();
           resolve(text);
         }, function () { fail("BLG-E04"); });
       }
 
-      /* Take a whole folder, and keep every file this publish still needs. */
-      function takeFolder(files) {
-        var byName = {};
-        Array.prototype.forEach.call(files || [], function (f) { byName[f.name] = f; });
-        var wanted = expected.length ? expected : [path];
-        var jobs = wanted.filter(function (pp) {
-          return !handed[pp] && byName[pp.replace(/^.*\//, "")];
+      /* Every path this publish still needs from a folder. */
+      function stillWanted() {
+        return (expected.length ? expected : [path]).filter(function (pp) {
+          return !handed[pp] && !skipped[pp];
         });
+      }
+      /* After a folder was read: close if the file this step is for came
+         out of it, else say the folder was the wrong one. */
+      function folderDone(took) {
+        if (!handed[path]) {
+          fail("BLG-E08", "Wanted: " + want + "." +
+            (took ? " Found " + took + " other file(s) it needs." : ""));
+          return;
+        }
+        console.info("[copy editor] took " + took + " file(s) from the folder; " +
+          "this publish will not ask again.");
+        done();
+        resolve(handed[path]);
+      }
+      function keep(pp, text) {
+        verifyWarn(pp, pp.replace(/^.*\//, ""), text);
+        handed[pp] = text;
+      }
+
+      /* The fallback folder input. The browser hands over every file in the
+         tree, so the match is on the full path under the picked folder, and
+         never on the bare name: the tree holds a test fixture with the same
+         name as a month file, and a name match let the last one seen win. */
+      function takeFolder(files) {
+        var byPath = {};
+        Array.prototype.forEach.call(files || [], function (f) {
+          var rel = f.webkitRelativePath
+            ? f.webkitRelativePath.replace(/^[^\/]+\//, "")
+            : f.name;
+          byPath[rel] = f;
+        });
+        var jobs = stillWanted().filter(function (pp) { return !!byPath[pp]; });
         if (!jobs.length) { fail("BLG-E08", "Wanted: " + want + "."); return; }
         Promise.all(jobs.map(function (pp) {
-          return readFile(byName[pp.replace(/^.*\//, "")]).then(function (text) {
-            if (verifyFile(pp, text).ok) handed[pp] = text;
-          }, function () {});
-        })).then(function () {
-          if (!handed[path]) { fail("BLG-E08", "Wanted: " + want + "."); return; }
-          console.info("[copy editor] took " + Object.keys(handed).length +
-            " file(s) from the folder; this publish will not ask again.");
-          done();
-          resolve(handed[path]);
-        });
+          return readFile(byPath[pp]).then(function (text) { keep(pp, text); },
+            function () {});
+        })).then(function () { folderDone(jobs.length); });
+      }
+
+      /* The File System Access path. Only the named files are opened. The
+         handle is kept, so no later ask in this page load opens a dialog. */
+      function takeDirectory(handle) {
+        repoDir = handle;
+        var took = 0;
+        Promise.all(stillWanted().map(function (pp) {
+          return readFromRepo(pp).then(function (text) {
+            if (text === null) {
+              if (isOptional(pp)) { skipped[pp] = true; errText("BLG-E09", "Wanted: " + pp + "."); }
+              return;
+            }
+            keep(pp, text);
+            took++;
+          }, function (err) { errText("BLG-E04", err && err.message); });
+        })).then(function () { folderDone(took); });
+      }
+      /* Pick the folder with the API when the browser has one, so the
+         browser opens only the files that are asked for and never counts
+         the tree. Otherwise the folder input, which reads everything. */
+      function pickFolder() {
+        if (typeof window.showDirectoryPicker !== "function") { folder.click(); return; }
+        window.showDirectoryPicker({ id: "amh-repo", mode: "read" }).then(takeDirectory,
+          function (err) {
+            if (err && err.name === "AbortError") return;   /* closed the picker */
+            fail("BLG-E04", err && err.message ? err.message : "");
+          });
       }
 
       zone.addEventListener("click", function () { input.click(); });
@@ -2074,7 +2181,7 @@
         }
       });
       pick.addEventListener("click", function () { input.click(); });
-      all.addEventListener("click", function () { folder.click(); });
+      all.addEventListener("click", pickFolder);
       input.addEventListener("change", function () { take(input.files && input.files[0]); });
       folder.addEventListener("change", function () { takeFolder(folder.files); });
 

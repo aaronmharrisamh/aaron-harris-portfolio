@@ -1950,6 +1950,127 @@ async function main() {
     cancelled && cancelled.code === "BLG-E07" && /BLG-E07/.test(cancelled.msg),
     JSON.stringify(cancelled).slice(0, 90));
 
+  // F1. the fallback folder input matches on the full path under the picked
+  // folder. The tree holds tools/e2e/fixtures/2607.html, and a match on the
+  // bare name let whichever file came last win over blog/2607.html.
+  const byPath = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2607.html"]);
+    window.__f1 = AMH.tool.handOff("blog/2607.html", new Error("fetch refused"));
+    var folder = document.querySelector('.ced-handoff input[webkitdirectory]');
+    if (!folder) return "no folder input";
+    function withPath(text, rel) {
+      var f = new File([text], rel.replace(/^.*\\//, ""), { type: "text/html" });
+      Object.defineProperty(f, "webkitRelativePath", { value: rel });
+      return f;
+    }
+    var dt = new DataTransfer();
+    dt.items.add(withPath("<!--[edit:a]--><p>REAL MONTH</p><!--[/edit:a]-->", "repo/blog/2607.html"));
+    dt.items.add(withPath("<!--[edit:a]--><p>FIXTURE</p><!--[/edit:a]-->", "repo/tools/e2e/fixtures/2607.html"));
+    folder.files = dt.files;
+    folder.dispatchEvent(new Event("change", { bubbles: true }));
+    return "dispatched";
+  })()`);
+  await sleep(400);
+  const f1 = await evaluate(`window.__f1.then(function (txt) {
+    return { text: txt, gone: !document.querySelector('.ced-handoff__zone') }; })`,
+    { awaitPromise: true });
+  check("repo folder (input): matched by full path, so the fixture with the same name loses",
+    byPath === "dispatched" && f1 && /REAL MONTH/.test(f1.text) && f1.gone === true,
+    byPath + " " + JSON.stringify(f1).slice(0, 90));
+
+  // F2. the File System Access path opens only the named files, keeps the
+  // folder, marks an optional file that is not there, and answers every
+  // later ask from the folder with no dialog.
+  const picked = await evaluate(`(function () {
+    // a fake directory tree with the API's own surface
+    function fileH(text, name) {
+      return { kind: "file", getFile: function () {
+        return Promise.resolve(new File([text], name, { type: "text/html" })); } };
+    }
+    function dirH(entries) {
+      return {
+        kind: "directory",
+        getDirectoryHandle: function (n) {
+          return entries[n] && entries[n].kind === "directory" ? Promise.resolve(entries[n])
+            : Promise.reject(new DOMException("no " + n, "NotFoundError"));
+        },
+        getFileHandle: function (n) {
+          return entries[n] && entries[n].kind === "file" ? Promise.resolve(entries[n])
+            : Promise.reject(new DOMException("no " + n, "NotFoundError"));
+        }
+      };
+    }
+    window.__opened = [];
+    var tree = dirH({
+      // nothing the suite has handed over already: those answer from memory
+      "gallery.html": fileH("<!--[edit:a]--><p>GALLERY FROM FOLDER</p><!--[/edit:a]-->", "gallery.html"),
+      "blog": dirH({ "2608.html": fileH("<!--[edit:a]--><p>AUGUST</p><!--[/edit:a]-->", "2608.html") })
+    });
+    window.__realPicker = window.showDirectoryPicker;
+    window.showDirectoryPicker = function (opts) {
+      window.__opened.push(opts && opts.mode);
+      return Promise.resolve(tree);
+    };
+    AMH.tool.expectFiles(["gallery.html", "blog/2606.html"]);
+    AMH.tool.expectOptional(["blog/2606.html"]);
+    window.__f2 = AMH.tool.handOff("gallery.html", new Error("fetch refused"));
+    var btn = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return /repo folder/.test(b.textContent); });
+    if (!btn) return "no button";
+    btn.click();
+    return "clicked";
+  })()`);
+  await sleep(500);
+  const f2 = await evaluate(`window.__f2.then(function (txt) {
+    return { text: txt, gone: !document.querySelector('.ced-handoff__zone'),
+             opened: window.__opened }; })`, { awaitPromise: true });
+  check("repo folder (API): the named file is read, the picker asked read-only, the dialog closes",
+    picked === "clicked" && f2 && /GALLERY FROM FOLDER/.test(f2.text) && f2.gone === true &&
+    JSON.stringify(f2.opened) === '["read"]', picked + " " + JSON.stringify(f2).slice(0, 120));
+
+  const later = await evaluate(`Promise.all([
+    AMH.tool.handOff("blog/2608.html", new Error("fetch refused")),
+    AMH.tool.handOff("blog/2606.html", new Error("fetch refused")),
+  ]).then(function (r) {
+    return { august: r[0], absent: r[1],
+             asked: !!document.querySelector('.ced-handoff__zone') }; })`,
+    { awaitPromise: true });
+  check("repo folder (API): every later ask is answered from the kept folder with no dialog",
+    later && /AUGUST/.test(later.august) && later.absent === null &&
+    later.asked === false, JSON.stringify(later).slice(0, 140));
+
+  // F3. a required file the folder lacks still opens the dialog for that file
+  const fallsThrough = await evaluate(`(function () {
+    // 2698, not 2699: the wizard checks above marked 2699 absent, and a
+    // skip is remembered for the page load
+    window.__f3 = AMH.tool.handOff("blog/2698.html", new Error("fetch refused"));
+    return new Promise(function (res) { setTimeout(function () {
+      var head = document.querySelector('.ced-handoff .ced-modal__head');
+      res({ asked: !!head, head: head ? head.textContent : "" });
+    }, 200); });
+  })()`, { awaitPromise: true });
+  check("repo folder (API): a required file the folder lacks is still asked for",
+    fallsThrough.asked && /2698\.html/.test(fallsThrough.head), JSON.stringify(fallsThrough));
+
+  // F4. without the API the button falls back to the folder input
+  const fallback = await evaluate(`(function () {
+    window.showDirectoryPicker = undefined;
+    var clicked = [];
+    var real = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function () { clicked.push(this.hasAttribute("webkitdirectory")); };
+    var btn = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return /repo folder/.test(b.textContent); });
+    if (btn) btn.click();
+    HTMLInputElement.prototype.click = real;
+    window.showDirectoryPicker = window.__realPicker;
+    document.querySelector('.ced-handoff .ced-modal__btns button:last-child').click();
+    return clicked;
+  })()`);
+  await evaluate(`window.__f3.then(function () { return 1; }, function () { return 0; })`,
+    { awaitPromise: true });
+  check("repo folder: with no API the button opens the folder input instead",
+    JSON.stringify(fallback) === "[true]", JSON.stringify(fallback));
+
   // W7. every code the wizard can answer with is declared and worded
   const codes = await evaluate(`(() => {
     const E = AMH.tool.errorCodes;
