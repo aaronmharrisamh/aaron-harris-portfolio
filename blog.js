@@ -1,25 +1,29 @@
 /* ============================================================
    blog.js - the blog reading engine.
 
-   Reads the manifest in #blogManifest, fetches month files lazily and
-   renders the stream into the page. Loads after work.js, because a
-   rendered post can carry a gallery. Publishes AMH.blog for the
-   composer in tool.js.
+   Reads the manifest in #blogManifest and filters the index the
+   publisher wrote into the page. Publishes AMH.blog for the composer
+   in publish.js.
 
-   Loaded only by blog.html. It renders into #blogFeed and does nothing
+   It fetches nothing. The page carries one card for each post, and
+   each card links into the month file that holds it. A link works
+   from a page opened from disk; a fetch does not, which is why the
+   stream this replaced could only ever read a month over http.
+
+   Loaded only by blog.html. It reads #blogIndex and does nothing
    on a page that has no such container, so being loaded elsewhere is
    harmless rather than wrong.
 
-   The manifest is the source of truth. Post content lives in real
-   per-month files (blog/YYMM.html) that also work as standalone pages
-   for a reader arriving from a search engine. This file only reads.
-   Writing is the composer's job, in tool.js.
+   The manifest is the source of truth. The full text of a post lives
+   in exactly one place, its month file (blog/YYMM.html), which is a
+   standalone page for a reader arriving from a search engine. This
+   page carries a summary and a link. This file only reads; writing is
+   the composer's job, in publish.js.
 
    Sections:
-     1. SETUP                    5. MONTH LOADING AND CACHE
-     2. MANIFEST AND DATES       6. SHOWING A TARGET
-     3. BODY RENDERING           7. ENTRY POINT AND EXPORTS
-     4. THE STREAM
+     1. SETUP                    4. THE INDEX
+     2. MANIFEST AND DATES       5. SHOWING A TARGET
+     3. BODY RENDERING           6. ENTRY POINT AND EXPORTS
    ============================================================ */
 (function () {
   "use strict";
@@ -120,32 +124,43 @@
   }
 
   /* ==========================================================
-     4. THE STREAM
+     4. THE INDEX
      ----------------------------------------------------------
-     The containers the page provides, the jump nav, and the
-     rendering of one month into the feed.
+     The cards are already on the page: the publisher writes them,
+     and they are plain markup with a link into the month file that
+     holds each post.
+
+     So this section reads the page rather than building it. It draws
+     the month filter from the manifest, hides the cards that do not
+     match, and moves to a post when a deep link asks for one.
+
+     Nothing here fetches. That is what lets this page work when it
+     is opened from disk, where a fetch is refused but a link is not.
      ========================================================== */
-  var blogFeed = null, blogSentinel = null, blogIO = null;
+  var blogIndex = null;
   var blogManifest = null;
-  var blogLoaded = {};          /* yymm -> "loading" | "done" | "failed" */
-  var blogQueue = [];           /* months not yet rendered, newest first */
-  var blogCache = {};           /* yymm -> fetched month html (session cache) */
-  var blogMonthsNav = null;     /* jump-nav row (from the manifest, no fetches) */
+  var blogMonthsNav = null;     /* the filter row, from the manifest */
   var canonicalEl = doc.querySelector('link[rel="canonical"]');
   var CANONICAL_PAGE = canonicalEl ? canonicalEl.getAttribute("href") : "";
 
   /* Find the containers this page provides. Returns false on a page that has
      none, which is how every other page opts out of the whole engine. */
   function blogAttach() {
-    if (blogFeed) return true;
-    blogFeed = doc.getElementById("blogFeed");
+    if (blogIndex) return true;
+    blogIndex = doc.getElementById("blogIndex");
     blogMonthsNav = doc.getElementById("blogMonths");
-    return !!blogFeed;
+    return !!blogIndex;
   }
 
-  /* While a month is in view, the month file is the canonical copy of those
-     posts: it is the standalone page a search engine should send people to.
-     With no month in view this page is its own canonical. */
+  function blogCards() {
+    return blogIndex
+      ? Array.prototype.slice.call(blogIndex.querySelectorAll(".bs-card"))
+      : [];
+  }
+
+  /* While one month is filtered to, that month file is the canonical copy of
+     those posts: it is the standalone page a search engine should send people
+     to. With no filter this page is its own canonical. */
   function blogSetCanonical(yymm) {
     if (!canonicalEl) return;
     canonicalEl.setAttribute("href", yymm
@@ -153,159 +168,59 @@
       : CANONICAL_PAGE);
   }
 
-  /* Give one rendered post its Edit button, if the editor is on and it has
-     none. The editor exposes AMH.tool.editPost only while it is active. */
-  function blogEditButton(art) {
+  /* Give one card its Edit button, if the editor is on and it has none. The
+     editor exposes AMH.tool.editPost only while it is active. */
+  function blogEditButton(card) {
     if (!(AMH.tool && AMH.tool.editPost)) return;
-    var head = art.querySelector("header");
-    if (!head || head.querySelector(".bs-retry")) return;
-    var id = art.getAttribute("data-id") || "";
+    if (card.querySelector(".bs-retry")) return;
+    var id = (card.id || "").replace(/^p/, "");
+    if (!id) return;
     var eb = doc.createElement("button");
     eb.type = "button";
     eb.className = "bs-retry";
     eb.textContent = "Edit p" + id;
-    eb.style.marginTop = ".5rem";
+    eb.style.marginLeft = ".6rem";
     eb.addEventListener("click", function () { AMH.tool.editPost(id); });
-    head.appendChild(eb);
+    card.appendChild(eb);
   }
 
-  /* Decorate every post already on screen. The editor calls this when it turns
-     on, because the stream was rendered before that happened. */
+  /* Decorate every card on screen. The editor calls this when it turns on,
+     because the page was drawn long before that happened. */
   function blogEditButtons() {
-    if (!blogFeed) return 0;
-    var arts = blogFeed.querySelectorAll("article.blog-post");
-    Array.prototype.forEach.call(arts, blogEditButton);
-    return arts.length;
-  }
-
-  function blogRenderMonth(yymm, monthDoc) {
-    var label = doc.createElement("h2");
-    label.className = "bs-month";
-    label.textContent = blogMonthTitle(yymm);
-    blogFeed.appendChild(label);
-    var arts = monthDoc.querySelectorAll("article.blog-post");
-    Array.prototype.forEach.call(arts, function (a) {
-      var srcEl = a.querySelector('script[type="text/x-blog-source"]');
-      var art = doc.createElement("article");
-      art.className = "blog-post";
-      art.id = a.id;
-      var date = a.getAttribute("data-date") || yymm + "01";
-      art.innerHTML = "<header><h2>" +
-        (a.getAttribute("data-title") || "").replace(/&/g, "&amp;").replace(/</g, "&lt;") +
-        '</h2><time datetime="' + blogDateTime(date) + '">' + blogDateLabel(date) +
-        "</time></header>" + '<div class="blog-post__body"></div>';
-      blogEditButton(art);
-      var body = art.querySelector(".blog-post__body");
-      if (srcEl) {
-        body.innerHTML = blogRenderBody(blogDecodeSource(srcEl.textContent).trim(), date, "stream");
-      } else {
-        /* no embedded source (foreign/hand-made file): reuse the static render,
-           fixing its month-page-relative ../ paths for the root context */
-        var st = a.querySelector(".blog-post__body");
-        body.innerHTML = st ? st.innerHTML : "";
-        Array.prototype.forEach.call(body.querySelectorAll("img"), function (im) {
-          var s = im.getAttribute("src") || "";
-          if (s.indexOf("../") === 0) im.setAttribute("src", s.slice(3));
-        });
-      }
-      blogFeed.appendChild(art);
-    });
-    AMH.work.buildGalleries();   /* upgrade any tag runs to carousels */
+    var cards = blogCards();
+    cards.forEach(blogEditButton);
+    return cards.length;
   }
 
   /* ==========================================================
-     5. MONTH LOADING AND CACHE
-     ========================================================== */
-  function blogLoadNextMonth() {
-    if (!blogQueue.length) {
-      if (blogSentinel) { blogSentinel.remove(); blogSentinel = null; }
-      if (!blogFeed.querySelector(".bs-end")) {   /* open + bump can both land here */
-        var end = doc.createElement("div");
-        end.className = "bs-end";
-        end.textContent = "· that's the whole blog ·";
-        blogFeed.appendChild(end);
-      }
-      return Promise.resolve();
-    }
-    var yymm = blogQueue[0];
-    if (blogLoaded[yymm] === "loading" || blogLoaded[yymm] === "done") return Promise.resolve();
-    blogLoaded[yymm] = "loading";
-    /* session cache: reopening the stream never refetches a month */
-    var got = blogCache[yymm]
-      ? Promise.resolve(blogCache[yymm])
-      : fetch("blog/" + yymm + ".html").then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          return res.text();
-        });
-    return got
-      .then(function (html) {
-        blogCache[yymm] = html;
-        blogLoaded[yymm] = "done";
-        blogQueue.shift();
-        blogRenderMonth(yymm, new DOMParser().parseFromString(html, "text/html"));
-        blogBumpSentinel();
-      })
-      .catch(function (err) {
-        blogLoaded[yymm] = "failed";
-        var note = doc.createElement("div");
-        note.className = "bs-note";
-        note.appendChild(doc.createTextNode(
-          "Couldn't load " + blogMonthTitle(yymm) + " (" + err.message + ")."));
-        var retry = doc.createElement("button");
-        retry.type = "button";
-        retry.className = "bs-retry";
-        retry.textContent = "Retry";
-        retry.addEventListener("click", function () {
-          note.remove();
-          delete blogLoaded[yymm];
-          blogLoadNextMonth();
-        });
-        note.appendChild(retry);
-        blogFeed.appendChild(note);
-      });
-  }
-
-  function blogBumpSentinel() {
-    if (blogSentinel) blogSentinel.remove();
-    blogSentinel = null;
-    if (!blogQueue.length) { blogLoadNextMonth(); return; }
-    blogSentinel = doc.createElement("div");
-    blogSentinel.style.height = "1px";
-    blogFeed.appendChild(blogSentinel);
-    if (!blogIO && "IntersectionObserver" in window) {
-      blogIO = new IntersectionObserver(function (entries) {
-        entries.forEach(function (en) {
-          if (en.isIntersecting) blogLoadNextMonth();
-        });
-      }, { rootMargin: "600px 0px" });
-    }
-    if (blogIO) blogIO.observe(blogSentinel);
-    else blogLoadNextMonth();   /* no IntersectionObserver: load every month */
-  }
-
-  /* target: "" | "YYMM" | "pNNNN" */
-  /* ==========================================================
-     6. SHOWING A TARGET
+     5. SHOWING A TARGET
+     ----------------------------------------------------------
+     A filter and a scroll. There is nothing to load.
      ========================================================== */
 
-  /* Render the stream, landing on a month or a post.
+  /* target: "" for every post, "YYMM" for one month, "pNNNN" for one post.
 
-     target: "" for the newest month first, "YYMM" for a month, "pNNNN" for a
-     post. An unknown target shows the latest with a note, because sending a
-     reader nowhere is worse than sending them somewhere with an explanation. */
+     An unknown target shows everything with a note, because sending a reader
+     nowhere is worse than sending them somewhere with an explanation. */
   function blogShow(target, push) {
     if (!blogAttach()) return;
     blogManifest = blogManifest || blogParseManifest();
-    var yymm = "", anchor = "";
+    var cards = blogCards();
+    var yymm = "", anchor = "", unknown = false;
+
     if (/^p\d{4}$/.test(target)) {
-      var id = target.slice(1);
       var entry = null;
-      blogManifest.entries.forEach(function (e) { if (e.id === id) entry = e; });
+      blogManifest.entries.forEach(function (e) {
+        if (e.id === target.slice(1)) entry = e;
+      });
       if (entry) { yymm = entry.month; anchor = target; }
-    } else if (/^\d{4}$/.test(target) && blogManifest.months.indexOf(target) !== -1) {
-      yymm = target;
+      else unknown = true;
+    } else if (/^\d{4}$/.test(target)) {
+      if (blogManifest.months.indexOf(target) !== -1) yymm = target;
+      else unknown = true;
     }
-    /* jump nav: month buttons straight from the manifest (no fetches) */
+
+    /* the filter row, straight from the manifest */
     if (blogMonthsNav) {
       blogMonthsNav.innerHTML = "";
       blogManifest.months.forEach(function (mo) {
@@ -313,60 +228,53 @@
         b.type = "button";
         b.className = "bs-retry" + (mo === yymm ? " on" : "");
         b.textContent = blogMonthTitle(mo);
-        b.addEventListener("click", function () { blogShow(mo, true); });
+        b.addEventListener("click", function () {
+          blogShow(mo === yymm ? "" : mo, true);
+        });
         blogMonthsNav.appendChild(b);
       });
     }
-    /* stream model: land at the target month, keep scrolling into OLDER
-       months. No target = newest first. */
-    blogQueue = blogManifest.months.slice();
-    if (yymm) blogQueue = blogQueue.slice(blogQueue.indexOf(yymm));
-    blogFeed.innerHTML = "";
-    Object.keys(blogLoaded).forEach(function (k) { delete blogLoaded[k]; });
-    if (target && !yymm && !anchor && blogManifest.entries.length) {
-      var miss = doc.createElement("div");
-      miss.className = "bs-note";
-      miss.textContent = "That post or month wasn't found - showing the latest instead.";
-      blogFeed.appendChild(miss);
+
+    /* hidden, not removed: the cards are the page's own markup and the
+       publisher owns them, so this file never takes one away */
+    cards.forEach(function (c) {
+      c.hidden = !!(yymm && c.getAttribute("data-month") !== yymm);
+      c.classList.toggle("is-target", !!anchor && c.id === anchor);
+    });
+
+    var note = blogIndex.querySelector(".bs-note--unknown");
+    if (note) note.remove();
+    if (unknown) {
+      var n = doc.createElement("p");
+      n.className = "bs-note bs-note--unknown";
+      n.textContent = "That post or month wasn't found - showing everything instead.";
+      blogIndex.insertBefore(n, blogIndex.firstChild);
     }
-    if (!blogManifest.entries.length) {
-      var note = doc.createElement("div");
-      note.className = "bs-note";
-      note.textContent = "No posts yet - check back soon.";
-      blogFeed.appendChild(note);
-      window.scrollTo(0, 0);
-    } else {
-      blogLoadNextMonth().then(function () {
-        function toAnchor() {
-          var el = doc.getElementById(anchor);
-          if (el) el.scrollIntoView({ block: "start" });
-        }
-        if (anchor) {
-          toAnchor();
-          /* lazy images above the anchor shift layout as they land -
-             re-anchor a couple of beats later */
-          window.setTimeout(toAnchor, 700);
-          window.setTimeout(toAnchor, 1800);
-        } else {
-          window.scrollTo(0, 0);
-        }
-        blogBumpSentinel();
-      });
+
+    blogSetCanonical(yymm);
+    if (push) {
+      var q = target ? "?b=" + target : location.pathname;
+      history.pushState(null, "", target ? q : location.pathname);
     }
-    blogSetCanonical(yymm || (blogManifest.months[0] || ""));
-    var wanted = target ? "?b=" + target : "";
-    if (push && location.search !== wanted) {   /* don't stack duplicate entries */
-      history.pushState({ blog: target || true }, "", location.pathname + wanted);
+    if (anchor) {
+      var el = doc.getElementById(anchor);
+      if (el) el.scrollIntoView({ block: "center" });
     }
+    blogEditButtons();
     if (AMH.tool && AMH.tool.viewChanged) AMH.tool.viewChanged();
     AMH.site.requestTick();
   }
 
   /* ==========================================================
-     7. ENTRY POINT AND EXPORTS
+     6. ENTRY POINT AND EXPORTS
      ========================================================== */
-  /* Render on load. "?b=" selects where to land; without it the newest month
-     comes first. On a page with no feed container this returns immediately. */
+  /* Filter on load. "?b=" selects a month or a post; without it every post
+     is shown. On a page with no index container this returns immediately.
+
+     Note what does NOT happen here: nothing is rendered and nothing is
+     fetched. The cards are already in the page, written by the publisher,
+     so a reader with no script gets the whole index and this only adds the
+     filter on top of it. */
   (function () {
     if (!blogAttach()) return;
     var m = /[?&]b=([^&]*)/.exec(location.search);
@@ -376,7 +284,7 @@
   /* Back and forward move between months on this page. Without "?b=" the URL
      is the page itself, which means the newest month. */
   window.addEventListener("popstate", function () {
-    if (!blogFeed) return;
+    if (!blogIndex) return;
     var m = /[?&]b=([^&]*)/.exec(location.search);
     blogShow(m ? decodeURIComponent(m[1]) : "", false);
   });
@@ -391,8 +299,8 @@
        encodeSource(s) / decodeSource(s) -> the escaped form stored in a
                                    month file's x-blog-source tag
        monthTitle(yymm) / dateLabel(yymmdd) / dateTime(yymmdd) -> display
-       show(target, push)         -> render the stream at a target
-       editButtons()              -> add the Edit button to posts on screen
+       show(target, push)         -> filter the index to a target
+       editButtons()              -> add the Edit button to the cards
 
      There is no close. The blog is a page now, so leaving it is a
      navigation like any other. */

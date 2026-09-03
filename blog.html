@@ -163,12 +163,24 @@
     <!-- ============================================================
          3. BLOG
          ------------------------------------------------------------
-         The heading is editable copy. The two containers below are
-         filled by blog.js: the months row comes straight from the
-         manifest with no fetches, and the feed loads one month at a
-         time as the reader scrolls.
+         An index, not a stream. Each post appears once, as a date, a
+         title, its first paragraph and a link into the month file
+         that holds it.
 
-         blog.js does nothing at all on a page without #blogFeed, so
+         The index is machine-owned: the publisher writes it, and
+         data-ced="generated" makes the editor open it read-only.
+
+         Why an index. A month file is a real standalone page, and a
+         LINK to one works from a page opened from disk, where a fetch
+         does not. The stream this replaced could only ever read a
+         month over http. The full text of a post now exists in
+         exactly one place, the month file, and this page carries a
+         summary of it.
+
+         The months row above is drawn by blog.js from the manifest
+         and filters the cards below. It fetches nothing.
+
+         blog.js does nothing at all on a page without #blogIndex, so
          it is the presence of this container that makes a page the
          blog page.
          ============================================================ -->
@@ -183,7 +195,11 @@
         <h2>Notes from the work.</h2>
         <!--[/edit:blog-h2]-->
         <div class="bs-months" id="blogMonths"></div>
-        <div id="blogFeed"></div>
+        <!--[edit:blog-index]-->
+        <div class="bs-index" id="blogIndex" data-ced="generated">
+          <p class="bs-note">No posts yet - check back soon.</p>
+        </div>
+        <!--[/edit:blog-index]-->
       </div>
     </section>
 
@@ -273,8 +289,9 @@
        from treating it as a text region. -->
   <!--[edit:blog-manifest]-->
   <script id="blogManifest" type="text/plain" data-ced="blog">
-next-post:0001
+next-post:0002
 next-img:0001
+2609020001Test
 </script>
   <!--[/edit:blog-manifest]-->
 </body>

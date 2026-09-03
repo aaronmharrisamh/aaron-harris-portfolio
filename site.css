@@ -1936,6 +1936,26 @@ figure.bp-fig figcaption {
 }
 figure.bp-fig figcaption:empty { display: none; }
 
+/* ---- the blog index, written into blog.html by the publisher ----
+   Every post appears once: a date, a title, its first paragraph and a link
+   into the month file that holds it. The cards are static markup, so this
+   page needs no script and works when it is opened from disk. A link to a
+   month file is a navigation, which file:// allows; a fetch is not. */
+.bs-index { margin-top: 1.6rem; border-top: 1px solid var(--line); }
+.bs-card { padding: 1.4rem .2rem 1.5rem; border-bottom: 1px solid var(--line); }
+.bs-card[hidden] { display: none; }
+.bs-card time { display: block; color: var(--dim); font-size: .74rem;
+  letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+.bs-card h3 { margin: .35rem 0 .5rem; font-size: clamp(1.1rem, 2vw, 1.45rem);
+  letter-spacing: -.01em; }
+.bs-card__excerpt { margin: 0 0 .8rem; color: var(--muted); line-height: 1.7;
+  max-width: 68ch; }
+.bs-card__more { display: inline-flex; align-items: center; gap: .35rem;
+  font-size: .78rem; font-weight: 600; letter-spacing: .04em; }
+.bs-card__more::after { content: "→"; transition: transform .3s var(--ease); }
+.bs-card__more:hover::after { transform: translateX(3px); }
+.bs-card.is-target { background: var(--accent-faint); border-radius: var(--radius-sm); }
+
 /* ---- the blog stream, rendered into blog.html by blog.js ---- */
 .bs-months { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.1rem; }
 .bs-months button.on { border-color: var(--accent); color: var(--accent-bright); }

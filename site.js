@@ -57,7 +57,11 @@
      Runs before anything else here, and only on a page that has no blog feed
      of its own, so blog.html never redirects to itself. */
   (function () {
-    if (doc.getElementById("blogFeed")) return;
+    /* The blog page is the one with the index container. Test for it before
+       redirecting: a page that IS the blog and fails this test sends itself
+       to itself, forever. Rename that container and this has to change with
+       it, which is why the id is named here and nowhere else. */
+    if (doc.getElementById("blogIndex")) return;
     var m = /[?&]b=([^&]*)/.exec(location.search);
     if (!m) return;
     location.replace("blog.html?b=" + m[1]);

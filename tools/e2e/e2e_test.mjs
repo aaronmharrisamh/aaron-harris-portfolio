@@ -3,7 +3,7 @@
 // Requires: node 22+ (native WebSocket/fetch), Chrome, py launcher (http.server).
 // The harness starts its own local server and Chrome, and cleans both up.
 import { spawn } from "node:child_process";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,8 +22,21 @@ function check(name, ok, detail) {
 }
 
 // self-contained: serve the repo ourselves for the duration of the run
+// The suite serves a COPY of the repo, not the repo, so the blog page can be
+// emptied without touching the site. Everything else is linked through.
+const SERVE = mkdtempSync(join(tmpdir(), "ced-serve-"));
+for (const f of ["index.html", "gallery.html", "site.css", "site.js", "work.js",
+                 "blog.js", "gallery.js", "tool.js", "publish.js",
+                 "aaron-portfolio-portrait-transparent.png"]) {
+  try { copyFileSync(join(REPO, f), join(SERVE, f)); } catch {}
+}
+writeFileSync(join(SERVE, "blog.html"),
+  emptyBlogPage(readFileSync(join(REPO, "blog.html"), "utf-8")));
+for (const d of ["img", "tools"]) {
+  try { cpSync(join(REPO, d), join(SERVE, d), { recursive: true }); } catch {}
+}
 const server = spawn("py", ["-3", "-m", "http.server", String(SERVER_PORT), "--bind", "127.0.0.1"],
-  { cwd: REPO, stdio: "ignore" });
+  { cwd: SERVE, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 1500));
 
 const profile = mkdtempSync(join(tmpdir(), "ced-e2e-"));
@@ -122,7 +135,7 @@ const EXPECTED_REGIONS = {
   ],
   "blog.html": [
     "brand-title", "brand-sub", "nav-work", "nav-gallery", "nav-blog",
-    "nav-about", "nav-contact", "blog-eyebrow", "blog-h2",
+    "nav-about", "nav-contact", "blog-eyebrow", "blog-h2", "blog-index",
     "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
     "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar",
     "blog-manifest",
@@ -146,6 +159,24 @@ const EXPECTED_SCRIPTS = {
   "blog.html": ["site.js", "work.js", "blog.js", "tool.js", "publish.js"],
   "gallery.html": ["site.js", "work.js", "tool.js", "gallery.js"],
 };
+
+// blog.html with no posts: the manifest reset to its counters and the index
+// back to its placeholder.
+//
+// The suite must not depend on what the live blog holds. Every check here was
+// written while the manifest was empty, and the first real post made four of
+// them false. This keeps the page's structure - its chrome, its regions, its
+// scripts - and makes only its content deterministic.
+function emptyBlogPage(src) {
+  const man = src.replace(
+    /(<script id="blogManifest"[^>]*>)[\s\S]*?(<\/script>)/,
+    '$1\nnext-post:0001\nnext-img:0001\n\n$2');
+  return man.replace(
+    /(<!--\[edit:blog-index\]-->)[\s\S]*?(<!--\[\/edit:blog-index\]-->)/,
+    '$1\n        <div class="bs-index" id="blogIndex" data-ced="generated">\n' +
+    '          <p class="bs-note">No posts yet - check back soon.</p>\n' +
+    '        </div>\n        $2');
+}
 
 // Read the open-marker slugs of a page source, in document order.
 function regionSlugs(text) {
@@ -183,8 +214,17 @@ function firstDiff(a, b) {
 // the content of the named regions. Export must leave every byte outside a
 // marked region alone, so this is the assertion the whole publish model rests
 // on. The page is a parameter because Phases 3 and 4 export three pages.
-function exportIsByteExact(page, exported, editedSlugs) {
+// The source the suite SERVES. That is the repo's page for everything except
+// the blog, whose content is reset so no check depends on what the live site
+// happens to hold. Comparing an export against the repo's copy would fail for
+// a reason that has nothing to do with the export.
+function servedSource(page) {
   const src = readFileSync(join(REPO, page), "utf-8");
+  return page === "blog.html" ? emptyBlogPage(src) : src;
+}
+
+function exportIsByteExact(page, exported, editedSlugs) {
+  const src = servedSource(page);
   const a = stripSpans(src, editedSlugs);
   const b = stripSpans(exported, editedSlugs);
   if (a === null) return { ok: false, detail: page + ": a slug is missing from the source" };
@@ -1020,6 +1060,23 @@ async function main() {
   await evaluate(`window.edit.pending.clear(); window.edit()`);
   await sleep(400);
   await send("Emulation.clearDeviceMetricsOverride");
+
+  // C-serve. The suite serves its OWN copy, with the blog emptied, so no check
+  // depends on what the live site holds. If a stale server from an earlier run
+  // still owns the port, the new one fails to bind in silence and every page
+  // comes from the repo instead. That looks exactly like a code bug and is not
+  // one, so it is caught here, once, by name.
+  await send("Page.navigate", { url: BLOGPAGE });
+  await waitLoaded();
+  await sleep(900);
+  const served = await evaluate(`(() => {
+    const m = document.getElementById('blogManifest');
+    return { manifest: m ? m.textContent.trim() : 'missing',
+             cards: document.querySelectorAll('.bs-card').length };
+  })()`);
+  check("harness: the blog page under test is the suite's own empty copy",
+    /^next-post:0001\s+next-img:0001$/.test(served.manifest) && served.cards === 0,
+    JSON.stringify(served));
 
   // C-nav. A shared header means a nav link names its page. site.js has to
   // put that back: on the page a link names it is an in-page anchor, and the
@@ -1955,7 +2012,7 @@ async function main() {
     brand: (document.querySelector('.brand__title') || {}).textContent,
     endbar: !!document.querySelector('.endbar'),
     note: (document.querySelector('.bs-note') || {}).textContent,
-    feed: !!document.getElementById('blogFeed'),
+    feed: !!document.getElementById('blogIndex'),
     current: (document.querySelector('.nav__links a[aria-current="page"]') || {}).textContent,
     workHref: document.querySelector('.nav__links a').getAttribute('href'),
     edit: typeof window.edit,
@@ -1970,7 +2027,7 @@ async function main() {
     shell.current === "Blog", JSON.stringify({ b: shell.brand, c: shell.current }));
   check("blog page: in-page anchors of the home page become cross-page links",
     shell.workHref === "index.html#work", shell.workHref);
-  check("blog page: the reading engine renders into it",
+  check("blog page: the index is on the page, with no posts to show",
     shell.feed && /No posts yet/i.test(shell.note || ""), (shell.note || "").trim());
   check("blog page: the editor is available here too", shell.edit === "function");
 
@@ -1982,7 +2039,7 @@ async function main() {
     chips: document.querySelectorAll('.ced-chip').length,
   })`);
   check("blog page: its regions get panel rows and badges",
-    blogUI.rows === 17 && blogUI.chips > 0, JSON.stringify(blogUI));
+    blogUI.rows === 18 && blogUI.chips > 0, JSON.stringify(blogUI));
 
   await evaluate(`[...document.querySelectorAll('.ced-panel__row')]
     .find(r => r.textContent.indexOf('blog-h2') >= 0).click()`);
@@ -2083,7 +2140,7 @@ async function main() {
   const homeClean = await evaluate(`({
     engine: typeof (window.AMH && window.AMH.blog),
     takeover: document.body.classList.contains('blog-open'),
-    feed: !!document.getElementById('blogFeed'),
+    feed: !!document.getElementById('blogIndex'),
     manifest: !!document.getElementById('blogManifest'),
   })`);
   check("home page carries no blog machinery",
@@ -2102,13 +2159,23 @@ async function main() {
   await sleep(1800);
   const degrade = await evaluate(`({
     note: document.querySelector('.bs-note')?.textContent || '',
-    feed: !!document.getElementById('blogFeed'),
+    feed: !!document.getElementById('blogIndex'),
   })`);
   check("blog page with an empty manifest shows the no-posts note",
     degrade.feed && degrade.note.includes("No posts yet"), JSON.stringify(degrade));
   await sleep(1800);
 
   // BL2. composer opens; draft save/restore round-trip
+  const bootState = await evaluate(`({
+    edit: typeof window.edit,
+    tool: typeof (window.AMH && window.AMH.tool),
+    publish: typeof (window.AMH && window.AMH.publish),
+    blog: typeof (window.AMH && window.AMH.blog),
+    href: location.href,
+  })`);
+  check("blog page: every trunk on it has loaded before the composer opens",
+    bootState.edit === "function" && bootState.publish === "object",
+    JSON.stringify(bootState) + " exceptions=" + exceptions.join(" | ").slice(0, 200));
   await evaluate(`window.edit.blog()`);
   await sleep(300);
   // The panel's own rules live in publish.js and are handed to the editor's
@@ -2305,15 +2372,29 @@ async function main() {
       stripSpans(outHome, ["blog-highlights"]) === stripSpans(srcHome, ["blog-highlights"]));
 
     const outIdx = zipFiles["blog.html"].toString("utf8");
-    const srcIdx = readFileSync(join(REPO, "blog.html"), "utf-8");
+    // the served page, not the repo's: the suite publishes into its own copy
+    const srcIdx = servedSource("blog.html");
     const manSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-manifest]-->"),
       outIdx.indexOf("<!--[/edit:blog-manifest]-->"));
     check("manifest spliced: counters + entry",
       manSpan.includes("next-post:0002") && manSpan.includes("next-img:0003") &&
       manSpan.includes("2607110001E2E first post"),
-      manSpan.replace(/\s+/g, " ").slice(0, 120));
-    check("bundle blog.html byte-identical outside the manifest",
-      stripSpans(outIdx, ["blog-manifest"]) === stripSpans(srcIdx, ["blog-manifest"]));
+      manSpan.replace(/\s+/g, " "));
+    // a publish writes two regions on this page now: the manifest and the
+    // index card for the post. Everything else must still be untouched.
+    check("bundle blog.html byte-identical outside the manifest and the index",
+      stripSpans(outIdx, ["blog-index", "blog-manifest"]) ===
+      stripSpans(srcIdx, ["blog-index", "blog-manifest"]));
+    const cardSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-index]-->"),
+      outIdx.indexOf("<!--[/edit:blog-index]-->"));
+    check("bundle: the index card carries the excerpt and links to the month",
+      /<article class="bs-card" id="p0001" data-month="2607">/.test(cardSpan) &&
+      /class="bs-card__excerpt">First e2e post/.test(cardSpan) &&
+      /href="blog\/2607\.html#p0001">Read more/.test(cardSpan),
+      cardSpan.replace(/\s+/g, " ").slice(0, 170));
+    check("bundle: the index carries a summary, not the post",
+      !/\[img0001/.test(cardSpan) && !/blog-post__body/.test(cardSpan),
+      "clean");
 
     const month = zipFiles["blog/2607.html"].toString("utf8");
     const srcM = /<scr[i]pt type="text\/x-blog-source">\n([\s\S]*?)\n<\/scr[i]pt>/.exec(month);
@@ -2367,7 +2448,7 @@ async function main() {
   }
 
   // BL5. serve the extracted bundle and read it like a visitor
-  const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { mkdirSync, rmSync } = await import("node:fs");
   const bdir = mkdtempSync(join(tmpdir(), "blog-bundle-"));
   let bs = null;
   const B = "http://127.0.0.1:8124/";
@@ -2390,26 +2471,34 @@ async function main() {
                      "publish.js", "index.html"]) {
       writeFileSync(join(bdir, f), readFileSync(join(REPO, f)));
     }
+    // blog.html is NOT copied from the repo here: this directory is the
+    // extracted bundle, so its blog.html is the one the publish just wrote.
     bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
     await sleep(1500);
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
-    check("bundle: the blog page renders its feed",
-      await evaluate(`!!document.getElementById('blogFeed')`));
+    check("bundle: the blog page shows its index",
+      await evaluate(`!!document.getElementById('blogIndex')`));
     await sleep(600);
-    const stream = await evaluate(`({
-      article: !!document.getElementById('p0001'),
-      carousel: document.querySelector('#p0001 .gallery.is-ready')?.querySelectorAll('.gallery__stage img').length || 0,
-      caption: document.querySelector('#p0001 .gallery__stage img')?.getAttribute('data-caption') || '',
-      esc: (document.querySelector('#p0001 .blog-post__body')?.textContent || '').includes('</scr' + 'ipt>'),
+    // No fetch happens here at all: the cards are in the page. That is what
+    // makes this page readable when it is opened from disk.
+    const index = await evaluate(`({
+      cards: document.querySelectorAll('.bs-card').length,
+      card: !!document.getElementById('p0001'),
+      title: (document.querySelector('#p0001 h3') || {}).textContent || '',
+      excerpt: (document.querySelector('#p0001 .bs-card__excerpt') || {}).textContent || '',
+      more: (document.querySelector('#p0001 .bs-card__more') || { getAttribute: () => '' }).getAttribute('href') || '',
+      months: document.querySelectorAll('.bs-months button').length,
     })`);
-    check("bundle: stream renders the published post with a 2-image carousel",
-      stream.article && stream.carousel === 2 && stream.caption === "Cap one" && stream.esc,
-      JSON.stringify(stream));
+    check("bundle: the index lists the published post, with a link to its month",
+      index.cards === 1 && index.card && index.title === "E2E first post" &&
+      /^First e2e post/.test(index.excerpt) && index.more === "blog/2607.html#p0001",
+      JSON.stringify(index));
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=p0001" });
     await sleep(2200);
     check("bundle: ?b=p0001 deep link lands on the post",
-      await evaluate(`!!document.getElementById('blogFeed') && !!document.getElementById('p0001')`));
+      await evaluate(`!!document.getElementById('blogIndex') &&
+        !!document.querySelector('.bs-card.is-target#p0001')`));
     const postCanon = await evaluate(`document.querySelector('link[rel="canonical"]').getAttribute('href')`);
     check("bundle: a month in view makes the month file canonical",
       /\/blog\/2607\.html$/.test(postCanon), postCanon);
@@ -2466,7 +2555,8 @@ async function main() {
       writeBundle(zip2);
     }
 
-    // P2-2. month cache: reopening the stream refetches nothing
+    // P2-2. the index fetches nothing, ever. There is no month cache to test
+    // because there is no month load: the cards are in the page.
     await send("Page.navigate", { url: B + "blog.html" });
     await sleep(2200);
     await evaluate(`
@@ -2480,25 +2570,28 @@ async function main() {
     await sleep(1800);
     const nav2 = await evaluate(`({
       months: document.querySelectorAll('.bs-months button').length,
-      posts: [...document.querySelectorAll('#blogFeed article.blog-post')].map(a => a.id),
+      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
       fetches: window.__blogFetches,
     })`);
-    check("P2: jump nav lists both months; stream newest-first across months",
-      nav2.months === 2 && JSON.stringify(nav2.posts) === '["p0001","p0002"]', JSON.stringify(nav2));
-    // there is no close on a page; re-showing clears the feed and renders it
-    // again, which is what has to come from the cache rather than the network
+    check("P2: the month filter lists both months; the index is newest first",
+      nav2.months === 2 && JSON.stringify(nav2.posts) === '["p0001","p0002"]',
+      JSON.stringify(nav2));
+    // filtering to a month and back hides and shows cards that are already
+    // there, so nothing can be fetched however many times it is done
     await evaluate(`AMH.blog.show("2606", false)`);
     await sleep(900);
     await evaluate(`AMH.blog.show("", false)`);
     await sleep(1200);
     const again = await evaluate(`({
       fetches: window.__blogFetches,
-      posts: [...document.querySelectorAll('#blogFeed article.blog-post')].map(a => a.id),
+      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
+      shown: [...document.querySelectorAll('.bs-card')].filter(c => !c.hidden).length,
     })`);
-    check("P2: re-showing the stream uses the month cache (no refetch)",
-      again.fetches === nav2.fetches &&
-      JSON.stringify(again.posts) === '["p0001","p0002"]',
-      "fetches " + nav2.fetches + " -> " + again.fetches + " posts=" + again.posts.join(","));
+    check("P2: filtering the index fetches nothing, which is why disk works",
+      again.fetches === 0 && nav2.fetches === 0 &&
+      JSON.stringify(again.posts) === '["p0001","p0002"]' && again.shown === 2,
+      "fetches " + nav2.fetches + " -> " + again.fetches +
+      " posts=" + again.posts.join(",") + " shown=" + again.shown);
 
     // P2-3. edit a published post's body (same title/date)
     await send("Page.navigate", { url: B + "blog.html" });
@@ -2581,13 +2674,16 @@ async function main() {
     await sleep(600);
     const after4 = await evaluate(`({
       months: document.querySelectorAll('.bs-months button').length,
-      posts: [...document.querySelectorAll('#blogFeed article.blog-post')].map(a => a.id),
-      title: document.querySelector('#p0001 header h2')?.textContent,
-      editBtns: document.querySelectorAll('#blogFeed article header .bs-retry').length,
+      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
+      title: (document.querySelector('#p0001 h3') || {}).textContent,
+      more: [...document.querySelectorAll('.bs-card__more')].map(a => a.getAttribute('href')),
+      editBtns: document.querySelectorAll('.bs-card .bs-retry').length,
     })`);
-    check("P2: post-move stream is one June month with both posts + edit buttons",
+    check("P2: after the move the index is one June month, both cards relinked",
       after4.months === 1 && JSON.stringify(after4.posts) === '["p0002","p0001"]' &&
-      after4.title === "Moved post" && after4.editBtns === 2, JSON.stringify(after4));
+      after4.title === "Moved post" && after4.editBtns === 2 &&
+      after4.more.every(h => h.indexOf("blog/2606.html#") === 0),
+      JSON.stringify(after4));
 
     // P2-6. delete a post (keeps the month, which still has p0001)
     await send("Page.navigate", { url: B + "blog.html" });

@@ -857,6 +857,95 @@
       "        ";
   }
 
+  /* ---------------- the blog index ----------------
+
+     blog.html lists every post once, as a card. The card carries the first
+     paragraph and a link into the month file, and the month file carries the
+     post. So the full text lives in exactly one place.
+
+     A link works from a page opened from disk; a fetch does not. That is the
+     whole reason the index exists. */
+
+  /* How much of the first paragraph a card shows. Long enough to say what a
+     post is about, short enough that the page stays a list. */
+  var EXCERPT_CHARS = 180;
+
+  /* The first paragraph of a post, as plain text.
+
+     Image tags go first: an excerpt is prose, and "[img0001,Cap|Alt]" is not.
+     Then the markup, because a card is one line of text and a stray <strong>
+     would have to be balanced to be safe. Cut on a word, never mid-word. */
+  function bcExcerpt(source) {
+    var s = String(source || "").replace(BC_TAG_RE_G, " ");
+    var para = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(s);
+    var text = (para ? para[1] : s)
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text.length <= EXCERPT_CHARS) return text;
+    var cut = text.slice(0, EXCERPT_CHARS);
+    var space = cut.lastIndexOf(" ");
+    return (space > 40 ? cut.slice(0, space) : cut).replace(/[.,;:!?]+$/, "") + "..";
+  }
+
+  /* One card. The id is the post id, so "?b=p0001" can find it, and the link
+     is the month file at that same anchor. */
+  function bcIndexCard(entry, source, indent) {
+    var yymm = entry.date.slice(0, 4);
+    var B = AMH.blog;
+    return indent + '<article class="bs-card" id="p' + entry.id +
+      '" data-month="' + yymm + '">\n' +
+      indent + '  <time datetime="' + B.dateTime(entry.date) + '">' +
+      B.dateLabel(entry.date) + "</time>\n" +
+      indent + "  <h3>" + TOOL.escAttr(entry.title) + "</h3>\n" +
+      indent + '  <p class="bs-card__excerpt">' + TOOL.escAttr(bcExcerpt(source)) + "</p>\n" +
+      indent + '  <a class="bs-card__more" href="blog/' + yymm + ".html#p" + entry.id +
+      '">Read more</a>\n' +
+      indent + "</article>";
+  }
+
+  /* Pull the cards already in the deployed index, keyed by post id, so a
+     publish can replace one and leave the rest byte-identical. */
+  function bcIndexCards(src) {
+    var open = "<!--[edit:blog-index]-->";
+    var a = src.indexOf(open);
+    if (a < 0) return null;
+    var b = src.indexOf("<!--[/edit:blog-index]-->", a);
+    if (b < 0) return null;
+    var region = src.slice(a + open.length, b);
+    var out = {};
+    var re = /[ \t]*<article class="bs-card" id="p(\d{4})"[\s\S]*?<\/article>/g;
+    var m;
+    while ((m = re.exec(region))) out[m[1]] = m[0];
+    return out;
+  }
+
+  /* Write the index back, newest post first, with one card changed.
+
+     card is null to remove that post. cards, when given, replaces the whole
+     set - which is what a rebuild does, because it has read every source. */
+  function bcSpliceIndex(src, entries, id, card, cards) {
+    var have = cards || bcIndexCards(src);
+    if (have === null) {
+      console.warn("[blog] blog.html has no [blog-index] region - the index was " +
+        "not updated. The post is published either way.");
+      return src;
+    }
+    if (id) {
+      if (card) have[id] = card;
+      else delete have[id];
+    }
+    var order = entries.slice().reverse();     /* manifest is oldest first */
+    var lines = order.map(function (e) { return have[e.id]; })
+      .filter(function (c) { return !!c; });
+    var inner = lines.length
+      ? "\n" + lines.join("\n") + "\n        "
+      : '\n          <p class="bs-note">No posts yet - check back soon.</p>\n        ';
+    var out = TOOL.spliceRegion(src, "blog-index", inner);
+    return out === null ? src : out;
+  }
+
   /* The public URL of a managed page. The home page is the site root: its
      canonical is the bare domain, and a sitemap that named index.html
      instead would be offering search engines a second URL for one page. */
@@ -1136,8 +1225,11 @@
           man.nextImg + bcImgCounter, entries);
         src = TOOL.spliceAllEdits(src);   /* outstanding copy/gallery edits ride along */
         var out = TOOL.spliceRegion(src, "blog-manifest", payload);
-        if (out === null) throw new Error("blog-manifest markers not found in deployed index.html");
+        if (out === null) throw new Error("blog-manifest markers not found in deployed blog.html");
         src = out;
+        /* the index card for this post, put in among the ones already there */
+        src = bcSpliceIndex(src, entries, id,
+          bcIndexCard({ id: id, date: date, title: title }, source, "          "));
         meta = bcSiteMeta(src);
         bcCommonFiles(files, src, entries, meta);
         var enc = new TextEncoder();
@@ -1266,8 +1358,9 @@
         var payload = bcManifestPayload(man.nextPost, man.nextImg, entries);
         src = TOOL.spliceAllEdits(src);
         var out = TOOL.spliceRegion(src, "blog-manifest", payload);
-        if (out === null) throw new Error("blog-manifest markers not found in deployed index.html");
+        if (out === null) throw new Error("blog-manifest markers not found in deployed blog.html");
         src = out;
+        src = bcSpliceIndex(src, entries, id, null);   /* card goes with the post */
         meta = bcSiteMeta(src);
         bcCommonFiles(files, src, entries, meta);
         imgOrphans.forEach(function (f) {
@@ -1320,6 +1413,8 @@
     /* a rebuild has no orphans of its own; never inherit a composer session's */
     var savedOrphans = bcOrphans;
     bcOrphans = [];
+    /* held for the last step, which writes the index back into the page */
+    var rebuiltCards = {}, rebuiltSrc = "", rebuiltEntries = [];
     TOOL.pristine()
       .then(function (src) {
         var man = bcManifestFrom(src);
@@ -1334,6 +1429,13 @@
         /* no manifest change: index.html stays out of a rebuild bundle */
         files["sitemap.xml"] = enc.encode(bcSitemap(meta.base, bcUniqueMonths(man.entries)));
         files["robots.txt"] = enc.encode(bcRobots(meta.base));
+        /* A rebuild reads every month, so it is the one path that holds
+           every post's source and can regenerate every card. It therefore
+           has to write blog.html, which it used to leave out: a rebuild that
+           rewrote the month files and not the index would be the one way
+           these two could fall out of step. */
+        rebuiltSrc = src;
+        rebuiltEntries = man.entries;
         var months = bcUniqueMonths(man.entries);
         /* every one of these is in the manifest, so every one should exist;
            a folder that lacks one is a fact about the folder, not a reason
@@ -1350,6 +1452,11 @@
                 carried.push("p" + b.id + " (" + yymm + ")");
                 return b;   /* no source: carry the block verbatim */
               }
+              /* the same source the month file is rendered from, so the card
+                 and the post cannot say different things */
+              rebuiltCards[post.id] = bcIndexCard(
+                { id: post.id, date: post.date, title: post.title },
+                post.source, "          ");
               return { id: post.id, date: post.date,
                        text: bcRenderArticle(post.id, post.date, post.title, post.source) };
             });
@@ -1362,6 +1469,14 @@
       .then(function () {
         if (carried.length) {
           console.warn("[blog] rebuilt with VERBATIM carry (no embedded source): " + carried.join(", "));
+        }
+        /* The index is regenerated from the same sources the month files
+           were, so the two cannot disagree. This is why a rebuild now writes
+           blog.html: it used to leave the page out, which was fine when the
+           page held nothing derived from a post. */
+        var idxSrc = bcSpliceIndex(rebuiltSrc, rebuiltEntries, null, null, rebuiltCards);
+        if (idxSrc !== rebuiltSrc) {
+          files[TOOL.currentPage()] = new TextEncoder().encode(idxSrc);
         }
         bcFinishBundle(files, "blog-rebuild-" + bcTodayYYMMDD() + ".zip", "", "");
         console.info("[blog] rebuild bundle ready - extract at the repo root, review, commit, push.");
