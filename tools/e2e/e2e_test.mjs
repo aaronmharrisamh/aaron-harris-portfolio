@@ -655,14 +655,27 @@ async function main() {
   // in document order, which is why there is no z-index inside the button:
   // put the word after the flap and it would float on top of the paper.
   const lxOrder = await evaluate(`(() => {
-    const kids = [...document.querySelector('.amh-edit__art').children];
-    const at = (sel) => kids.findIndex(k => k.matches(sel));
-    return { hole: at('.amh-edit__hole'), word: at('.amh-edit__word--edit'),
-             flap: at('.amh-edit__flap'), count: kids.length };
+    const art = document.querySelector('.amh-edit__art');
+    const kids = [...art.children];
+    const word = art.querySelector('.amh-edit__word--edit');
+    const group = word && word.closest('g[clip-path]');
+    const idx = (el) => kids.indexOf(el);
+    const wordStyle = word ? getComputedStyle(word) : null;
+    return {
+      hole: kids.findIndex(k => k.matches('.amh-edit__hole')),
+      word: group ? idx(group) : -1,
+      flap: kids.findIndex(k => k.matches('.amh-edit__flap')),
+      clipped: !!(group && /amhPeel/.test(group.getAttribute('clip-path') || '')),
+      // the reveal must be geometry, not a second animation on a timer
+      fades: wordStyle ? /opacity/.test(wordStyle.transitionProperty) : null,
+    };
   })()`);
   check("launcher: the word is painted under the flap, so the peel reveals it",
     lxOrder.hole >= 0 && lxOrder.word > lxOrder.hole && lxOrder.flap > lxOrder.word,
     "hole=" + lxOrder.hole + " word=" + lxOrder.word + " flap=" + lxOrder.flap);
+  check("launcher: the word is clipped to the hole, and does not fade on a timer",
+    lxOrder.clipped === true && lxOrder.fades === false,
+    "clipped=" + lxOrder.clipped + " fades=" + lxOrder.fades);
 
   // any corner, from one attribute. The art is drawn for the bottom left and
   // the other three mirror it, so each corner touches two viewport edges.
@@ -1574,6 +1587,14 @@ async function main() {
     readOnly: document.querySelector('.ced-modal textarea').readOnly,
     status: document.querySelector('.ced-modal__status').textContent,
   })`);
+  const modalTools = await evaluate(`(() => {
+    const tools = [...document.querySelectorAll('.ced-modal__tools .ced-tool')];
+    return { count: tools.length, stops: tools.filter(b => b.tabIndex !== -1).length };
+  })()`);
+  check("region modal: it shares the toolbar, so that is skipped here too",
+    modalTools.count > 0 && modalTools.stops === 0,
+    modalTools.count + " buttons, " + modalTools.stops + " of them tab stops");
+
   check("machine-owned: the panel marks the region generated", !!(genRow && genRow.note));
   check("machine-owned: the editor opens it read-only and says who owns it",
     gen.found && gen.readOnly === true && /publisher/i.test(gen.status),
@@ -1817,6 +1838,37 @@ async function main() {
   check("wizard: a file already handed over is not asked for again",
     kept.text === "<html>no markers here</html>" && kept.asked === false,
     JSON.stringify(kept).slice(0, 80));
+
+  // W4b. a file that may not exist is asked for differently: it gets an
+  // answer that is not "give up", it resolves rather than rejecting, and the
+  // answer is remembered.
+  const optional = await evaluate(`(function () {
+    AMH.tool.expectFiles(["index.html", "blog/2699.html"]);
+    AMH.tool.expectOptional(["blog/2699.html"]);
+    window.__h4 = AMH.tool.handOff("blog/2699.html", new Error("fetch refused"));
+    const btns = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .map(b => b.textContent);
+    const head = document.querySelector('.ced-handoff .ced-modal__head').textContent;
+    const absent = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(b => /Not on disk/.test(b.textContent));
+    if (absent) absent.click();
+    return { btns, head, clicked: !!absent };
+  })()`);
+  const optionalOut = await evaluate(`window.__h4`, { awaitPromise: true });
+  check("wizard: a file that may be absent offers an answer that is not Cancel",
+    optional.clicked === true && optional.btns.some(b => /Not on disk/.test(b)),
+    optional.btns.join(" | "));
+  check("wizard: saying it is not there resolves with null, and does not reject",
+    optionalOut === null, JSON.stringify(optionalOut));
+  check("wizard: an optional file is not counted as a step",
+    !/file \d+ of/.test(optional.head), optional.head);
+
+  const remembered = await evaluate(`AMH.tool.handOff("blog/2699.html", null).then(
+    function (v) { return { value: v, asked: !!document.querySelector('.ced-handoff__zone') }; })`,
+    { awaitPromise: true });
+  check("wizard: a file already said to be absent is not asked for again",
+    remembered.value === null && remembered.asked === false,
+    JSON.stringify(remembered));
 
   // W5. progress, when the caller says what it will need
   const steps = await evaluate(`(function () {
@@ -2077,6 +2129,63 @@ async function main() {
     composerUI.panel && composerUI.tabs === 3 && composerUI.position === "fixed" &&
     composerUI.write === "flex" && composerUI.images === "none",
     JSON.stringify(composerUI));
+  // The tab order: date, title, the three view tabs, the body, then the
+  // buttons at the bottom. The twelve formatting buttons are not stops.
+  const tabOrder = await evaluate(`(() => {
+    const panel = document.querySelector('.bc-panel');
+    const stops = [...panel.querySelectorAll('input, textarea, button')]
+      .filter(el => el.tabIndex !== -1 && !el.disabled &&
+                    (el.offsetWidth > 0 || el.offsetHeight > 0));
+    const name = (el) => el.className.split(' ')[0] || el.tagName.toLowerCase();
+    return {
+      order: stops.map(name),
+      tools: panel.querySelectorAll('.ced-tool').length,
+      toolStops: [...panel.querySelectorAll('.ced-tool')]
+        .filter(b => b.tabIndex !== -1).length,
+      first: stops.length ? name(stops[0]) : "",
+      focused: document.activeElement.className.split(' ')[0],
+    };
+  })()`);
+  check("composer: the formatting toolbar is not in the tab order",
+    tabOrder.tools === 12 && tabOrder.toolStops === 0,
+    tabOrder.tools + " buttons, " + tabOrder.toolStops + " of them tab stops");
+  // The close X is first, which is where a dialog usually puts it. After that
+  // the order is the one the panel reads in, and the twelve toolbar buttons
+  // that used to sit between the body and Publish are gone from it.
+  check("composer: TAB runs close, date, title, the view tabs, the body, the buttons",
+    tabOrder.order.join(" ") ===
+      "ced-modal__x bc-date bc-title bc-tab bc-tab bc-tab textarea " +
+      "ced-btn ced-btn ced-btn ced-btn",
+    tabOrder.order.join(" "));
+
+  // aria-modal promises the focus stays inside, so TAB has to wrap
+  const trap = await evaluate(`(() => {
+    const panel = document.querySelector('.bc-panel');
+    const stops = [...panel.querySelectorAll('input, textarea, button')]
+      .filter(el => el.tabIndex !== -1 && !el.disabled &&
+                    (el.offsetWidth > 0 || el.offsetHeight > 0));
+    const first = stops[0], last = stops[stops.length - 1];
+    const press = (shift) => {
+      const e = new KeyboardEvent('keydown',
+        { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+      document.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    last.focus();
+    const wrapped = press(false);
+    const toFirst = document.activeElement === first;
+    first.focus();
+    const wrappedBack = press(true);
+    const toLast = document.activeElement === last;
+    return { modal: panel.getAttribute('aria-modal'), wrapped, toFirst,
+             wrappedBack, toLast, stops: stops.length };
+  })()`);
+  check("composer: TAB off the last control returns to the first, not the page",
+    trap.modal === "true" && trap.wrapped === true && trap.toFirst === true,
+    JSON.stringify(trap));
+  check("composer: shift and TAB off the first control returns to the last",
+    trap.wrappedBack === true && trap.toLast === true, JSON.stringify(trap));
+
   await evaluate(`document.querySelector('.bc-title').value = 'Draft probe'`);
   await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Draft body.</p>'`);
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Save Draft').click()`);

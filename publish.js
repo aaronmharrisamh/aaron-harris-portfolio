@@ -424,6 +424,36 @@
     if (bcPanel && bcPanel.parentNode) bcPanel.parentNode.removeChild(bcPanel);
   }
 
+  /* Everything in the panel a TAB can land on, in the order it appears:
+     the date, the title, the three view tabs, the body, then the buttons at
+     the bottom. The toolbar is absent by construction, because its buttons
+     carry tabIndex -1 and this asks the document which elements are
+     focusable rather than listing them. */
+  function bcFocusables() {
+    if (!bcPanel) return [];
+    return Array.prototype.filter.call(
+      bcPanel.querySelectorAll("input, textarea, button, [href], select"),
+      function (el) {
+        return el.tabIndex !== -1 && !el.disabled &&
+               el.getAttribute("aria-hidden") !== "true" &&
+               (el.offsetWidth > 0 || el.offsetHeight > 0);
+      });
+  }
+
+  /* The panel says aria-modal, so TAB has to stay in it. Without this the
+     focus walks out through the scrim and onto the page behind, where the
+     editor's own chips are waiting, and there is no way back but the mouse. */
+  function bcTrapFocus(e) {
+    if (e.key !== "Tab") return;
+    var items = bcFocusables();
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    var at = items.indexOf(doc.activeElement);
+    if (at === -1) { e.preventDefault(); first.focus(); return; }
+    if (e.shiftKey && doc.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+
   var bcEscBound = false;
   function openComposer(editing) {
     if (bcPanel && bcPanel.parentNode) return;
@@ -432,10 +462,16 @@
     if (!bcEscBound) {
       bcEscBound = true;
       doc.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && bcPanel && bcPanel.parentNode && !TOOL.modalOpen()) {
+        if (!bcPanel || !bcPanel.parentNode) return;
+        /* the region modal layers over this one and owns the keyboard while
+           it is open, so neither rule fires underneath it */
+        if (TOOL.modalOpen()) return;
+        if (e.key === "Escape") {
           e.preventDefault();
           bcRequestClose();
+          return;
         }
+        bcTrapFocus(e);
       });
     }
     bcPublished = false;
@@ -514,6 +550,7 @@
     ]).forEach(function (t) {
       var b = doc.createElement("button");
       b.type = "button"; b.className = "ced-tool";
+      b.tabIndex = -1;             /* see the note in tool.js: not a tab stop */
       b.textContent = t[0]; b.title = t[1];
       b.addEventListener("click", t[2]);
       tools.appendChild(b);
@@ -937,8 +974,19 @@
      which callers already handle. A refused fetch is a different thing: the
      page was opened from disk, so ask for the file rather than report a month
      that does exist as missing. Cancelling the prompt gives the same null. */
-  function bcFetchMonth(yymm) {
+  function bcFetchMonth(yymm, deployed) {
     var path = "blog/" + yymm + ".html";
+    /* The manifest is the record of what has been published, and a month
+       file exists only for a month with posts in it. So a month the manifest
+       does not know cannot have a file, and asking for one is noise: it is
+       the publish that is about to create it.
+
+       deployed is the list of months the DEPLOYED manifest holds. Callers
+       that have not read a manifest pass nothing and keep the old behaviour,
+       which is to ask. */
+    if (deployed && deployed.indexOf(yymm) === -1) {
+      return Promise.resolve(null);
+    }
     return fetch(path, { cache: "no-store" }).then(
       function (res) { return res.ok ? res.text() : null; },
       function (netErr) {
@@ -1065,6 +1113,13 @@
         if (man.payload.trim() !== bcManAtOpen.trim()) {
           throw new Error("the deployed manifest differs from the page you loaded - reload and recompose (Save Draft first)");
         }
+        /* what the deployed manifest knows, read before this post is added
+           to it: that is the list of month files that can exist */
+        var deployed = bcUniqueMonths(man.entries);
+        /* a month with no deployed posts is one this publish creates, so it
+           is never asked for; a month that has them may still be missing
+           from someone's folder, so it is optional rather than required */
+        TOOL.expectOptional(deployed.map(function (m) { return "blog/" + m + ".html"; }));
         entries = man.entries.slice();
         if (bcEditing) {
           /* republish: the permanent id keeps its place unless the date moved */
@@ -1087,7 +1142,7 @@
         bcCommonFiles(files, src, entries, meta);
         var enc = new TextEncoder();
         /* target month: swap in the (re)rendered article */
-        return bcFetchMonth(yymm).then(function (existing) {
+        return bcFetchMonth(yymm, deployed).then(function (existing) {
           var blocks = existing ? bcParseMonthBlocks(existing) : [];
           if (existing && !blocks.length) {
             throw new Error("blog/" + yymm + ".html exists but couldn't be parsed - is it a generated month file?");
@@ -1101,7 +1156,7 @@
           /* cross-month move: regenerate the old month without this post,
              or orphan the whole file if this was its only post */
           if (!bcEditing || oldMonth === yymm) return;
-          return bcFetchMonth(oldMonth).then(function (oldText) {
+          return bcFetchMonth(oldMonth, deployed).then(function (oldText) {
             if (oldText === null) return;   /* nothing deployed there - nothing to fix */
             var oldBlocks = bcParseMonthBlocks(oldText)
               .filter(function (b) { return b.id !== id; });
@@ -1218,6 +1273,8 @@
         imgOrphans.forEach(function (f) {
           if (bcOrphans.indexOf(f) === -1) bcOrphans.push(f);
         });
+        /* the post being deleted lives in this month, so its file must
+           exist; a missing one is a real problem and is thrown below */
         return bcFetchMonth(yymm).then(function (text) {
           if (text === null) {
             /* never half-delete: dropping the manifest entry while the
@@ -1277,8 +1334,13 @@
         /* no manifest change: index.html stays out of a rebuild bundle */
         files["sitemap.xml"] = enc.encode(bcSitemap(meta.base, bcUniqueMonths(man.entries)));
         files["robots.txt"] = enc.encode(bcRobots(meta.base));
-        return Promise.all(bcUniqueMonths(man.entries).map(function (yymm) {
-          return bcFetchMonth(yymm).then(function (text) {
+        var months = bcUniqueMonths(man.entries);
+        /* every one of these is in the manifest, so every one should exist;
+           a folder that lacks one is a fact about the folder, not a reason
+           to abandon the rebuild */
+        TOOL.expectOptional(months.map(function (m) { return "blog/" + m + ".html"; }));
+        return Promise.all(months.map(function (yymm) {
+          return bcFetchMonth(yymm, months).then(function (text) {
             if (text === null) throw new Error("blog/" + yymm + ".html is missing on the server");
             var blocks = bcParseMonthBlocks(text);
             if (!blocks.length) throw new Error("blog/" + yymm + ".html couldn't be parsed");

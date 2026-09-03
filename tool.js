@@ -939,6 +939,7 @@
     ".ced-handoff__item{font:700 9.5px/1 Consolas,monospace;letter-spacing:.06em;border-radius:4px;padding:3px 6px;border:1px solid var(--line);color:var(--dim);}" +
     ".ced-handoff__item.is-now{border-color:var(--accent);color:var(--accent-bright);}" +
     ".ced-handoff__item.is-done{border-color:rgba(74,165,232,.3);color:var(--muted);text-decoration:line-through;}" +
+    ".ced-handoff__item.is-none{border-style:dashed;color:var(--dim);}" +
     ".ced-panel__list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:.35rem 0;}" +
     ".ced-panel__row{display:flex;gap:.55rem;align-items:center;width:100%;padding:.22rem .8rem;" +
     "border:0;background:none;color:var(--text-soft);font:inherit;cursor:pointer;text-align:left;}" +
@@ -1266,6 +1267,13 @@
     return '<svg class="amh-edit__art" viewBox="0 0 150 150" aria-hidden="true" ' +
       'focusable="false" preserveAspectRatio="none">' +
       "<defs>" +
+        /* The word is clipped to the hole, so it is drawn only where the
+           page has peeled away. The clip path carries the same
+           transform as the paper, so the two grow together and cannot fall
+           out of step - which is what a second, timed fade could do. */
+        '<clipPath id="amhPeel" clipPathUnits="userSpaceOnUse">' +
+          '<path class="amh-edit__paper" d="M0 150 L0 9 Q62 51 141 150 Z" />' +
+        "</clipPath>" +
         '<linearGradient id="amhHole" x1="0" y1="1" x2="1" y2="0">' +
           '<stop offset="0" stop-color="#0e131a" /><stop offset="1" stop-color="#05070a" />' +
         "</linearGradient>" +
@@ -1281,10 +1289,12 @@
       /* anchored at the middle so the rotation is symmetric and the word
          cannot run off the corner, and turned to follow the fold, which
          runs down and to the right */
-      '<text class="amh-edit__word amh-edit__word--edit" x="52" y="103" ' +
-        'text-anchor="middle" transform="rotate(45 52 103)">EDIT</text>' +
-      '<text class="amh-edit__word amh-edit__word--exit" x="52" y="103" ' +
-        'text-anchor="middle" transform="rotate(45 52 103)">EXIT</text>' +
+      '<g clip-path="url(#amhPeel)">' +
+        '<text class="amh-edit__word amh-edit__word--edit" x="52" y="103" ' +
+          'text-anchor="middle" transform="rotate(45 52 103)">EDIT</text>' +
+        '<text class="amh-edit__word amh-edit__word--exit" x="52" y="103" ' +
+          'text-anchor="middle" transform="rotate(45 52 103)">EXIT</text>' +
+      "</g>" +
       /* 3. the flap, over both */
       '<path class="amh-edit__paper amh-edit__flap" d="M0 9 Q88 35 141 150 Q39 85 0 9 Z" />' +
       "</svg>";
@@ -1404,6 +1414,10 @@
     TOOLS.forEach(function (t) {
       var b = doc.createElement("button");
       b.type = "button"; b.className = "ced-tool";
+      /* out of the tab order. Twelve stops between the text and the buttons
+         that apply it is a long walk for a shortcut, and the surface here is
+         raw HTML: a keyboard user can type the tag. The mouse is unaffected. */
+      b.tabIndex = -1;
       b.textContent = t[0]; b.title = t[1];
       b.addEventListener("click", t[2]);
       tools.appendChild(b);
@@ -1813,7 +1827,8 @@
     "BLG-E05": "That file carries no editable regions, so it is not a page this editor writes.",
     "BLG-E06": "That file is missing a region this publish has to write.",
     "BLG-E07": "Cancelled. No file was provided.",
-    "BLG-E08": "That folder holds none of the files this publish needs."
+    "BLG-E08": "That folder holds none of the files this publish needs.",
+    "BLG-E09": "Not on disk. The publish treats this file as one it has to create."
   };
 
   /* Say a code the same way every time, and put it where a console search
@@ -1834,12 +1849,30 @@
      Cleared by a reload, which is the same life as an unexported edit. */
   var handed = {};
 
+  /* Files the user said are not there. Only an optional file can be skipped,
+     and a skip is remembered for the same reason a handed file is: a rebuild
+     walks every month, and asking twice about one that does not exist is the
+     dialog wasting someone's time. */
+  var skipped = {};
+
   /* What this publish is going to ask for, when the caller knows in advance.
      The wizard counts against it so it can say "file 2 of 4" rather than
      opening the same dialog four times with no sense of progress. */
   var expected = [];
   function expectFiles(paths) {
     expected = (paths || []).slice();
+  }
+
+  /* Files the caller has said may legitimately be absent. They are asked for
+     differently and are not counted in the step total, because a file that
+     does not have to exist is not a step someone has to complete. */
+  var optional = {};
+  function expectOptional(paths) {
+    (paths || []).forEach(function (pp) { optional[pp] = true; });
+  }
+  function isOptional(path) { return !!optional[path]; }
+  function required() {
+    return expected.filter(function (pp) { return !optional[pp]; });
   }
 
   /* Does this look like a page the editor writes? Better verification, as
@@ -1896,7 +1929,11 @@
      the rejection carries a code. */
   function handOff(path, netErr) {
     if (handed[path]) return Promise.resolve(handed[path]);
+    /* already said to be absent: an optional file answers null and the
+       caller carries on, which is what it would have done at a 404 */
+    if (skipped[path]) return Promise.resolve(null);
     var want = path.replace(/^.*\//, "");
+    var mayBeAbsent = isOptional(path);
     if (netErr) errText("BLG-E01", "Wanted: " + want + ".");
 
     return new Promise(function (resolve, reject) {
@@ -1926,7 +1963,9 @@
       var note = doc.createElement("div");
       note.className = "ced-modal__status";
       note.textContent = ERR["BLG-E01"] + " Hand it the file from your repo and " +
-        "the export continues as normal.";
+        "the export continues as normal." +
+        (mayBeAbsent ? " This one may not exist yet. If it does not, say so and " +
+                       "the publish creates it." : "");
 
       var list = doc.createElement("div");
       list.className = "ced-handoff__list";
@@ -1956,6 +1995,18 @@
       all.title = "Pick the folder once. Every file this publish needs is taken from it.";
       var spacer = doc.createElement("span");
       spacer.className = "ced-spacer";
+      /* An optional file needs an answer that is not "give up". Cancel
+         abandons the publish; this says the file is not there, which is a
+         fact about the repo rather than a change of mind. */
+      var absent = null;
+      if (mayBeAbsent) {
+        absent = doc.createElement("button");
+        absent.type = "button";
+        absent.className = "ced-btn";
+        absent.textContent = "Not on disk yet";
+        absent.title = "The publish will create this file.";
+      }
+
       var cancel = doc.createElement("button");
       cancel.type = "button";
       cancel.className = "ced-btn";
@@ -2038,6 +2089,14 @@
         zone.classList.remove("is-over", "is-wrong", "is-warn");
         take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
       });
+      if (absent) {
+        absent.addEventListener("click", function () {
+          skipped[path] = true;
+          errText("BLG-E09", "Wanted: " + want + ".");
+          done();
+          resolve(null);
+        });
+      }
       cancel.addEventListener("click", function () {
         done();
         reject(errObj("BLG-E07", "Wanted: " + want + "."));
@@ -2045,6 +2104,7 @@
 
       btns.appendChild(pick);
       btns.appendChild(all);
+      if (absent) btns.appendChild(absent);
       btns.appendChild(spacer);
       btns.appendChild(cancel);
       box.appendChild(title);
@@ -2070,19 +2130,26 @@
   }
 
   /* "2 of 4", when the caller said what it would need. */
+  /* "2 of 3", counting only the files that have to exist. A file that may
+     legitimately be absent is not a step, and counting it makes the dialog
+     claim there is more to do than there is. */
   function stepLabel(path) {
-    if (expected.length < 2) return "";
-    var at = expected.indexOf(path);
+    var must = required();
+    if (must.length < 2) return "";
+    var at = must.indexOf(path);
     if (at < 0) return "";
-    return ' <span class="ced-hidden">file ' + (at + 1) + " of " + expected.length + "</span>";
+    return ' <span class="ced-hidden">file ' + (at + 1) + " of " + must.length + "</span>";
   }
 
-  /* The whole list, with what is already in hand ticked off. */
+  /* The whole list, with what is in hand ticked off and what is not there
+     marked as such. */
   function listMarkup(path) {
-    if (expected.length < 2) return "";
+    if (required().length < 2) return "";
     return expected.map(function (pp) {
       var name = pp.replace(/^.*\//, "");
-      var state = handed[pp] ? "done" : (pp === path ? "now" : "wait");
+      var state = handed[pp] ? "done"
+        : skipped[pp] ? "none"
+        : (pp === path ? "now" : "wait");
       return '<span class="ced-handoff__item is-' + state + '">' + escAttr(name) + "</span>";
     }).join("");
   }
@@ -2092,6 +2159,8 @@
   /* A caller that knows every file it will need says so first, and the wizard
      shows progress instead of opening the same dialog once per file. */
   AMH.tool.expectFiles = expectFiles;
+  /* Which of those files may legitimately not exist. */
+  AMH.tool.expectOptional = expectOptional;
   AMH.tool.errorCodes = ERR;
   function fetchPristine() { return pristine(currentPage()); }
 

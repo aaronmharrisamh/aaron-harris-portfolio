@@ -384,15 +384,16 @@ body.nav-open { overflow: hidden; }
   filter: drop-shadow(-4px 4px 9px rgba(0, 0, 0, .72));
 }
 
-/* The word sits between the two, so it needs no stacking rule of its own.
-   It is hidden at rest because at that size the flap is smaller than the
-   text, and a word poking out from under a closed corner is not a hint. */
+/* The word sits between the two, so it needs no stacking rule of its own,
+   and it is clipped to the hole, so it is drawn only where the page has
+   peeled away. There is no opacity transition: a second animation on a
+   timer could show the word over paper that had not lifted yet, and would
+   reverse at a different rate when the pointer left. One motion drives the
+   paper, the clip and the reveal together. */
 .amh-edit__word {
   fill: var(--accent-bright);
   font: 700 13px/1 Consolas, "Courier New", monospace;
   letter-spacing: .24em;
-  opacity: 0;
-  transition: opacity .3s var(--ease) .16s;
 }
 .amh-edit__word--exit { display: none; }
 .amh-edit.is-on .amh-edit__word--edit { display: none; }
@@ -406,10 +407,6 @@ body.nav-open { overflow: hidden; }
 .amh-edit:focus-visible .amh-edit__paper,
 .amh-edit.is-on .amh-edit__paper { transform: scale(1); }
 
-.amh-edit:hover .amh-edit__word,
-.amh-edit:focus-visible .amh-edit__word,
-.amh-edit.is-on .amh-edit__word { opacity: 1; }
-
 .amh-edit.is-on .amh-edit__word { fill: var(--accent); }
 
 /* The button has no box of its own, so the focus ring goes on the art. */
@@ -420,7 +417,7 @@ body.nav-open { overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .amh-edit, .amh-edit__paper, .amh-edit__word { transition: none; }
+  .amh-edit, .amh-edit__paper { transition: none; }
 }
 
 /* ============================================================
