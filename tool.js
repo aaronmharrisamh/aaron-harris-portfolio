@@ -933,6 +933,12 @@
     ".ced-handoff__zone span{color:var(--muted);font-size:.75rem;}" +
     ".ced-handoff__zone.is-over{background:rgba(74,165,232,.18);}" +
     ".ced-handoff__zone.is-wrong{border-color:var(--c-red,#e5534b);}" +
+    ".ced-handoff__zone.is-warn{border-color:#f0883e;}" +
+    ".ced-handoff__zone:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".ced-handoff__list{display:flex;flex-wrap:wrap;gap:.3rem;padding:0 1.1rem .2rem;}" +
+    ".ced-handoff__item{font:700 9.5px/1 Consolas,monospace;letter-spacing:.06em;border-radius:4px;padding:3px 6px;border:1px solid var(--line);color:var(--dim);}" +
+    ".ced-handoff__item.is-now{border-color:var(--accent);color:var(--accent-bright);}" +
+    ".ced-handoff__item.is-done{border-color:rgba(74,165,232,.3);color:var(--muted);text-decoration:line-through;}" +
     ".ced-panel__list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:.35rem 0;}" +
     ".ced-panel__row{display:flex;gap:.55rem;align-items:center;width:100%;padding:.22rem .8rem;" +
     "border:0;background:none;color:var(--text-soft);font:inherit;cursor:pointer;text-align:left;}" +
@@ -1244,31 +1250,45 @@
      attribute, so moving it is a one-word change here and no CSS edit. */
   var LAUNCH_CORNER = "bottom-left";   /* or bottom-right, top-left, top-right */
 
-  /* The letterforms, drawn as single strokes so each can be dashed on.
-     Both words share their metrics, so the button does not resize when the
+  /* The corner, as one SVG.
+
+     Paint order is the whole trick. SVG draws in document order, so the flap
+     is last and covers everything under it; the word is drawn before it and
+     is therefore revealed by the curl rather than floating over it. There is
+     no z-index in here at all.
+
+     The free edge of the flap is a curve, not a crease, which is what makes
+     it read as paper that has rolled back instead of a folded triangle.
+
+     Both words share the same anchor, so the corner does not move when the
      editor is switched on and the label changes. */
-  var GLYPH = {
-    E: "M7 0 H0 V12 H7 M0 6 H5",
-    D: "M0 12 V0 H3 C7 0 8 3 8 6 C8 9 7 12 3 12 H0",
-    I: "M0 0 V12",
-    T: "M0 0 H8 M4 0 V12",
-    X: "M0 0 L8 12 M8 0 L0 12"
-  };
-  var ADVANCE = [0, 11, 23, 28];       /* where each letter starts */
-
-  function word(letters, cls) {
-    var paths = letters.split("").map(function (ch, i) {
-      return '<path transform="translate(' + ADVANCE[i] + ' 0)" d="' + GLYPH[ch] + '" />';
-    });
-    return '<svg class="amh-edit__word ' + cls + '" viewBox="0 0 36 12" ' +
-      'aria-hidden="true" focusable="false">' + paths.join("") + "</svg>";
+  function peelSVG() {
+    return '<svg class="amh-edit__art" viewBox="0 0 150 150" aria-hidden="true" ' +
+      'focusable="false" preserveAspectRatio="none">' +
+      "<defs>" +
+        '<linearGradient id="amhHole" x1="0" y1="1" x2="1" y2="0">' +
+          '<stop offset="0" stop-color="#0e131a" /><stop offset="1" stop-color="#05070a" />' +
+        "</linearGradient>" +
+        '<linearGradient id="amhFlap" x1="0" y1="1" x2="1" y2="0">' +
+          '<stop offset="0" stop-color="#39414d" />' +
+          '<stop offset="0.55" stop-color="#1f242d" />' +
+          '<stop offset="1" stop-color="#10141a" />' +
+        "</linearGradient>" +
+      "</defs>" +
+      /* 1. the page under the corner */
+      '<path class="amh-edit__paper amh-edit__hole" d="M0 150 L0 9 Q62 51 141 150 Z" />' +
+      /* 2. the word, under the flap */
+      /* anchored at the middle so the rotation is symmetric and the word
+         cannot run off the corner, and turned to follow the fold, which
+         runs down and to the right */
+      '<text class="amh-edit__word amh-edit__word--edit" x="52" y="103" ' +
+        'text-anchor="middle" transform="rotate(45 52 103)">EDIT</text>' +
+      '<text class="amh-edit__word amh-edit__word--exit" x="52" y="103" ' +
+        'text-anchor="middle" transform="rotate(45 52 103)">EXIT</text>' +
+      /* 3. the flap, over both */
+      '<path class="amh-edit__paper amh-edit__flap" d="M0 9 Q88 35 141 150 Q39 85 0 9 Z" />' +
+      "</svg>";
   }
-
-  var MARK_SVG =
-    '<svg class="amh-edit__mark" viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
-    '<path d="M2.2 11.8 L2.9 9.1 L9.7 2.3 A1.45 1.45 0 0 1 11.7 4.3 L4.9 11.1 Z" />' +
-    '<path d="M8.5 3.5 L10.5 5.5" />' +
-    "</svg>";
 
   var launcher = null;
 
@@ -1278,8 +1298,7 @@
     launcher.type = "button";
     launcher.className = "amh-edit";
     launcher.setAttribute("data-corner", LAUNCH_CORNER);
-    launcher.innerHTML = MARK_SVG + word("EDIT", "amh-edit__word--edit") +
-      word("EXIT", "amh-edit__word--exit");
+    launcher.innerHTML = peelSVG();
     launcher.addEventListener("click", function () { api(); });
     doc.body.appendChild(launcher);
     syncLauncher();
@@ -1769,45 +1788,174 @@
     );
   }
 
-  /* Ask for one file by hand, because fetch is refused.
+  /* ---------------- the file hand-off wizard ----------------
 
      A page opened from disk has no origin a fetch can use, so the editor
      cannot read its own published bytes. The File API can, because the user
-     picks the file. The bytes are then used exactly as fetched bytes are.
+     picks the file. The bytes are then used exactly as fetched bytes are,
+     which is what keeps the export byte-exact either way.
 
-     One file at a time, named exactly, so a multi-page publish asks for each
-     page in turn and it is always clear which one is wanted. */
+     Only a page on file:// reaches this. A rejected fetch is the trigger; a
+     404 from a real server is a real problem and is thrown instead.
+
+     The wizard asks once for each file and keeps what it is given for the
+     rest of the page load, so a publish that touches four files asks for
+     four and never asks twice. A folder gives it everything in one action.
+
+     Every refusal carries a code. The codes are stable, they are printed to
+     the console, and they are what a bug report should quote. */
+
+  var ERR = {
+    "BLG-E01": "This page was opened from disk, so the editor cannot read its own published bytes.",
+    "BLG-E02": "That drag carried no file. Some sources hand over a link instead of a file. Use the button, or drag from a file manager.",
+    "BLG-E03": "That is the wrong file for this step.",
+    "BLG-E04": "That file could not be read.",
+    "BLG-E05": "That file carries no editable regions, so it is not a page this editor writes.",
+    "BLG-E06": "That file is missing a region this publish has to write.",
+    "BLG-E07": "Cancelled. No file was provided.",
+    "BLG-E08": "That folder holds none of the files this publish needs."
+  };
+
+  /* Say a code the same way every time, and put it where a console search
+     will find it. Returns the sentence, for a dialog to show. */
+  function errText(code, extra) {
+    var msg = (ERR[code] || "Unexpected problem.") + (extra ? " " + extra : "");
+    console.warn("[copy editor] " + code + " " + msg);
+    return code + " - " + msg;
+  }
+  function errObj(code, extra) {
+    var e = new Error(errText(code, extra));
+    e.code = code;
+    return e;
+  }
+
+  /* Files the user has already handed over, for this page load only. Keyed by
+     the path the engine asked for, holding the text a fetch would have given.
+     Cleared by a reload, which is the same life as an unexported edit. */
+  var handed = {};
+
+  /* What this publish is going to ask for, when the caller knows in advance.
+     The wizard counts against it so it can say "file 2 of 4" rather than
+     opening the same dialog four times with no sense of progress. */
+  var expected = [];
+  function expectFiles(paths) {
+    expected = (paths || []).slice();
+  }
+
+  /* Does this look like a page the editor writes? Better verification, as
+     chosen: the name has to match, and the markers the splice needs have to
+     be present. It warns and lets the user continue, because the editor
+     legitimately holds edits that are not in the file yet. */
+  function verifyFile(path, text) {
+    var marks = text.match(/<!--\[edit:[\w-]+\]-->/g) || [];
+    if (!marks.length) {
+      return { ok: true, warn: true, code: "BLG-E05", detail: "" };
+    }
+    var slugs = {};
+    marks.forEach(function (m) { slugs[m.slice(11, -4)] = true; });
+    /* the regions this page load knows about, when it is this page */
+    var missing = [];
+    if (path === currentPage()) {
+      regions.forEach(function (r) { if (!slugs[r.slug]) missing.push(r.slug); });
+      gals.forEach(function (g) { if (!slugs[g.slug]) missing.push(g.slug); });
+    }
+    Object.keys(staged[path] || {}).forEach(function (s) {
+      if (!slugs[s]) missing.push(s);
+    });
+    if (missing.length) {
+      return { ok: true, warn: true, code: "BLG-E06",
+               detail: missing.slice(0, 4).join(", ") +
+                       (missing.length > 4 ? " and " + (missing.length - 4) + " more" : "") };
+    }
+    return { ok: true, count: marks.length };
+  }
+
+  /* A file dropped anywhere but a drop target makes the browser open it,
+     which throws the page away and every unexported edit with it. Nothing
+     used to listen at this level, so a near miss was destructive. */
+  var dropGuarded = false;
+  function guardDocumentDrops() {
+    if (dropGuarded) return;
+    dropGuarded = true;
+    ["dragover", "drop"].forEach(function (ev) {
+      doc.addEventListener(ev, function (e) {
+        /* a real target has already stopped this from bubbling */
+        if (!e.dataTransfer) return;
+        var types = e.dataTransfer.types || [];
+        var isFile = Array.prototype.indexOf.call(types, "Files") !== -1;
+        if (!isFile) return;
+        e.preventDefault();
+        if (ev === "dragover") e.dataTransfer.dropEffect = "none";
+      });
+    });
+  }
+
+  /* Ask for one file, and keep it.
+
+     Resolves with the file's text. Rejects only when the user cancels, and
+     the rejection carries a code. */
   function handOff(path, netErr) {
+    if (handed[path]) return Promise.resolve(handed[path]);
     var want = path.replace(/^.*\//, "");
+    if (netErr) errText("BLG-E01", "Wanted: " + want + ".");
+
     return new Promise(function (resolve, reject) {
       injectStyles();
+      guardDocumentDrops();
+
       var scrim2 = doc.createElement("div");
       scrim2.className = "ced-scrim";
       var box = doc.createElement("div");
       box.className = "ced-modal ced-handoff";
 
+      /* ced-modal__head, not ced-modal__title: the second has no rules
+         anywhere in this file, which is why the badge and the name used to
+         run together with no padding. */
       var title = doc.createElement("div");
-      title.className = "ced-modal__title";
+      title.className = "ced-modal__head";
       title.innerHTML = '<span class="ced-b">FILE</span><span class="ced-slug">' +
-        escAttr(want) + "</span>";
+        escAttr(want) + "</span>" + stepLabel(path);
 
       var zone = doc.createElement("div");
       zone.className = "ced-handoff__zone";
+      zone.setAttribute("tabindex", "0");
+      zone.setAttribute("role", "button");
       zone.innerHTML = "<strong>Drop <code>" + escAttr(want) + "</code> here</strong>" +
         "<span>or click to choose it</span>";
 
       var note = doc.createElement("div");
       note.className = "ced-modal__status";
-      note.textContent = "This page was opened from disk, so the editor cannot read its own " +
-        "published bytes. Hand it the file from your repo and the export continues as normal.";
+      note.textContent = ERR["BLG-E01"] + " Hand it the file from your repo and " +
+        "the export continues as normal.";
+
+      var list = doc.createElement("div");
+      list.className = "ced-handoff__list";
+      list.innerHTML = listMarkup(path);
 
       var input = doc.createElement("input");
       input.type = "file";
       input.accept = ".html,text/html";
       input.style.display = "none";
 
+      var folder = doc.createElement("input");
+      folder.type = "file";
+      folder.setAttribute("webkitdirectory", "");
+      folder.setAttribute("directory", "");
+      folder.style.display = "none";
+
       var btns = doc.createElement("div");
       btns.className = "ced-modal__btns";
+      var pick = doc.createElement("button");
+      pick.type = "button";
+      pick.className = "ced-btn ced-btn--accent";
+      pick.textContent = "Choose file";
+      var all = doc.createElement("button");
+      all.type = "button";
+      all.className = "ced-btn";
+      all.textContent = "Use my repo folder";
+      all.title = "Pick the folder once. Every file this publish needs is taken from it.";
+      var spacer = doc.createElement("span");
+      spacer.className = "ced-spacer";
       var cancel = doc.createElement("button");
       cancel.type = "button";
       cancel.className = "ced-btn";
@@ -1817,26 +1965,68 @@
         if (scrim2.parentNode) scrim2.parentNode.removeChild(scrim2);
         if (box.parentNode) box.parentNode.removeChild(box);
       }
+      function fail(code, extra) {
+        note.textContent = errText(code, extra);
+        zone.classList.add("is-wrong");
+      }
+
+      /* Take one file for THIS step. */
       function take(file) {
-        if (!file) return;
-        /* the wrong file spliced into the wrong page would be silent and
-           destructive, so the name has to match */
+        if (!file) { fail("BLG-E02"); return; }
         if (file.name !== want) {
-          note.textContent = 'That file is "' + file.name + '". This step needs "' + want +
-            '". Pick the one from your repo that matches.';
-          zone.classList.add("is-wrong");
+          fail("BLG-E03", 'You gave "' + file.name + '". This step needs "' + want + '".');
           return;
         }
-        var fr = new FileReader();
-        fr.onload = function () { done(); resolve(String(fr.result)); };
-        fr.onerror = function () {
-          note.textContent = "That file could not be read. Try again.";
-        };
-        fr.readAsText(file);
+        readFile(file).then(function (text) {
+          /* Warn, and continue. A warning is not a refusal: the editor
+             holds edits that are not in the file yet, so it cannot know from
+             the bytes alone that a file is wrong. The splice is the real
+             gate, and it fails loudly and names what it could not find. */
+          var v = verifyFile(path, text);
+          handed[path] = text;
+          if (v.warn) {
+            errText(v.code, v.detail
+              ? "Missing: " + v.detail + ". The export will report anything it cannot splice."
+              : 'The file is named "' + want + '" and holds no markers. Continuing anyway.');
+          }
+          done();
+          resolve(text);
+        }, function () { fail("BLG-E04"); });
+      }
+
+      /* Take a whole folder, and keep every file this publish still needs. */
+      function takeFolder(files) {
+        var byName = {};
+        Array.prototype.forEach.call(files || [], function (f) { byName[f.name] = f; });
+        var wanted = expected.length ? expected : [path];
+        var jobs = wanted.filter(function (pp) {
+          return !handed[pp] && byName[pp.replace(/^.*\//, "")];
+        });
+        if (!jobs.length) { fail("BLG-E08", "Wanted: " + want + "."); return; }
+        Promise.all(jobs.map(function (pp) {
+          return readFile(byName[pp.replace(/^.*\//, "")]).then(function (text) {
+            if (verifyFile(pp, text).ok) handed[pp] = text;
+          }, function () {});
+        })).then(function () {
+          if (!handed[path]) { fail("BLG-E08", "Wanted: " + want + "."); return; }
+          console.info("[copy editor] took " + Object.keys(handed).length +
+            " file(s) from the folder; this publish will not ask again.");
+          done();
+          resolve(handed[path]);
+        });
       }
 
       zone.addEventListener("click", function () { input.click(); });
+      zone.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+          e.preventDefault(); input.click();
+        }
+      });
+      pick.addEventListener("click", function () { input.click(); });
+      all.addEventListener("click", function () { folder.click(); });
       input.addEventListener("change", function () { take(input.files && input.files[0]); });
+      folder.addEventListener("change", function () { takeFolder(folder.files); });
+
       zone.addEventListener("dragover", function (e) {
         e.preventDefault(); e.stopPropagation();
         e.dataTransfer.dropEffect = "copy";
@@ -1845,20 +2035,24 @@
       zone.addEventListener("dragleave", function () { zone.classList.remove("is-over"); });
       zone.addEventListener("drop", function (e) {
         e.preventDefault(); e.stopPropagation();
-        zone.classList.remove("is-over", "is-wrong");
+        zone.classList.remove("is-over", "is-wrong", "is-warn");
         take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
       });
       cancel.addEventListener("click", function () {
         done();
-        reject(new Error("cancelled: " + want + " was not provided (" +
-          (netErr && netErr.message ? netErr.message : "fetch refused") + ")"));
+        reject(errObj("BLG-E07", "Wanted: " + want + "."));
       });
 
+      btns.appendChild(pick);
+      btns.appendChild(all);
+      btns.appendChild(spacer);
       btns.appendChild(cancel);
       box.appendChild(title);
       box.appendChild(zone);
       box.appendChild(note);
+      if (list.innerHTML) box.appendChild(list);
       box.appendChild(input);
+      box.appendChild(folder);
       box.appendChild(btns);
       doc.body.appendChild(scrim2);
       doc.body.appendChild(box);
@@ -1866,8 +2060,39 @@
     });
   }
 
+  function readFile(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result)); };
+      fr.onerror = function () { reject(errObj("BLG-E04", file.name)); };
+      fr.readAsText(file);
+    });
+  }
+
+  /* "2 of 4", when the caller said what it would need. */
+  function stepLabel(path) {
+    if (expected.length < 2) return "";
+    var at = expected.indexOf(path);
+    if (at < 0) return "";
+    return ' <span class="ced-hidden">file ' + (at + 1) + " of " + expected.length + "</span>";
+  }
+
+  /* The whole list, with what is already in hand ticked off. */
+  function listMarkup(path) {
+    if (expected.length < 2) return "";
+    return expected.map(function (pp) {
+      var name = pp.replace(/^.*\//, "");
+      var state = handed[pp] ? "done" : (pp === path ? "now" : "wait");
+      return '<span class="ced-handoff__item is-' + state + '">' + escAttr(name) + "</span>";
+    }).join("");
+  }
+
   /* The tests drive the hand-off without a real drag: same path, same checks. */
   AMH.tool.handOff = handOff;
+  /* A caller that knows every file it will need says so first, and the wizard
+     shows progress instead of opening the same dialog once per file. */
+  AMH.tool.expectFiles = expectFiles;
+  AMH.tool.errorCodes = ERR;
   function fetchPristine() { return pristine(currentPage()); }
 
   /* Edits waiting to be written to a page whose DOM is not on screen, keyed by

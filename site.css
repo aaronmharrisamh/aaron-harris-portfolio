@@ -332,94 +332,95 @@ body.nav-open { overflow: hidden; }
 /* ------------------------------------------------------------
    THE EDIT LAUNCHER
    ------------------------------------------------------------
-   A quiet mark in a corner that opens the copy editor. tool.js
-   builds it at load, on every page, so nothing here is authored
-   into a file and nothing here can reach an export.
+   The page corner peels back to show the word underneath. tool.js
+   builds it at load, on every page, so nothing here is authored into
+   a file and nothing here can reach an export.
 
-   It rests at low opacity and stays out of the way. On hover or on
-   keyboard focus the pill grows and the word EDIT draws itself, one
-   letter at a time. While the editor is on it stays open, turns
-   accent, and reads EXIT.
+   The whole thing is one SVG, and its paint order does the layering:
+   the page under the corner, then the word, then the flap. SVG draws
+   in document order, so the flap covers the word and the curl
+   uncovers it. There is no z-index inside the button.
 
-   Above everything: the editor's own panel is 3100, its scrim 3200,
-   its modal 3300, and the composer 3300. The way out of the editor
-   must never be behind the editor.
+   The free edge of the flap is a curve rather than a crease, which is
+   what makes it read as paper that rolled rather than folded.
 
-   Which corner comes from data-corner, which tool.js sets. All four
-   are written here, so moving it is one word in tool.js. */
+   Above everything: the editor's panel is 3100, its scrim 3200, its
+   modal 3300, the composer 3300. The way out of the editor must never
+   be behind the editor.
+
+   Which corner comes from data-corner, which tool.js sets. The art is
+   drawn for the bottom left and the other three mirror it, so moving
+   it is one word in tool.js and no new path data. */
 .amh-edit {
   position: fixed;
   z-index: 4000;
-  display: flex;
-  align-items: center;
-  gap: .55rem;
-  width: 40px;
-  height: 40px;
-  padding: 0 12px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(18, 20, 25, .55);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  color: var(--dim);
-  opacity: .34;
+  width: 132px;
+  height: 132px;
+  padding: 0;
+  border: 0;
+  background: none;
   cursor: pointer;
-  transition: width .42s var(--ease), opacity .3s var(--ease-soft),
-              color .3s ease, border-color .3s ease, background .3s ease;
+  opacity: .5;
+  transition: opacity .34s var(--ease-soft);
 }
-.amh-edit[data-corner="bottom-left"]  { left: 18px;  bottom: 18px; }
-.amh-edit[data-corner="bottom-right"] { right: 18px; bottom: 18px; }
-.amh-edit[data-corner="top-left"]     { left: 18px;  top: 18px; }
-.amh-edit[data-corner="top-right"]    { right: 18px; top: 18px; }
+.amh-edit[data-corner="bottom-left"]  { left: 0;  bottom: 0; }
+.amh-edit[data-corner="bottom-right"] { right: 0; bottom: 0; transform: scaleX(-1); }
+.amh-edit[data-corner="top-left"]     { left: 0;  top: 0;    transform: scaleY(-1); }
+.amh-edit[data-corner="top-right"]    { right: 0; top: 0;    transform: scale(-1); }
 
-.amh-edit__mark { flex: none; width: 14px; height: 14px; }
-.amh-edit__mark path,
-.amh-edit__word path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.amh-edit__art { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* The paper. Both paths scale from the corner itself, so the peel grows out
+   of it rather than sliding in from somewhere else. */
+.amh-edit__paper {
+  transform-box: view-box;
+  transform-origin: 0 150px;
+  transform: scale(.30);
+  transition: transform .55s var(--ease);
 }
-.amh-edit__word { flex: none; width: 36px; height: 12px; }
-
-/* The draw. The dash is longer than any of these letters, so an offset of
-   zero shows the whole stroke and a full offset hides it. */
-.amh-edit__word path {
-  stroke-width: 1.5;
-  stroke-dasharray: 44;
-  stroke-dashoffset: 44;
-  transition: stroke-dashoffset .46s var(--ease);
+.amh-edit__hole { fill: url(#amhHole); }
+.amh-edit__flap {
+  fill: url(#amhFlap);
+  filter: drop-shadow(-4px 4px 9px rgba(0, 0, 0, .72));
 }
-.amh-edit__word path:nth-child(2) { transition-delay: .06s; }
-.amh-edit__word path:nth-child(3) { transition-delay: .12s; }
-.amh-edit__word path:nth-child(4) { transition-delay: .18s; }
 
-/* one word at a time, and both have the same metrics so the pill never
-   changes width when the editor is switched on */
+/* The word sits between the two, so it needs no stacking rule of its own.
+   It is hidden at rest because at that size the flap is smaller than the
+   text, and a word poking out from under a closed corner is not a hint. */
+.amh-edit__word {
+  fill: var(--accent-bright);
+  font: 700 13px/1 Consolas, "Courier New", monospace;
+  letter-spacing: .24em;
+  opacity: 0;
+  transition: opacity .3s var(--ease) .16s;
+}
 .amh-edit__word--exit { display: none; }
 .amh-edit.is-on .amh-edit__word--edit { display: none; }
 .amh-edit.is-on .amh-edit__word--exit { display: block; }
 
 .amh-edit:hover,
 .amh-edit:focus-visible,
-.amh-edit.is-on {
-  width: 94px;
-  opacity: 1;
-  color: var(--text);
-  border-color: var(--accent);
-  background: rgba(18, 20, 25, .92);
-}
-.amh-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.amh-edit.is-on { color: var(--accent-bright); }
+.amh-edit.is-on { opacity: 1; }
 
-.amh-edit:hover .amh-edit__word path,
-.amh-edit:focus-visible .amh-edit__word path,
-.amh-edit.is-on .amh-edit__word path { stroke-dashoffset: 0; }
+.amh-edit:hover .amh-edit__paper,
+.amh-edit:focus-visible .amh-edit__paper,
+.amh-edit.is-on .amh-edit__paper { transform: scale(1); }
+
+.amh-edit:hover .amh-edit__word,
+.amh-edit:focus-visible .amh-edit__word,
+.amh-edit.is-on .amh-edit__word { opacity: 1; }
+
+.amh-edit.is-on .amh-edit__word { fill: var(--accent); }
+
+/* The button has no box of its own, so the focus ring goes on the art. */
+.amh-edit:focus-visible { outline: none; }
+.amh-edit:focus-visible .amh-edit__flap {
+  filter: drop-shadow(-4px 4px 9px rgba(0, 0, 0, .72))
+          drop-shadow(0 0 0 2px var(--accent));
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .amh-edit, .amh-edit__word path { transition: none; }
+  .amh-edit, .amh-edit__paper, .amh-edit__word { transition: none; }
 }
 
 /* ============================================================

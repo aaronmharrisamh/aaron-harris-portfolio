@@ -589,22 +589,24 @@ async function main() {
       if (!b) return { there: false };
       const cs = getComputedStyle(b);
       const r = b.getBoundingClientRect();
+      const vh = document.documentElement.clientHeight;
+      // the corner is flush with the page corner, because that is the corner
+      // it is pretending to be
       return {
         there: true,
         tag: b.tagName,
         z: +cs.zIndex,
         corner: b.getAttribute('data-corner'),
-        atLeft: Math.round(r.left) === 18,
-        atBottom: Math.round(innerHeight - r.bottom) === 18,
+        atLeft: Math.abs(r.left) <= 1,
+        atBottom: Math.abs(vh - r.bottom) <= 1,
         label: b.getAttribute('aria-label'),
         pressed: b.getAttribute('aria-pressed'),
-        words: b.querySelectorAll('.amh-edit__word').length,
-        letters: b.querySelectorAll('.amh-edit__word--edit path').length,
+        words: b.querySelectorAll('text.amh-edit__word').length,
       };
     })()`);
-    check("launcher: " + page + " carries it, bottom left and above everything",
+    check("launcher: " + page + " carries it, in the corner and above everything",
       lx.there && lx.tag === "BUTTON" && lx.z === 4000 &&
-      lx.corner === "bottom-left" && lx.atLeft && lx.atBottom,
+      lx.corner === "bottom-left" && lx.atLeft && lx.atBottom && lx.words === 2,
       JSON.stringify(lx));
     // in the markup of no page: it is runtime scaffolding, like the chips
     const src = readFileSync(join(REPO, page), "utf-8");
@@ -641,7 +643,7 @@ async function main() {
   })()`);
   check("launcher: it reads EXIT and says so while the editor is on",
     lxToggle.onNow.pressed === "true" && /Close/.test(lxToggle.onNow.label) &&
-    lxToggle.onNow.exit === "block", JSON.stringify(lxToggle.onNow));
+    lxToggle.onNow.exit !== "none", JSON.stringify(lxToggle.onNow));
   check("launcher: clicking it closes the editor",
     lxToggle.offAfter.pressed === "false" && /Open/.test(lxToggle.offAfter.label) &&
     lxToggle.offAfter.panel === false, JSON.stringify(lxToggle.offAfter));
@@ -649,7 +651,21 @@ async function main() {
     lxToggle.onAgain.pressed === "true" && lxToggle.onAgain.panel === true,
     JSON.stringify(lxToggle.onAgain));
 
-  // any corner, from one attribute
+  // the word is painted BEFORE the flap, so the curl uncovers it. SVG draws
+  // in document order, which is why there is no z-index inside the button:
+  // put the word after the flap and it would float on top of the paper.
+  const lxOrder = await evaluate(`(() => {
+    const kids = [...document.querySelector('.amh-edit__art').children];
+    const at = (sel) => kids.findIndex(k => k.matches(sel));
+    return { hole: at('.amh-edit__hole'), word: at('.amh-edit__word--edit'),
+             flap: at('.amh-edit__flap'), count: kids.length };
+  })()`);
+  check("launcher: the word is painted under the flap, so the peel reveals it",
+    lxOrder.hole >= 0 && lxOrder.word > lxOrder.hole && lxOrder.flap > lxOrder.word,
+    "hole=" + lxOrder.hole + " word=" + lxOrder.word + " flap=" + lxOrder.flap);
+
+  // any corner, from one attribute. The art is drawn for the bottom left and
+  // the other three mirror it, so each corner touches two viewport edges.
   const lxCorners = await evaluate(`(() => {
     const b = document.querySelector('.amh-edit');
     const out = {};
@@ -658,12 +674,13 @@ async function main() {
     // element measured against innerWidth reads one scrollbar out.
     const vw = document.documentElement.clientWidth;
     const vh = document.documentElement.clientHeight;
+    const near = (a, b2) => Math.abs(a - b2) <= 1;
     for (const c of ['bottom-left', 'bottom-right', 'top-left', 'top-right']) {
       b.setAttribute('data-corner', c);
       const r = b.getBoundingClientRect();
       out[c] = [
-        Math.round(r.left) === 18 ? 'L' : (Math.round(vw - r.right) === 18 ? 'R' : '?'),
-        Math.round(r.top) === 18 ? 'T' : (Math.round(vh - r.bottom) === 18 ? 'B' : '?'),
+        near(r.left, 0) ? 'L' : (near(r.right, vw) ? 'R' : '?'),
+        near(r.top, 0) ? 'T' : (near(r.bottom, vh) ? 'B' : '?'),
       ].join("");
     }
     b.setAttribute('data-corner', 'bottom-left');
@@ -1738,6 +1755,116 @@ async function main() {
   check("hand-off: the right file is read with the File API and closes the prompt",
     handed && handed.text === "<html>HANDED OVER</html>" && handed.gone === true,
     JSON.stringify(handed).slice(0, 90));
+
+  // W1. the fault that made a real drag look frozen: a drop that carries no
+  // file used to return with no message at all.
+  const noFile = await evaluate(`(function () {
+    window.__h2 = AMH.tool.handOff("blog/2605.html", new Error("fetch refused"));
+    var zone = document.querySelector('.ced-handoff__zone');
+    if (!zone) return { zone: false };
+    // a drag that carries a link and no file, which is what several sources
+    // hand over. dataTransfer.files is empty.
+    var dt = new DataTransfer();
+    dt.setData("text/uri-list", "file:///c:/repo/index.html");
+    zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return {
+      zone: true,
+      note: document.querySelector('.ced-modal__status').textContent,
+      cls: document.querySelector('.ced-handoff__zone').className,
+      stillOpen: !!document.querySelector('.ced-handoff__zone'),
+    };
+  })()`);
+  check("wizard: a drop with no file says so, and does not sit silent",
+    noFile.zone && /BLG-E02/.test(noFile.note) && /is-wrong/.test(noFile.cls) &&
+    noFile.stillOpen, JSON.stringify(noFile).slice(0, 130));
+
+  // W2. the heading. ced-modal__title has no rules anywhere, which is why the
+  // badge and the file name used to run together with no padding.
+  const head = await evaluate(`(() => {
+    const h = document.querySelector('.ced-handoff .ced-modal__head');
+    if (!h) return { there: false };
+    const cs = getComputedStyle(h);
+    return { there: true, display: cs.display, gap: cs.columnGap,
+             padded: parseFloat(cs.paddingLeft) > 0,
+             text: h.textContent };
+  })()`);
+  check("wizard: the heading is laid out, so FILE and the name are apart",
+    head.there && head.display === "flex" && parseFloat(head.gap) > 0 && head.padded,
+    JSON.stringify(head));
+
+  // W3. a file with no markers is taken, and warned about. Better verifies;
+  // it does not refuse. The editor holds edits that are not in the file yet,
+  // so the bytes alone cannot prove a file wrong. The splice is the gate.
+  const bare = await evaluate(`(function () {
+    var zone = document.querySelector('.ced-handoff__zone');
+    var dt = new DataTransfer();
+    dt.items.add(new File(["<html>no markers here</html>"], "2605.html", { type: "text/html" }));
+    zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return true;
+  })()`);
+  await sleep(500);
+  const bareOut = await evaluate(`window.__h2.then(function (txt) {
+    return { text: txt, gone: !document.querySelector('.ced-handoff__zone') }; })`,
+    { awaitPromise: true });
+  check("wizard: a file with no markers is warned about, not refused",
+    bare && bareOut.text === "<html>no markers here</html>" && bareOut.gone === true,
+    JSON.stringify(bareOut).slice(0, 90));
+
+  // W4. it keeps what it was given, so a publish asks once for each file
+  const kept = await evaluate(`AMH.tool.handOff("blog/2605.html", null).then(function (txt) {
+    return { text: txt, asked: !!document.querySelector('.ced-handoff__zone') }; })`,
+    { awaitPromise: true });
+  check("wizard: a file already handed over is not asked for again",
+    kept.text === "<html>no markers here</html>" && kept.asked === false,
+    JSON.stringify(kept).slice(0, 80));
+
+  // W5. progress, when the caller says what it will need
+  const steps = await evaluate(`(function () {
+    AMH.tool.expectFiles(["index.html", "blog/2607.html", "blog/2606.html"]);
+    window.__h3 = AMH.tool.handOff("blog/2607.html", new Error("fetch refused"));
+    var head = document.querySelector('.ced-handoff .ced-modal__head').textContent;
+    var items = [...document.querySelectorAll('.ced-handoff__item')]
+      .map(function (i) { return i.className.replace('ced-handoff__item is-', '') + ':' + i.textContent; });
+    document.querySelector('.ced-handoff .ced-modal__btns button:last-child').click();
+    return { head: head, items: items };
+  })()`);
+  check("wizard: it shows the step and the whole list, with what it holds ticked",
+    /file 2 of 3/.test(steps.head) &&
+    steps.items.join(" ") === "done:index.html now:2607.html wait:2606.html",
+    steps.head + " | " + steps.items.join(" "));
+
+  // W6. cancelling rejects with a code a caller can catch
+  const cancelled = await evaluate(`window.__h3.then(
+    function () { return "resolved"; },
+    function (e) { return { code: e.code, msg: e.message }; })`, { awaitPromise: true });
+  check("wizard: cancel rejects with BLG-E07, which a caller can catch",
+    cancelled && cancelled.code === "BLG-E07" && /BLG-E07/.test(cancelled.msg),
+    JSON.stringify(cancelled).slice(0, 90));
+
+  // W7. every code the wizard can answer with is declared and worded
+  const codes = await evaluate(`(() => {
+    const E = AMH.tool.errorCodes;
+    const keys = Object.keys(E);
+    return { keys, allNamed: keys.every(k => /^BLG-E[0-9][0-9]$/.test(k)),
+             allWorded: keys.every(k => typeof E[k] === "string" && E[k].length > 20) };
+  })()`);
+  check("wizard: every code is BLG-E## and carries a sentence",
+    codes.keys.length >= 8 && codes.allNamed && codes.allWorded,
+    codes.keys.join(" "));
+
+  // W8. the document guard: a file dropped away from a target must not make
+  // the browser open it and take every unexported edit with it.
+  const guard = await evaluate(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["x"], "index.html", { type: "text/html" }));
+    const ev = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+    document.body.dispatchEvent(ev);
+    return { prevented: ev.defaultPrevented };
+  })()`);
+  check("wizard: a file dropped away from a target cannot navigate the page",
+    guard.prevented === true, JSON.stringify(guard));
+
+  await evaluate(`AMH.tool.expectFiles([])`);
 
   // put the pages back for the blog tests
   await evaluate(`window.edit.pending.clear()`);

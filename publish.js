@@ -1048,6 +1048,12 @@
     bcSetStatus("Publishing…");
     var yymm = date.slice(0, 4);
     var oldMonth = bcEditing ? bcEditing.date0.slice(0, 4) : null;
+    /* Say what this publish will read before it starts. A page opened from
+       disk cannot fetch its own bytes, and the wizard shows the whole list
+       and its progress rather than asking once per file with no context. */
+    TOOL.expectFiles([TOOL.currentPage(), "blog/" + yymm + ".html"]
+      .concat(oldMonth && oldMonth !== yymm ? ["blog/" + oldMonth + ".html"] : [])
+      .concat(willWrite.filter(function (pp) { return pp !== TOOL.currentPage(); })));
     var dateChanged = !!(bcEditing && bcEditing.date0 !== date);
     var files = {};   /* name -> Uint8Array */
     /* held for the last step of the chain, which renders the home page
@@ -1194,6 +1200,7 @@
     bcSetStatus("Building deletion bundle…");
     var files = {};
     var meta, entries;
+    TOOL.expectFiles([TOOL.currentPage(), "blog/" + yymm + ".html"]);
     TOOL.pristine()
       .then(function (src) {
         var man = bcManifestFrom(src);
@@ -1260,6 +1267,11 @@
       .then(function (src) {
         var man = bcManifestFrom(src);
         if (!man.entries.length) throw new Error("manifest is empty - nothing to rebuild");
+        /* A rebuild reads every month, and only knows which ones once the
+           manifest is in hand. Declaring them here still lets the wizard show
+           the list and the progress for all the asks that follow. */
+        TOOL.expectFiles([TOOL.currentPage()].concat(
+          bcUniqueMonths(man.entries).map(function (m) { return "blog/" + m + ".html"; })));
         var meta = bcSiteMeta(src);
         var enc = new TextEncoder();
         /* no manifest change: index.html stays out of a rebuild bundle */
