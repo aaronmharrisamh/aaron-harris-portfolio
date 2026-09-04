@@ -713,45 +713,50 @@
      7. FIND
      ----------------------------------------------------------
      search.js is everything the site knows about its posts in a form a
-     browser can search: one line, `window.AMH_SEARCH = "..."`, holding
-     base64 of gzip of JSON. The publish writes it; this reads it.
+     browser can search: one statement, `window.AMH_SEARCH = { ... }`,
+     holding the table as readable JSON. The publish writes it; this
+     reads it.
 
      It is a classic script and not a JSON file for one reason: a fetch
      is refused from disk and a script tag is not, and reading this site
      from disk has to work. Nothing here runs until something asks, so a
      reader who never searches never loads it.
 
+     The table was base64 of gzip until V057. The change was not made
+     for size: the server's own compression leaves about four percent
+     between the two forms. It was made because a file that is one long
+     opaque string is the shape a virus scanner reads as a packed
+     payload, and Windows called search.js a dangerous file.
+
      One unpacker. publish.js reads the deployed file through
      AMH.search.unpack, so the writer and the reader can never disagree
      about the format.
      ========================================================== */
-  var SEARCH_RE = /window\.AMH_SEARCH\s*=\s*"([^"]*)"/;
   var SEARCH_EMPTY = { v: 1, stamp: "", posts: [] };
+  /* An index this build cannot read. It is empty like the one above, and
+     it says why, so the pill can tell the reader instead of showing
+     nothing. See the carry-over note in searchUnpack. */
+  var SEARCH_STALE = { v: 1, stamp: "", posts: [], stale: true };
   var searchLoading = null;   /* the one load, cached as its promise */
 
-  function searchBytes(b64) {
-    var bin = atob(b64);
-    var out = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  /* Takes the file's text or the bare packed string. A publish holds the
-     file it read; the loader holds the value the script tag set. */
-  function searchUnpack(text) {
-    var m = SEARCH_RE.exec(String(text || ""));
-    var payload = m ? m[1] : String(text || "");
-    if (!payload) return Promise.resolve(SEARCH_EMPTY);
-    /* a browser with no CompressionStream writes the table unpacked, and
-       says so with this prefix */
-    if (payload.indexOf("plain:") === 0) {
-      return Promise.resolve(JSON.parse(new TextDecoder().decode(searchBytes(payload.slice(6)))));
+  /* Takes the table itself or the text of the file that holds it. The
+     loader has the object the script tag assigned; a publish has the
+     bytes it read back from the deployed site. */
+  function searchUnpack(source) {
+    if (source && typeof source === "object") return Promise.resolve(source);
+    var text = String(source || "");
+    if (!text) return Promise.resolve(SEARCH_EMPTY);
+    var open = text.indexOf("{");
+    var close = text.lastIndexOf("}");
+    /* CARRY-OVER: an index written before V057 is base64 of gzip, which
+       holds no object at all. One publish replaces the file and this
+       branch stops being reachable; remove it then. */
+    if (open === -1 || close < open) return Promise.resolve(SEARCH_STALE);
+    try {
+      return Promise.resolve(JSON.parse(text.slice(open, close + 1)));
+    } catch (err) {
+      return Promise.reject(err);
     }
-    if (typeof DecompressionStream !== "function") {
-      return Promise.reject(new Error("search is not available in this browser"));
-    }
-    var stream = new Blob([searchBytes(payload)]).stream()
-      .pipeThrough(new DecompressionStream("gzip"));
-    return new Response(stream).text().then(function (json) { return JSON.parse(json); });
   }
 
   /* The table, loaded once. The script tag is created on the first ask
@@ -771,8 +776,8 @@
         resolve("");
       };
       doc.head.appendChild(el);
-    }).then(function (packed) {
-      return packed ? searchUnpack(packed) : SEARCH_EMPTY;
+    }).then(function (assigned) {
+      return assigned ? searchUnpack(assigned) : SEARCH_EMPTY;
     });
     return searchLoading;
   }
@@ -939,7 +944,11 @@
     searchLoad().then(function (table) {
       findTable = table;
       if (!table.posts.length) {
-        findInput.placeholder = "No posts indexed yet";
+        /* the two ways to have no posts are not the same problem, and a
+           reader who can act on one should not be told the other */
+        findInput.placeholder = table.stale
+          ? "Search index needs one more publish"
+          : "No posts indexed yet";
       }
     }, function (err) {
       findInput.placeholder = "Search is not available in this browser";

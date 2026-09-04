@@ -157,7 +157,7 @@ here before they exist on disk.
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
 | `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer for a post body. `blog.html` only. |
-| `search.js` | GENERATED. The packed index of every post, read by find. Do not edit by hand. |
+| `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, and the export. |
@@ -171,7 +171,7 @@ sections only when a distinct job cannot merge into another section. Three
 files are at eight and say why in their own headers: `gallery.js`, which both
 decides a layout and is an editing surface; `site.css`, whose gallery grid is a
 whole page's layout system with an invariant of its own; and `blog.js`, whose
-FIND section reads a packed file about every post the blog has, while every
+FIND section reads one file about every post the blog has, while every
 other section reads the page it is on.
 
 ### The Self-Editing Laws

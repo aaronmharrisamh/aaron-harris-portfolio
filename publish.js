@@ -394,6 +394,11 @@
     ".bc-wiz__checks input:disabled+span{color:var(--dim);text-decoration:none;}" +
     ".bc-wiz__opt{display:flex;gap:.5rem;align-items:center;margin:.6rem 0 .2rem;font-size:.75rem;cursor:pointer;}" +
     ".bc-wiz__legend{font-size:.68rem;color:var(--dim);}" +
+    /* the delivery choice, and the line that appears when it could not be kept */
+    ".bc-wiz__route{margin:.7rem 0;padding:.6rem .7rem;border:1px solid var(--line);" +
+      "border-radius:var(--radius-sm);background:var(--bg-deep);font-size:.78rem;}" +
+    ".bc-wiz__fell{margin:0 0 .7rem;padding:.6rem .7rem;border:1px solid var(--warn,#b4761f);" +
+      "border-radius:var(--radius-sm);font-size:.8rem;}" +
     ".bc-wiz__reads{padding:0;margin:.3rem 0 .2rem;}" +
     ".bc-wiz__reads .is-opt{border-style:dashed;}" +
     ".bc-wiz__zone{margin:.5rem 0;}" +
@@ -1245,6 +1250,85 @@
   }
   var BC_LEGEND = '<p class="bc-wiz__legend">Solid: spliced from the deployed bytes. ' +
     "Dashed: written whole. Yellow: added.</p>";
+  /* ---------------- where the bundle lands ----------------
+
+     The same bundle, two ways to deliver it. The zip is what a reader of
+     this site gets in any browser, so it stays a first-class choice and
+     not a fallback. The folder write puts the files straight into the
+     repo through the File System Access API: no download, so no Mark of
+     the Web and no extract step.
+
+     The choice is shown, not configured. It is two buttons on the step
+     that starts a build, so the route is picked with the file lists in
+     view. The last route is remembered only to answer the reminder-off
+     notice, which has no one to ask. */
+  var BC_ROUTE_ZIP = "zip";
+  var BC_ROUTE_FOLDER = "folder";
+  var ROUTE_KEY = "amh-publish-route";
+
+  function bcRoute() {
+    try {
+      return localStorage.getItem(ROUTE_KEY) === BC_ROUTE_FOLDER
+        ? BC_ROUTE_FOLDER : BC_ROUTE_ZIP;
+    } catch (err) { return BC_ROUTE_ZIP; }
+  }
+  function bcSetRoute(route) {
+    try { localStorage.setItem(ROUTE_KEY, route); } catch (err) {}
+  }
+  /* Can this browser write to a folder at all? Chrome and Edge can. */
+  function bcCanWriteFolder() { return !!(TOOL.hasPicker && TOOL.hasPicker()); }
+
+  /* The two delivery buttons, in the order they should be read. Returns
+     the folder button so a caller can focus it. Where the API is missing
+     the button stays on screen and disabled: a hidden option teaches
+     nobody what the tool can do, which is half the point of having both. */
+  function bcRouteButtons(resolve) {
+    var can = bcCanWriteFolder();
+    var zip = bcWizBtn("Download a .zip", can ? "" : "ced-btn--accent", function () {
+      bcSetRoute(BC_ROUTE_ZIP);
+      resolve(BC_ROUTE_ZIP);
+    });
+    var folder = bcWizBtn("Write into my repo folder", can ? "ced-btn--accent" : "", function () {
+      bcSetRoute(BC_ROUTE_FOLDER);
+      resolve(BC_ROUTE_FOLDER);
+    });
+    if (!can) {
+      folder.disabled = true;
+      folder.title = "This browser has no folder picker. Chrome and Edge have one.";
+    }
+    /* the one to focus is the one that can be pressed */
+    return can ? folder : zip;
+  }
+  /* The sentence under the file lists that says what the two buttons do. */
+  function bcRouteBlurb() {
+    return '<p class="bc-wiz__route">Choose how this bundle reaches your repo. ' +
+      "<strong>Download a .zip</strong> saves it to your Downloads folder for you to " +
+      "extract, which is what any browser can do. <strong>Write into my repo folder</strong> " +
+      "puts the files straight in, with no zip to extract" +
+      (bcCanWriteFolder()
+        ? ". You pick the folder once."
+        : ". This browser cannot do that; Chrome and Edge can.") +
+      " Neither one commits or pushes.</p>";
+  }
+
+  /* The choice on its own, for the two flows that have no confirm step of
+     their own: a delete, which already asked in a browser box, and a
+     rebuild, which is started from the console. Resolves the route, or
+     false when the reader backs out. */
+  function bcWizRoutePick(title, intro) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var take = function (v) { if (!done) { done = true; resolve(v); } };
+      var wz = bcWizShow("route", title);
+      wz.body.innerHTML = "<p>" + intro + "</p>" + bcRouteBlurb();
+      var cancel = function () { bcWizClose(); take(false); };
+      bcWizBtn("Cancel", "", cancel);
+      bcWizSpacer();
+      bcRouteButtons(take).focus();
+      wz.onEscape = cancel;
+    });
+  }
+
   function bcNoRemind() {
     try { return localStorage.getItem(NOREMIND_KEY) === "1"; } catch (err) { return false; }
   }
@@ -1255,11 +1339,12 @@
     } catch (err) {}
   }
 
-  /* Step one. Resolves true to build, false to stop. The reminder is the
-     one the browser box carried, because it is what stops a stale local copy
-     from silently reverting real work. With the reminder switched off the
-     step still shows, as a notice that proceeds on its own, so a publish
-     never starts with nothing on screen. */
+  /* Step one. Resolves the delivery route to build, or false to stop. The
+     reminder is the one the browser box carried, because it is what stops a
+     stale local copy from silently reverting real work. With the reminder
+     switched off the step still shows, as a notice that proceeds on its own,
+     so a publish never starts with nothing on screen; the route it takes is
+     the last one chosen, because the notice has no one to ask. */
   function bcWizConfirm(willWrite, willReplace) {
     return new Promise(function (resolve) {
       var lists =
@@ -1267,33 +1352,45 @@
         '<div class="bc-wiz__files">' + bcFileChips(willWrite.slice().sort(), "spliced") + "</div>" +
         "<p>These files are <strong>written whole</strong>:</p>" +
         '<div class="bc-wiz__files">' + bcFileChips(willReplace, "regenerated") + "</div>";
+      var once = function (fn) {
+        var done = false;
+        return function (v) { if (!done) { done = true; fn(v); } };
+      };
       if (bcNoRemind()) {
+        var pick = once(resolve);
         var w = bcWizShow("notice", "Proceeding");
         w.body.innerHTML =
-          "<p>You chose not to see the reminder. The bundle builds in a moment. " +
-          "Cancel stops it.</p>" + lists;
-        var timer = window.setTimeout(function () { resolve(true); }, NOTICE_MS);
-        var stop = function () { window.clearTimeout(timer); bcWizClose(); resolve(false); };
-        bcWizSpacer();
+          "<p>You chose not to see the reminder. The bundle builds in a moment, " +
+          "and lands where it landed last time. Cancel stops it, or choose the " +
+          "other way below.</p>" + lists + bcRouteBlurb();
+        var timer = window.setTimeout(function () { pick(bcRoute()); }, NOTICE_MS);
+        var stop = function () { window.clearTimeout(timer); bcWizClose(); pick(false); };
         bcWizBtn("Cancel", "", stop).focus();
+        bcWizSpacer();
+        /* choosing a route here cancels the countdown: the reader took the
+           decision the timer was about to take for them */
+        bcRouteButtons(function (route) { window.clearTimeout(timer); pick(route); });
         w.onEscape = stop;
         return;
       }
+      var take = once(resolve);
       var wz = bcWizShow("confirm", "Before the build");
       wz.body.innerHTML = lists +
         "<p>Make sure your local repo is <strong>clean and synced with the live site</strong> " +
-        "before you extract the zip. A spliced page keeps every byte outside its markers. " +
+        "before this lands. A spliced page keeps every byte outside its markers. " +
         "A stale copy reverts real work, and says nothing.</p>" +
+        bcRouteBlurb() +
         '<label class="bc-wiz__opt"><input type="checkbox" class="bc-wiz__noremind" />' +
         "<span>Do not show this reminder again</span></label>";
-      var cancel = function () { bcWizClose(); resolve(false); };
+      var cancel = function () { bcWizClose(); take(false); };
       bcWizBtn("Cancel", "", cancel);
       bcWizSpacer();
-      bcWizBtn("Build the bundle", "ced-btn--accent", function () {
+      var chosen = function (route) {
         var cb = wz.body.querySelector(".bc-wiz__noremind");
         if (cb && cb.checked) bcSetNoRemind(true);
-        resolve(true);
-      }).focus();
+        take(route);
+      };
+      bcRouteButtons(chosen).focus();
       wz.onEscape = cancel;
     });
   }
@@ -1523,10 +1620,13 @@
     TOOL.download(rec.zip.replace(/\.zip$/, "-again.zip"), TOOL.zip(parts));
   }
 
-  /* Step three. What happened, where the zip went, what is in it, and the
-     list to work through. The list is the person's, because the page cannot
-     see the repo. The last box is the page's, and it ticks itself when the
-     site shows the post. */
+  /* Step three. What happened, where the bundle went, what is in it, and
+     the list to work through. The list is the person's, because the page
+     cannot see the repo. The last box is the page's, and it ticks itself
+     when the site shows the post.
+
+     The list follows the route taken. A folder write puts the files in
+     place, so "extract the zip" is not one of the reader's steps. */
   function bcWizDone(rec) {
     var esc = TOOL.escAttr;
     var w = bcWizShow("done",
@@ -1534,10 +1634,11 @@
       : rec.kind === "rebuild" ? "Rebuild bundle built"
       : (rec.edit ? "Republished p" : "Published p") + rec.id);
     var checks = rec.checks || {};
-    var items = [
-      ["extract", "Extract <code>" + esc(rec.zip) + "</code> at the repo root"],
-      ["review", "Review the diff"]
-    ];
+    var wrote = rec.route === BC_ROUTE_FOLDER;
+    var items = wrote
+      ? [["review", "Review the diff"]]
+      : [["extract", "Extract <code>" + esc(rec.zip) + "</code> at the repo root"],
+         ["review", "Review the diff"]];
     if (rec.orphans && rec.orphans.length) {
       items.push(["orphans", "Delete the files in <code>ORPHANS.txt</code>"]);
     }
@@ -1546,7 +1647,14 @@
       : rec.kind === "rebuild" ? "The site shows the rebuild"
       : "The site shows the post";
     w.body.innerHTML =
-      "<p>Your browser saved <code>" + esc(rec.zip) + "</code> to its Downloads folder.</p>" +
+      (rec.fellBack
+        ? '<p class="bc-wiz__fell"><strong>The folder write did not happen.</strong> ' +
+          esc(rec.fellBack) + "</p>"
+        : "") +
+      (wrote
+        ? "<p>The files were written straight into your repo folder. There is no zip " +
+          "to extract, and nothing was downloaded.</p>"
+        : "<p>Your browser saved <code>" + esc(rec.zip) + "</code> to its Downloads folder.</p>") +
       "<p>The bundle holds:</p>" +
       '<div class="bc-wiz__files">' + bcFileChips(rec.spliced || [], "spliced") +
       bcFileChips(rec.regenerated || [], "regenerated") + bcFileChips(rec.added || [], "added") + "</div>" +
@@ -1580,8 +1688,10 @@
       rec.checks[key] = !!cb.checked;
       bcRecordSave(rec);
     });
+    /* The two plain choices come last and read as a sentence: go back to
+       this post, or finish with it. The quieter buttons are the ones a
+       reader needs only sometimes. */
     var close = function () { bcWizClose(); };
-    bcWizBtn("Close", "", close);
     if (rec.files && Object.keys(rec.files).length) {
       bcWizBtn("Download again", "", function () { bcDownloadAgain(rec); });
     }
@@ -1591,15 +1701,31 @@
         if (again.parentNode) again.parentNode.removeChild(again);
       });
     }
-    bcWizSpacer();
-    bcWizBtn("Compose another", "ced-btn--accent", function () {
+    /* a new empty composer, which is not the same as going back to the
+       post that was published: both are offered, and named for what they do */
+    bcWizBtn("Compose another", "", function () {
       bcWizClose();
-      /* the composer that published is finished with: openComposer
-         refuses to open over one that is still on screen, so this button
-         would otherwise do nothing at all */
       bcClose();
       if (!TOOL.editorOn()) window.edit();
       openComposer(null);
+    });
+    bcWizSpacer();
+    /* only a post can be resumed: a delete has nothing to go back to, and
+       a rebuild was never a post */
+    if (rec.kind === "publish" && rec.id) {
+      bcWizBtn("Resume editing this post", "", function () {
+        bcWizClose();
+        /* the composer that published is finished with: openComposer
+           refuses to open over one that is still on screen, so this
+           button would otherwise do nothing at all */
+        bcClose();
+        if (!TOOL.editorOn()) window.edit();
+        bcLoadPost(rec.id);
+      });
+    }
+    bcWizBtn("All done, close the post!", "ced-btn--accent", function () {
+      bcWizClose();
+      bcClose();
     }).focus();
     w.onEscape = close;
   }
@@ -2155,49 +2281,40 @@
       '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
       urls.join("\n") + "\n</urlset>\n";
   }
-  /* ---------------- the packed index ----------------
+  /* ---------------- the search index ----------------
 
      search.js is everything the site knows about its posts, in one file
-     a browser can search: base64 of gzip of JSON, in a classic script.
-     A script tag loads from disk and a fetch does not, and reading this
-     site from disk has to work.
+     a browser can search: the table as readable JSON, in a classic
+     script. A script tag loads from disk and a fetch does not, and
+     reading this site from disk has to work.
 
-     Gzip because the words of a blog would otherwise sit as a large
-     plain block in every publish diff. The thumbnails do not compress,
-     so they are kept tiny: 48 px on the long side, WebP, about a
-     kilobyte each, and only for a post that has an image.
+     The thumbnails are the one large part, so they are kept tiny: 48 px
+     on the long side, WebP, about a kilobyte each, and only for a post
+     that has an image.
 
      blog.js owns the unpacker, and this file reads the deployed index
      through it, so the writer and the reader cannot disagree. */
   var SEARCH_FILE = "search.js";
   var THUMB_PX = 48;
 
-  /* Base64 of bytes, in chunks: one apply() over a megabyte overflows
-     the argument list. */
-  function bcB64(bytes) {
-    var out = "";
-    for (var i = 0; i < bytes.length; i += 8192) {
-      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-    }
-    return btoa(out);
-  }
-  /* The file's text. A browser with no CompressionStream writes the
-     table unpacked behind a "plain:" prefix the unpacker understands,
-     so a publish is never blocked by a missing browser feature. */
+  /* The file's text: the table as readable JSON, assigned to a global.
+
+     It was base64 of gzip until V057. The reason for the change is not
+     size. A packed file is smaller on disk, and over HTTP the server's
+     own compression leaves about four percent between the two. The
+     reason is that a file whose whole content is one long opaque string
+     is the shape a virus scanner reads as a packed payload, and Windows
+     called search.js a dangerous file. Readable JSON also takes the
+     compression code out of this file and out of blog.js. */
   function bcSearchPack(table, stamp) {
-    var json = JSON.stringify(table);
-    var head = "/* " + bcGenerated(stamp) + " */\n";
-    var line = function (payload) {
-      return head + "window.AMH_SEARCH = \"" + payload + "\";\n";
-    };
-    if (typeof CompressionStream !== "function") {
-      return Promise.resolve({
-        text: line("plain:" + bcB64(new TextEncoder().encode(json))), plain: true });
-    }
-    var stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
-    return new Response(stream).arrayBuffer().then(function (buf) {
-      return { text: line(bcB64(new Uint8Array(buf))), plain: false };
-    });
+    /* U+2028 and U+2029 are legal inside JSON and were once illegal
+       inside a JavaScript string literal. Escaping them keeps a post
+       that contains either one safe to load as a script. */
+    var json = JSON.stringify(table)
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+    return "/* " + bcGenerated(stamp) + " */\n" +
+      "window.AMH_SEARCH = " + json + ";\n";
   }
   /* One entry, from an extracted post. The text is the post's words with
      the image tags taken out, and the captions are their own field, so a
@@ -2291,16 +2408,18 @@
         posts.sort(function (a, b) {
           return a.date === b.date ? (a.id < b.id ? -1 : 1) : (a.date < b.date ? -1 : 1);
         });
-        return bcSearchPack({ v: 1, stamp: stamp, posts: posts }, stamp)
-          .then(function (packed) { packed.posts = posts; return packed; });
-      })
-      .then(function (packed) {
-        files[SEARCH_FILE] = new TextEncoder().encode(packed.text);
-        if (packed.plain) {
-          console.warn("[blog] this browser cannot compress, so search.js was written " +
-            "unpacked. It still works; a publish from a browser that can will shrink it.");
+        /* The deployed index is from a publish before V057, so its posts
+           could not be read and this one would ship a shorter index than
+           the site already has. A rebuild does not read the old file at
+           all: it passes the whole table, built from the month files. */
+        if (old.stale && !(change && change.table)) {
+          console.warn("[blog] the deployed search.js is from an older publish and " +
+            "cannot be read. Run edit.blog.rebuild() once to write the index again " +
+            "from the month files, or find will know only the newest posts.");
         }
-        return packed.posts;
+        files[SEARCH_FILE] = new TextEncoder().encode(
+          bcSearchPack({ v: 1, stamp: stamp, posts: posts }, stamp));
+        return posts;
       });
   }
   /* The thumbnail for the post being published: from the bytes the
@@ -2529,6 +2648,7 @@
      is a fact the managed-page list already holds, and everything else in
      the bundle was written whole. */
   function bcFinishBundle(files, zipName, statusMsg, extraLog, rec) {
+    var route = rec.route === BC_ROUTE_FOLDER ? BC_ROUTE_FOLDER : BC_ROUTE_ZIP;
     var enc = new TextEncoder();
     var orphans = bcOrphans.filter(function (o, i) { return bcOrphans.indexOf(o) === i; });
     if (orphans.length) {
@@ -2538,7 +2658,6 @@
         orphans.map(function (o) { return o; }).join("\n") + "\n");
     }
     var names = Object.keys(files).sort();
-    TOOL.download(zipName, TOOL.zip(names.map(function (n) { return { name: n, bytes: files[n] }; })));
     console.info("[blog] bundle contents:\n  " + names.join("\n  ") + (extraLog ? "\n" + extraLog : ""));
     if (orphans.length) {
       console.warn("[blog] ORPHANED FILES - delete these from the repo before committing:\n  " +
@@ -2550,7 +2669,7 @@
     var managed = TOOL.pages.map(function (pg) { return pg.path; });
     var record = {
       kind: rec.kind, edit: !!rec.edit, id: rec.id || "", zip: zipName, url: rec.url || "",
-      stamp: rec.stamp || "",
+      stamp: rec.stamp || "", route: route, wrote: [], fellBack: "",
       spliced: names.filter(function (n) { return managed.indexOf(n) !== -1; }),
       regenerated: names.filter(function (n) {
         return managed.indexOf(n) === -1 && (/\.(html|xml|txt)$/.test(n) || n === SEARCH_FILE);
@@ -2578,7 +2697,65 @@
     var prog = bcProg;
     bcProg = null;
     if (prog) prog.mark(6);
-    (prog ? prog.finish() : Promise.resolve()).then(function () { bcWizDone(record); });
+    (prog ? prog.finish() : Promise.resolve())
+      .then(function () { return bcDeliver(files, names, zipName, record); })
+      .then(function () {
+        /* the record was staged before the bundle was delivered, and
+           delivery is what decides the route: a folder write that fell
+           back to the zip must not leave a stored record claiming the
+           files are already in the repo. The checklist is reopened from
+           this record long after the wizard closes. */
+        bcRecordSave(record);
+        bcWizDone(record);
+      });
+  }
+
+  /* Put the bundle where the reader chose. The zip is one call. The folder
+     asks for the folder, then writes each file in turn.
+
+     A folder write that fails falls back to the zip, and the record says
+     so. The bundle is built by then, and losing it because a browser
+     refused a permission would be the worst of both routes. */
+  function bcDeliver(files, names, zipName, record) {
+    var asZip = function () {
+      TOOL.download(zipName, TOOL.zip(names.map(function (n) {
+        return { name: n, bytes: files[n] };
+      })));
+      record.route = BC_ROUTE_ZIP;
+      record.wrote = [];
+    };
+    if (record.route !== BC_ROUTE_FOLDER) {
+      asZip();
+      return Promise.resolve();
+    }
+    /* ORPHANS.txt belongs to the zip. Writing it into the repo would add a
+       file to delete to the list of files to delete. */
+    var send = {};
+    names.forEach(function (n) { if (n !== "ORPHANS.txt") send[n] = files[n]; });
+    var pick = TOOL.repoWriteReady()
+      ? Promise.resolve(true)
+      : TOOL.pickRepoWrite().then(function (handle) { return !!handle; });
+    return pick.then(function (got) {
+      if (!got) {                       /* the picker was closed: no choice was made */
+        asZip();
+        record.fellBack = "The folder was not chosen, so the bundle was downloaded instead.";
+        return;
+      }
+      return TOOL.writeRepo(send).then(function (written) {
+        record.wrote = written;
+        console.info("[blog] written into the repo folder:\n  " + written.join("\n  "));
+      });
+    }, function (err) {
+      asZip();
+      record.fellBack = (err && err.message ? err.message : String(err)) +
+        " The bundle was downloaded instead.";
+      console.warn("[blog] folder write refused: " + record.fellBack);
+    }).then(null, function (err) {
+      asZip();
+      record.fellBack = (err && err.message ? err.message : String(err)) +
+        " The bundle was downloaded instead.";
+      console.warn("[blog] folder write failed: " + record.fellBack);
+    });
   }
 
   /* ---------------- publish: a new post, or an edited one again ---------------- */
@@ -2666,13 +2843,15 @@
       if (willReplace.indexOf("blog/" + m + ".html") === -1) willReplace.splice(-2, 0, "blog/" + m + ".html");
     });
     var reads = bcPublishReads(date, willWrite, neighbours);
+    var route = null;
     bcWizConfirm(willWrite, willReplace)
-      .then(function (go) { return go && bcWizFiles(reads); })
+      .then(function (chosen) { route = chosen; return chosen && bcWizFiles(reads); })
       .then(function (go) {
         if (!go) { bcSetStatus("Not published. Nothing was written."); return; }
         bcPublishBuild({ date: date, title: title, entryTitle: entryTitle, source: source,
                          meta: { format: format, time: time, zone: zone, tags: tags },
-                         usedNew: usedNew, usedPub: usedPub, willWrite: willWrite, reads: reads });
+                         usedNew: usedNew, usedPub: usedPub, willWrite: willWrite,
+                         reads: reads, route: route });
       });
   }
 
@@ -2910,6 +3089,7 @@
               ".html - re-share the new URL"
             : ""),
           { kind: "publish", edit: !!bcEditing, id: id, stamp: stamps.publish,
+            route: p.route,
             url: meta.base + "blog/" + yymm + ".html#p" + id });
       })
       .catch(function (err) {
@@ -2941,6 +3121,16 @@
         "\n\nThis builds a publish bundle. The post stays live until you upload the bundle.")) {
       return;
     }
+    bcWizRoutePick("Where should the deletion bundle land?",
+      "The post stays live until this reaches the repo and you commit it.")
+      .then(function (route) { if (route) bcDeleteBuild(route, imgOrphans); });
+  }
+  /* imgOrphans is decided before the ask, from the source the composer
+     holds, so the question and the build name the same files. */
+  function bcDeleteBuild(route, imgOrphans) {
+    var id = bcEditing.id;
+    var date0 = bcEditing.date0;
+    var yymm = date0.slice(0, 4);
     bcSetStatus("Building the deletion bundle.");
     var files = {};
     var meta, entries, man, stamps, months, deployed;
@@ -3013,7 +3203,7 @@
         bcFinishBundle(files, "blog-delete-p" + id + ".zip",
           "Deletion bundle built for p" + id + ". Extract it at the repo root. Delete the files in " +
           "ORPHANS.txt. Commit and push. Then reload this page.", "",
-          { kind: "delete", id: id, stamp: stamps.publish });
+          { kind: "delete", id: id, stamp: stamps.publish, route: route });
       })
       .catch(function (err) {
         bcSetStatus("Delete failed: " + err.message);
@@ -3025,6 +3215,12 @@
   /* ---------------- rebuild: every month file, current chrome ---------------- */
   function bcRebuild() {
     TOOL.injectStyles();
+    bcWizRoutePick("Where should the rebuild bundle land?",
+      "Every month file is written again with the current design.")
+      .then(function (route) { if (route) bcRebuildBuild(route); });
+    return "rebuilding: choose where the bundle should land";
+  }
+  function bcRebuildBuild(route) {
     console.info("[blog] rebuild: rendering every month file again with the current chrome.");
     var files = {};
     var carried = [];     /* blocks with no source, carried verbatim */
@@ -3112,7 +3308,7 @@
           return (same ? Promise.resolve() : bcOtherPages(files, derived.entries)).then(function () {
             if (!same) TOOL.markExported();
             bcFinishBundle(files, "blog-rebuild-" + bcTodayYYMMDD() + ".zip", "", "",
-              { kind: "rebuild", stamp: stamps.publish });
+              { kind: "rebuild", stamp: stamps.publish, route: route });
             console.info("[blog] rebuild bundle ready. Extract it at the repo root, review, commit, push.");
           });
         });
@@ -3122,7 +3318,6 @@
         bcWizFail(err, "Rebuild");
       })
       .then(function () { bcOrphans = savedOrphans; });
-    return "rebuilding (bundle will download)";
   }
 
   /* The index a rebuild writes, from the posts it read.

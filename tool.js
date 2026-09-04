@@ -2029,7 +2029,10 @@
     "BLG-E08": "That folder has none of the files this publish needs.",
     "BLG-E09": "Not on disk. The publish creates this file.",
     "BLG-E10": "This month file is from a different publish than the blog page you opened. The publish overwrites it with the version this page knows.",
-    "BLG-E11": "The live manifest is different from the page you loaded. Reload the page and compose again. Save Draft first."
+    "BLG-E11": "The live manifest is different from the page you loaded. Reload the page and compose again. Save Draft first.",
+    "BLG-E12": "The browser did not give permission to write to that folder. Pick it again and choose Save changes.",
+    "BLG-E13": "That folder is not the root of this repo. The root holds index.html and blog.html.",
+    "BLG-E14": "A file could not be written to the folder. Nothing else was written after it."
   };
 
   /* Say a code the same way every time, and put it where a console search
@@ -2298,6 +2301,118 @@
     })).then(function () { return took; });
   }
   function hasPicker() { return typeof window.showDirectoryPicker === "function"; }
+
+  /* ---------------- writing back into the repo folder ----------------
+
+     The other direction. A publish can hand its files to the browser as a
+     zip, or write them straight into the repo folder through this.
+
+     Why it exists: a downloaded zip carries the Mark of the Web, Windows
+     copies that mark onto every file taken out of it, and it blocks a
+     marked file whose type it treats as a script. A file written through
+     the File System Access API never goes through the download manager,
+     so it carries no mark. It also removes the extract step.
+
+     What it does NOT do: delete. The tool proposes and the user decides,
+     so an orphan is still named for the user to remove by hand. */
+  var repoWriteDir = null;    /* the folder, once it may be written to */
+
+  /* The two files that say this folder is the root of this site. A publish
+     splices deployed bytes, so writing into the wrong folder would put a
+     half-site somewhere it does not belong. */
+  var ROOT_MARKS = ["index.html", "blog.html"];
+
+  function repoHasRootMarks(handle) {
+    return Promise.all(ROOT_MARKS.map(function (name) {
+      return handle.getFileHandle(name).then(function () { return true; },
+        function () { return false; });
+    })).then(function (found) {
+      return found.every(function (ok) { return ok; });
+    });
+  }
+
+  /* Ask for write permission on a handle the user already picked. The
+     browser may grant it with the pick and then need no prompt at all. */
+  function repoWritable(handle) {
+    if (!handle.queryPermission) return Promise.resolve(true);
+    return handle.queryPermission({ mode: "readwrite" }).then(function (state) {
+      if (state === "granted") return true;
+      return handle.requestPermission({ mode: "readwrite" })
+        .then(function (asked) { return asked === "granted"; });
+    });
+  }
+
+  /* Pick the repo folder for writing. Resolves with the handle, or null
+     when the picker was closed. Rejects when the folder is not this repo
+     or permission was refused, so a caller can say which happened. */
+  function pickRepoWrite() {
+    if (!hasPicker()) return Promise.reject(errObj("BLG-E04", "no folder picker in this browser"));
+    return window.showDirectoryPicker({ id: "amh-repo", mode: "readwrite" }).then(
+      function (handle) {
+        return repoHasRootMarks(handle).then(function (isRoot) {
+          if (!isRoot) throw errObj("BLG-E13", "");
+          return repoWritable(handle).then(function (may) {
+            if (!may) throw errObj("BLG-E12", "");
+            repoWriteDir = handle;
+            /* one pick answers both directions: a later read needs no
+               second dialog, which is what picking the folder once means */
+            if (!repoDir) repoDir = handle;
+            return handle;
+          });
+        });
+      },
+      function (err) {
+        if (err && err.name === "AbortError") return null;
+        if (err && err.code) throw err;
+        throw errObj("BLG-E04", err && err.message ? err.message : "");
+      });
+  }
+
+  /* Walk to the folder a path lives in, making each step that is missing.
+     "blog/2607.html" makes blog/ when the repo has no month files yet. */
+  function repoDirFor(parts) {
+    var dir = Promise.resolve(repoWriteDir);
+    parts.forEach(function (seg) {
+      dir = dir.then(function (d) {
+        return d.getDirectoryHandle(seg, { create: true });
+      });
+    });
+    return dir;
+  }
+
+  /* Write one file. The stream truncates, so the file is replaced whole
+     and never left with the tail of a longer previous version. */
+  function writeOne(path, bytes) {
+    var parts = path.split("/");
+    var name = parts.pop();
+    return repoDirFor(parts)
+      .then(function (d) { return d.getFileHandle(name, { create: true }); })
+      .then(function (fh) { return fh.createWritable(); })
+      .then(function (stream) {
+        return Promise.resolve(stream.write(bytes)).then(function () {
+          return stream.close();
+        });
+      })
+      .then(null, function (err) {
+        throw errObj("BLG-E14", path + (err && err.message ? " (" + err.message + ")" : ""));
+      });
+  }
+
+  /* Write every file of a bundle, in a fixed order so a failure leaves a
+     state that can be described. Resolves with the paths written. The
+     caller must have picked the folder first. */
+  function writeRepo(files) {
+    if (!repoWriteDir) return Promise.reject(errObj("BLG-E12", "no folder was picked"));
+    var names = Object.keys(files).sort();
+    var written = [];
+    return names.reduce(function (chain, name) {
+      return chain.then(function () {
+        return writeOne(name, files[name]).then(function () { written.push(name); });
+      });
+    }, Promise.resolve()).then(function () { return written; },
+      function (err) { err.written = written; throw err; });
+  }
+  function repoWriteReady() { return !!repoWriteDir; }
   /* Pick the folder with the API, so the browser opens only the files that
      are asked for and never counts the tree. Resolves with the count taken,
      or null when the picker was closed. A browser with no API needs a
@@ -2570,6 +2685,9 @@
   AMH.tool.hasRepo = function () { return !!repoDir; };
   AMH.tool.hasPicker = hasPicker;
   AMH.tool.pickRepo = pickRepo;
+  AMH.tool.pickRepoWrite = pickRepoWrite;
+  AMH.tool.writeRepo = writeRepo;
+  AMH.tool.repoWriteReady = repoWriteReady;
   AMH.tool.takeFiles = takeFiles;
   AMH.tool.takeFolder = takeFolder;
   AMH.tool.fileState = function (path) {

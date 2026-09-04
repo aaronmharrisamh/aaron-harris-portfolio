@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { gunzipSync } from "node:zlib";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -78,6 +77,26 @@ const ZIP_CAPTURE = `
       fr.readAsDataURL(b);
     })).then(b64 => { window.__zipB64 = b64; });
   };`;
+
+// The search index, read out of the file a publish wrote. Since V057 the
+// file is one assignment holding readable JSON, so the table is the object
+// in it and there is nothing to decompress.
+function searchTable(fileText) {
+  const t = String(fileText);
+  const open = t.indexOf("{"), close = t.lastIndexOf("}");
+  if (open < 0 || close < open) return { error: "no table in search.js" };
+  try { return JSON.parse(t.slice(open, close + 1)); }
+  catch (e) { return { error: e.message }; }
+}
+// A run of base64 long enough to be a payload rather than a word. A
+// thumbnail is a data: URI and is base64 by its nature, so it is taken out
+// first: what must not be in the file is a payload, which is what made a
+// scanner call the old packed index a dangerous file.
+function hasBase64Blob(text) {
+  const withoutThumbs = String(text)
+    .replace(/data:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+/g, "");
+  return /[A-Za-z0-9+/]{60,}={0,2}/.test(withoutThumbs);
+}
 
 // remove the CONTENT of the named regions from a source string, so two files
 // can be compared for byte-identity everywhere outside those regions.
@@ -2824,19 +2843,30 @@ async function main() {
       regen: [...box.querySelectorAll('.bc-wiz__file[data-how=regenerated]')].map(function (f) { return f.textContent; }),
       reminder: /clean and synced/.test(box.textContent),
       checkbox: !!box.querySelector('.bc-wiz__noremind'),
+      route: !!box.querySelector('.bc-wiz__route'),
       btns: [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }),
+      disabled: [...box.querySelectorAll('.ced-modal__btns button')]
+        .filter(function (b) { return b.disabled; }).map(function (b) { return b.textContent; }),
       focused: document.activeElement && document.activeElement.textContent,
     };
   })()`);
   check("wizard: the confirm step names what is spliced and what is regenerated",
     confirmStep.step === "confirm" && confirmStep.spliced.indexOf("blog.html") !== -1 &&
     confirmStep.regen.indexOf("blog/2607.html") !== -1 && confirmStep.regen.indexOf("sitemap.xml") !== -1 &&
-    confirmStep.reminder && confirmStep.checkbox &&
-    JSON.stringify(confirmStep.btns) === '["Cancel","Build the bundle"]' &&
-    confirmStep.focused === "Build the bundle",
+    confirmStep.reminder && confirmStep.checkbox,
     JSON.stringify(confirmStep).slice(0, 240));
+  // WR1. the delivery choice is on the step that starts the build, so the
+  // route is picked with the file lists in view. Headless Chrome has the
+  // folder picker, so both buttons are live here.
+  check("wizard: the confirm step offers both ways for the bundle to land",
+    JSON.stringify(confirmStep.btns) ===
+      '["Cancel","Download a .zip","Write into my repo folder"]' &&
+    confirmStep.route === true && confirmStep.disabled.length === 0 &&
+    confirmStep.focused === "Write into my repo folder",
+    JSON.stringify({ btns: confirmStep.btns, disabled: confirmStep.disabled,
+                     focused: confirmStep.focused }));
 
-  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => /Build the bundle/.test(b.textContent)).click()`);
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => /Download a \.zip/.test(b.textContent)).click()`);
   await sleep(200);
   const progressStep = await evaluate(`(function () {
     var box = document.querySelector('.bc-wizard');
@@ -2877,6 +2907,7 @@ async function main() {
         checks: [...box.querySelectorAll('.bc-wiz__checks input')].map(function (c) { return c.getAttribute('data-check') + (c.disabled ? '!' : ''); }),
         btns: [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }),
         url: (box.querySelector('.bc-wiz__body a') || {}).textContent || '',
+        focused: document.activeElement && document.activeElement.textContent,
         publishDisabled: [...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled,
       };
     })()`);
@@ -2896,8 +2927,16 @@ async function main() {
     doneStep.elapsed >= 7 * 350 - 100, "elapsed " + doneStep.elapsed + "ms");
   check("wizard: the list is extract, review, commit, push, and a live box the page owns",
     JSON.stringify(doneStep.checks) === '["extract","review","commit","push","live!"]' &&
-    JSON.stringify(doneStep.btns) === '["Close","Download again","Compose another"]',
+    JSON.stringify(doneStep.btns) ===
+      '["Download again","Compose another","Resume editing this post","All done, close the post!"]',
     JSON.stringify(doneStep.checks) + " " + JSON.stringify(doneStep.btns));
+  // WD1. the last step ends in two plain choices: go back to this post, or
+  // finish with it. The quieter buttons stay for the times they are wanted.
+  check("wizard: the done step's two clear choices are last, and finishing is the default",
+    doneStep.btns[doneStep.btns.length - 2] === "Resume editing this post" &&
+    doneStep.btns[doneStep.btns.length - 1] === "All done, close the post!" &&
+    doneStep.focused === "All done, close the post!",
+    JSON.stringify({ btns: doneStep.btns, focused: doneStep.focused }));
 
   // PW4. a tick is remembered in the record, and the panel line reads it
   const ticked = await evaluate(`(function () {
@@ -2913,7 +2952,7 @@ async function main() {
     ticked.checked && ticked.rec === true && ticked.id === "0001" && !ticked.hidden &&
     /p0001 is in a bundle that is not live yet\. 1 of 4 steps ticked\./.test(ticked.line),
     JSON.stringify(ticked).slice(0, 200));
-  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,
@@ -3021,14 +3060,13 @@ async function main() {
                    source: "Words **here**.\\n\\n[img0001,Cap one|Alt one][png0002,Cap two]\\n\\nMore.",
                    staticBody: "" };
       var entry = AMH.publish.searchEntry(post, "");
-      return AMH.publish.searchPack({ v: 1, stamp: "zzz999", posts: [entry] }, "zzz999")
-        .then(function (packed) {
-          return AMH.search.unpack(packed.text).then(function (back) {
-            return { entry: entry, plain: packed.plain,
-                     same: JSON.stringify(back.posts[0]) === JSON.stringify(entry),
-                     stamp: back.stamp, head: packed.text.split("\\n")[0] };
-          });
-        });
+      var text = AMH.publish.searchPack({ v: 1, stamp: "zzz999", posts: [entry] }, "zzz999");
+      return AMH.search.unpack(text).then(function (back) {
+        return { entry: entry, text: text,
+                 same: JSON.stringify(back.posts[0]) === JSON.stringify(entry),
+                 stamp: back.stamp, head: text.split("\\n")[0],
+                 readable: text.indexOf('"title":"A day"') !== -1 };
+      });
     })()`, { awaitPromise: true });
     check("search: an entry holds the words without the image tags, and the captions apart",
       unit.entry.text === "Words here. More." &&
@@ -3036,26 +3074,27 @@ async function main() {
       unit.entry.tags === "xr planetarium" && unit.entry.time === "1839" && unit.entry.zone === "EDT",
       JSON.stringify(unit.entry).slice(0, 220));
     check("search: pack and unpack round-trip a table, with the stamp in the header",
-      unit.same && unit.stamp === "zzz999" && unit.plain === false && /stamp:zzz999/.test(unit.head),
+      unit.same && unit.stamp === "zzz999" && unit.readable && /stamp:zzz999/.test(unit.head),
       JSON.stringify({ same: unit.same, stamp: unit.stamp, head: unit.head }).slice(0, 180));
+    // SR0. the file a scanner sees. A packed payload is what made Windows
+    // call search.js a dangerous file, so the absence of one is the fix.
+    check("search: the packed table is readable JSON, with no base64 payload in it",
+      !hasBase64Blob(unit.text) && unit.text.indexOf("window.AMH_SEARCH = {") !== -1,
+      unit.text.slice(0, 150));
 
-    // SR1. the packed index the publish ships: a classic script whose one
-    // line is base64 of gzip of the table, with the publish stamp in its
-    // header comment
+    // SR1. the index the publish ships: a classic script assigning the table
+    // as readable JSON, with the publish stamp in its header comment
     const searchFile = zipFiles["search.js"].toString("utf8");
     const searchStamp = (/GENERATED[^*]*stamp:([0-9a-z]{6})/.exec(searchFile) || [])[1];
-    const packed = (/window\.AMH_SEARCH = "([^"]*)";/.exec(searchFile) || [])[1] || "";
-    let searchTable = null;
-    try {
-      searchTable = JSON.parse(gunzipSync(Buffer.from(packed, "base64")).toString("utf8"));
-    } catch (e) { searchTable = { error: e.message }; }
-    check("search: the file is one packed line, stamped by the publish that wrote it",
-      searchStamp === pubStamp && packed.length > 0 && packed.indexOf("plain:") !== 0 &&
-      searchTable && searchTable.v === 1 && searchTable.stamp === pubStamp,
-      JSON.stringify({ searchStamp, pubStamp, bytes: searchFile.length }).slice(0, 160));
-    const e1 = (searchTable.posts || [])[0] || {};
+    const shipped = searchTable(searchFile);
+    check("search: the file is one readable assignment, stamped by the publish that wrote it",
+      searchStamp === pubStamp && !hasBase64Blob(searchFile) &&
+      shipped && shipped.v === 1 && shipped.stamp === pubStamp,
+      JSON.stringify({ searchStamp, pubStamp, bytes: searchFile.length,
+                       err: shipped.error }).slice(0, 160));
+    const e1 = (shipped.posts || [])[0] || {};
     check("search: the entry carries the post's words, captions, tags, time and zone",
-      (searchTable.posts || []).length === 1 && e1.id === "0001" && e1.date === "260711" &&
+      (shipped.posts || []).length === 1 && e1.id === "0001" && e1.date === "260711" &&
       /^\d{4}$/.test(e1.time) && e1.zone.length >= 2 && e1.title === "E2E first post" &&
       /^First e2e post/.test(e1.text) && !/\[img0001/.test(e1.text) &&
       JSON.stringify(e1.caps) === '["Cap one Alt one","Cap two"]',
@@ -3248,9 +3287,34 @@ async function main() {
       writeFileSync(join(bdir, name), data);
     }
   }
+  // Click one of the two delivery buttons on whatever step is showing.
+  // Returns true when it was there to click. The suite drives the zip route
+  // almost everywhere, because a zip is what it can read back; the folder
+  // route has its own checks against a stubbed writer.
+  async function pressRoute(label = "Download a .zip") {
+    return await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      if (!box) return false;
+      var b = [...box.querySelectorAll('.ced-modal__btns button')]
+        .find(function (x) { return x.textContent === ${JSON.stringify(label)}; });
+      if (!b || b.disabled) return false;
+      b.click();
+      return true;
+    })()`);
+  }
+  // Wait for the route step a delete or a rebuild shows, then take the zip.
+  async function passRouteStep(label = "Download a .zip") {
+    for (let i = 0; i < 30; i++) {
+      await sleep(150);
+      const step = await evaluate(`(document.querySelector('.bc-wizard') || {getAttribute(){return null}}).getAttribute('data-step')`);
+      if (step === "route") return await pressRoute(label);
+      if (step === "progress" || step === "done" || step === "failed") return true;
+    }
+    return false;
+  }
   // Publish through the wizard. Clicks Publish, then the confirm step's
-  // Build button when it appears. With the reminder switched off the step is
-  // a notice that proceeds on its own, so the helper also returns when the
+  // delivery button when it appears. With the reminder switched off the step
+  // is a notice that proceeds on its own, so the helper also returns when the
   // wizard has moved past the confirm step by itself.
   async function pressPublish() {
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
@@ -3261,7 +3325,7 @@ async function main() {
         if (!box) return "none";
         var step = box.getAttribute('data-step');
         if (step === 'confirm') {
-          var b = [...box.querySelectorAll('.ced-modal__btns button')].find(function (x) { return /Build the bundle/.test(x.textContent); });
+          var b = [...box.querySelectorAll('.ced-modal__btns button')].find(function (x) { return x.textContent === 'Download a .zip'; });
           if (b) { b.click(); return "built"; }
         }
         return step;
@@ -3615,9 +3679,15 @@ async function main() {
     check("chain: a publish that creates a month names its neighbour among the files written whole",
       notice.regen.indexOf("blog/2606.html") !== -1 && notice.regen.indexOf("blog/2607.html") !== -1,
       notice.regen.join(", "));
+    // The notice still proceeds on its own, by the route used last time,
+    // because it has no one to ask. The choice is offered all the same, so
+    // taking the other route is one click rather than a settings hunt.
     check("wizard: with the reminder off, a notice says so and proceeds on its own",
       notice.step === "notice" && /You chose not to see the reminder/.test(notice.text) &&
-      JSON.stringify(notice.btns) === '["Cancel"]', JSON.stringify(notice).slice(0, 160));
+      /lands where it landed last time/.test(notice.text) &&
+      JSON.stringify(notice.btns) ===
+        '["Cancel","Download a .zip","Write into my repo folder"]',
+      JSON.stringify(notice).slice(0, 200));
     const zip2 = await capturePublish();
     let done2 = null;
     for (let i = 0; i < 20 && !(done2 && done2.step === "done"); i++) {
@@ -3637,7 +3707,7 @@ async function main() {
     check("wizard: the done step can switch the reminder back on",
       done2.step === "done" && done2.btns.indexOf("Show the reminder again") !== -1 &&
       remindAgain.cleared && remindAgain.gone, JSON.stringify(done2) + " " + JSON.stringify(remindAgain));
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
     check("P2: second post published into an earlier month", !!zip2 && !!zip2["blog/2606.html"],
       zip2 ? Object.keys(zip2).sort().join(", ") : "no zip");
     if (zip2) {
@@ -3659,9 +3729,7 @@ async function main() {
       const m2606c = zip2["blog/2606.html"].toString("utf8");
       const m2607c = zip2["blog/2607.html"] ? zip2["blog/2607.html"].toString("utf8") : "";
       // the index keeps every other post and gains this one
-      const t2 = JSON.parse(gunzipSync(Buffer.from(
-        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip2["search.js"].toString("utf8")) || [])[1],
-        "base64")).toString("utf8"));
+      const t2 = searchTable(zip2["search.js"].toString("utf8"));
       check("search: a second publish adds its entry and keeps the first, oldest first",
         t2.posts.length === 2 && t2.posts[0].id === "0002" && t2.posts[1].id === "0001" &&
         t2.posts[0].title === "June post" && t2.posts[1].thumb.length > 100,
@@ -3842,6 +3910,7 @@ async function main() {
     await evaluate(`window.edit.blog.edit(${JSON.stringify(mayId || "0000")})`);
     await sleep(1200);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
+    await passRouteStep();
     const zipMayGone = await capturePublish();
     check("chain: a delete that empties the first month repairs the month after it",
       !!zipMayGone && !zipMayGone["blog/2605.html"] &&
@@ -3853,7 +3922,7 @@ async function main() {
       rmSync(join(bdir, "blog/2605.html"), { force: true });
       rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close')?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!')?.click()`);
 
     // P2-2. the stream shows the newest month and loads nothing until it
     // is asked to. Two months are deployed now, so the stream is July and
@@ -4270,11 +4339,10 @@ async function main() {
     await evaluate(`window.edit.blog.edit("0002")`);
     await sleep(1200);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
+    await passRouteStep();
     const zip5 = await capturePublish();
     if (zip5 && zip5["search.js"]) {
-      const t5 = JSON.parse(gunzipSync(Buffer.from(
-        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip5["search.js"].toString("utf8")) || [])[1],
-        "base64")).toString("utf8"));
+      const t5 = searchTable(zip5["search.js"].toString("utf8"));
       check("search: a delete takes that post out of the index and leaves the rest",
         !t5.posts.some((e) => e.id === "0002") && t5.posts.some((e) => e.id === "0001"),
         t5.posts.map((e) => e.id).join(" "));
@@ -4291,6 +4359,7 @@ async function main() {
     await sleep(2200);
     await evaluate(ZIP_CAPTURE);
     await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
     const zip6 = await capturePublish();
     // blog.html is in every rebuild bundle now: the manifest is written
     // again from the month files and carries a new stamp. index.html is
@@ -4300,12 +4369,8 @@ async function main() {
       !!zip6["robots.txt"] && !!zip6["blog.html"] && !zip6["index.html"],
       zip6 ? Object.keys(zip6).sort().join(", ") : "no zip");
     if (zip6) {
-      const t6 = JSON.parse(gunzipSync(Buffer.from(
-        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip6["search.js"].toString("utf8")) || [])[1],
-        "base64")).toString("utf8"));
-      const t6prev = JSON.parse(gunzipSync(Buffer.from(
-        (/window\.AMH_SEARCH = "([^"]*)";/.exec(readFileSync(join(bdir, "search.js"), "utf8")) || [])[1],
-        "base64")).toString("utf8"));
+      const t6 = searchTable(zip6["search.js"].toString("utf8"));
+      const t6prev = searchTable(readFileSync(join(bdir, "search.js"), "utf8"));
       check("search: a rebuild writes the index again from the sources, keeping the thumbnails",
         t6.posts.length === t6prev.posts.length &&
         JSON.stringify(t6.posts.map((e) => e.id + e.text)) ===
@@ -4333,6 +4398,7 @@ async function main() {
     await evaluate(`window.__warned = []; (function () { var ow = console.warn;
       console.warn = function (m) { window.__warned.push(String(m)); ow.apply(console, arguments); }; })()`);
     await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
     const zip8 = await capturePublish();
     const warned8 = await evaluate(`window.__warned`);
     const man8 = zip8 && zip8["blog.html"] ? zip8["blog.html"].toString("utf8") : "";
@@ -4521,6 +4587,7 @@ async function main() {
     await sleep(2200);
     await evaluate(ZIP_CAPTURE);
     await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
     const zip12 = await capturePublish();
     const mo12 = zip12 && zip12["blog/2606.html"] ? zip12["blog/2606.html"].toString("utf8") : "";
     check("rebuild: a month with both kinds regenerates both kinds, byte for byte",
@@ -4698,7 +4765,7 @@ async function main() {
       /Layer two/.test(again["blog.html"].toString("utf8")) &&
       !Object.keys(again).some((n) => /\.(jpg|png)$/.test(n)),
       again ? Object.keys(again).sort().join(", ") : "no zip");
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
 
     // LY2. an authored region is never replaced from the layer
     const authored = await evaluate(`(function () {
@@ -4742,6 +4809,109 @@ async function main() {
       tooBig.kept === false && tooBig.files === 0 && tooBig.over &&
       /over the .* the staging layer keeps/.test(tooBig.warned),
       JSON.stringify(tooBig).slice(0, 200));
+
+    // ============ THE FOLDER ROUTE ============
+    // A real folder pick needs a user gesture and opens a picker no headless
+    // browser can answer, so the two calls that touch the disk are stubbed.
+    // What is under test is everything else: that choosing the folder button
+    // sends the bundle to the writer and not to the download, that ORPHANS.txt
+    // is held back, and that the Done step describes what actually happened.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`(function () {
+      window.__wrote = null;
+      AMH.tool.repoWriteReady = function () { return false; };
+      AMH.tool.pickRepoWrite = function () { return Promise.resolve({ stub: true }); };
+      AMH.tool.writeRepo = function (files) {
+        window.__wrote = Object.keys(files).sort();
+        return Promise.resolve(window.__wrote);
+      };
+    })()`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260815'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'Folder route'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = 'Written into the folder.'`);
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await sleep(400);
+    const tookFolder = await pressRoute("Write into my repo folder");
+    let folderDone = null;
+    for (let i = 0; i < 40 && !(folderDone && folderDone.step === "done"); i++) {
+      await sleep(300);
+      folderDone = await evaluate(`(function () {
+        var box = document.querySelector('.bc-wizard');
+        if (!box) return { step: 'none' };
+        return {
+          step: box.getAttribute('data-step'),
+          body: box.querySelector('.bc-wiz__body').textContent,
+          checks: [...box.querySelectorAll('.bc-wiz__checks input')].map(function (c) { return c.getAttribute('data-check'); }),
+          wrote: window.__wrote,
+          zipped: window.__zipB64 !== null,
+          fell: !!box.querySelector('.bc-wiz__fell'),
+          route: (AMH.publish.record() || {}).route
+        };
+      })()`);
+    }
+    check("folder route: the chosen button sends the bundle to the writer, not the download",
+      tookFolder === true && folderDone.step === "done" && folderDone.route === "folder" &&
+      folderDone.zipped === false && folderDone.fell === false &&
+      (folderDone.wrote || []).indexOf("blog.html") !== -1 &&
+      (folderDone.wrote || []).indexOf("blog/2608.html") !== -1 &&
+      (folderDone.wrote || []).indexOf("search.js") !== -1,
+      JSON.stringify({ took: tookFolder, route: folderDone.route, zipped: folderDone.zipped,
+                       wrote: folderDone.wrote }).slice(0, 240));
+    // ORPHANS.txt is the zip's own file. Writing it into the repo would add a
+    // file to delete to the list of files to delete.
+    check("folder route: ORPHANS.txt is never written into the repo",
+      (folderDone.wrote || []).indexOf("ORPHANS.txt") === -1,
+      JSON.stringify(folderDone.wrote));
+    // and the reader's list loses the step that only a zip has
+    check("folder route: the done step drops the extract step and says the files are in place",
+      /written straight into your repo folder/.test(folderDone.body) &&
+      folderDone.checks.indexOf("extract") === -1 &&
+      folderDone.checks.indexOf("review") !== -1 &&
+      folderDone.checks.indexOf("commit") !== -1,
+      JSON.stringify(folderDone.checks));
+
+    // FR2. a refused folder must not lose the bundle: it falls back to the zip
+    // and the Done step says so, because the bundle is already built by then.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`(function () {
+      AMH.tool.repoWriteReady = function () { return false; };
+      AMH.tool.pickRepoWrite = function () {
+        return Promise.reject(Object.assign(new Error("BLG-E13 - not the repo root"), { code: "BLG-E13" }));
+      };
+    })()`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260816'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'Refused folder'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = 'Falls back to the zip.'`);
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await sleep(400);
+    await pressRoute("Write into my repo folder");
+    let refused = null;
+    for (let i = 0; i < 40 && !(refused && refused.step === "done"); i++) {
+      await sleep(300);
+      refused = await evaluate(`(function () {
+        var box = document.querySelector('.bc-wizard');
+        if (!box) return { step: 'none' };
+        return { step: box.getAttribute('data-step'),
+                 fell: (box.querySelector('.bc-wiz__fell') || {}).textContent || '',
+                 zipped: window.__zipB64 !== null,
+                 route: (AMH.publish.record() || {}).route,
+                 checks: [...box.querySelectorAll('.bc-wiz__checks input')].map(function (c) { return c.getAttribute('data-check'); }) };
+      })()`);
+    }
+    check("folder route: a refused folder falls back to the zip and says so",
+      refused.step === "done" && refused.route === "zip" && refused.zipped === true &&
+      /BLG-E13/.test(refused.fell) && /downloaded instead/.test(refused.fell) &&
+      refused.checks.indexOf("extract") !== -1,
+      JSON.stringify({ route: refused.route, zipped: refused.zipped,
+                       fell: refused.fell }).slice(0, 200));
 
     /* the layer is the tab's, so it is cleared before anything else runs */
     await evaluate(`AMH.tool.layerSave(null)`);
@@ -4788,7 +4958,7 @@ async function main() {
     await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Written from a file page.</p>'`);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
     await sleep(300);
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => /Build the bundle/.test(b.textContent)).click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Download a .zip').click()`);
     await sleep(1400);   /* the arrow's entrance */
   }
   async function dropInto(selector, name, text) {
