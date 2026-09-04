@@ -1731,6 +1731,15 @@
       "; stamp:" + stamp + "; hand edits are overwritten";
   }
 
+  /* The first letter of each word of the wordmark, so "AARON M. HARRIS"
+     gives "AMH". The month bar shows this instead of the full name on a
+     narrow screen. It is derived and not fixed, so a change to the
+     wordmark carries into the month files at the next publish. */
+  function bcMonogram(brand) {
+    return String(brand).split(/\s+/).filter(Boolean)
+      .map(function (w) { return w.charAt(0); }).join("").toUpperCase();
+  }
+
   /* meta is the site meta from bcSiteMeta; prev is the month before this
      one, or null for the first month. The chain runs backward only:
      reading runs back in time, so a month needs to know only the month
@@ -1779,16 +1788,30 @@
       "</head>\n" +
       '<body class="blog-month">\n' +
       '  <div class="blog-wrap">\n' +
-      /* The same bar the stream has, so a reader who lands here from a
-         search engine sees the blog and not a plainer copy of it. Three
-         links, three jobs: the brand is the wordmark and goes home, the
-         picker jumps to another month, and the stream link is the way
-         back to where the reader came from. */
+      /* The heading, which scrolls away, and then the bar, which sticks.
+         blog.html has the same two above its stream, so a reader who
+         lands here from a search engine sees the blog and not a plainer
+         copy of it.
+
+         The month name and the stream link sit in the heading and not in
+         the bar. The bar holds one row at every width, and a 600px
+         measure cannot fit five items on one row. */
+      '    <div class="bm-top">\n' +
+      '      <span class="eyebrow">' + (meta.eyebrow || "Blog") + "</span>\n" +
+      '      <h1 class="bm-top__month">' + mt + "</h1>\n" +
+      '      <a class="textlink bm-top__stream" href="../blog.html?b=' + yymm +
+      '">Read in the full stream</a>\n' +
+      "    </div>\n" +
+      /* Three items, three jobs, the same three blog.html carries: the
+         wordmark goes home, the find slot takes the search pill, and the
+         picker jumps to another month. The monogram replaces the
+         wordmark on a narrow screen, where the full name would squeeze
+         the search box under its floor. */
       '    <div class="bs-bar" id="blogBar">\n' +
-      '      <a class="bs-bar__name" href="../index.html">' + brand + "</a>\n" +
-      '      <h1 class="bs-bar__label">' + mt + "</h1>\n" +
+      '      <a class="bs-bar__name" href="../index.html">' +
+      '<span class="bs-bar__full">' + brand + "</span>" +
+      '<span class="bs-bar__short">' + bcMonogram(brand) + "</span></a>\n" +
       '      <div class="bs-bar__find" id="blogFind"></div>\n' +
-      '      <a class="textlink bs-bar__stream" href="../blog.html?b=' + yymm + '">Read in the full stream</a>\n' +
       '      <select class="bs-bar__month" id="blogMonth" aria-label="Jump to a month"></select>\n' +
       "    </div>\n" +
       "    <main>\n" +
@@ -2412,7 +2435,11 @@
     var brand = (/class="brand__title full">([^<]*)</.exec(src) ||
       [null, "AARON M. HARRIS"])[1];
     bcBrand = brand;
-    return { base: base, fontHref: fontHref, brand: brand };
+    /* The blog eyebrow, read for the same reason as the brand. A month
+       page opens with it, and it is editable copy on blog.html. */
+    var eyebrow = (/\[edit:blog-eyebrow\]-->\s*<span class="eyebrow">([^<]*)</.exec(src) ||
+      [null, "Blog"])[1];
+    return { base: base, fontHref: fontHref, brand: brand, eyebrow: eyebrow };
   }
   function bcUniqueMonths(entries) {
     var months = [];

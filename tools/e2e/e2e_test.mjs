@@ -3191,18 +3191,37 @@ async function main() {
     const brand = /class="brand__title full">([^<]*)</.exec(
       readFileSync(join(REPO, "index.html"), "utf-8"))[1];
     check("month page carries the site wordmark, not a copy of the words",
-      month.includes('<a class="bs-bar__name" href="../index.html">' + brand + "</a>"),
-      (/bs-bar__name[^>]*>([^<]*)</.exec(month) || [])[1] + " vs " + brand);
+      month.includes('<span class="bs-bar__full">' + brand + "</span>"),
+      (/bs-bar__full">([^<]*)</.exec(month) || [])[1] + " vs " + brand);
+    // The monogram is derived from that wordmark, so a rename reaches it too.
+    check("month page carries the wordmark's monogram for a narrow screen",
+      month.includes('<span class="bs-bar__short">' +
+        brand.split(/\s+/).filter(Boolean).map((w) => w[0]).join("").toUpperCase() + "</span>"),
+      (/bs-bar__short">([^<]*)</.exec(month) || [])[1]);
     check("month page links back to the blog page, brand still home",
       month.includes('href="../blog.html?b=2607"') && month.includes('href="../index.html"'),
-      (/bs-bar__stream" href="([^"]+)"/.exec(month) || [])[1]);
+      (/bm-top__stream" href="([^"]+)"/.exec(month) || [])[1]);
     // MP1. the month page is the stream's own design: the same bar, the
     // same post markup with "p" ids, and its own month list for the picker
     check("month page: the same bar as the stream, with the find slot and the picker",
       /<div class="bs-bar" id="blogBar">/.test(month) && month.includes('id="blogFind"') &&
-      month.includes('<select class="bs-bar__month" id="blogMonth"') &&
-      month.includes('<h1 class="bs-bar__label">July 2026</h1>'),
+      month.includes('<select class="bs-bar__month" id="blogMonth"'),
       (month.match(/<div class="bs-bar"[\s\S]*?<\/div>/) || [""])[0].replace(/\s+/g, " ").slice(0, 200));
+    // MP1b. the bar holds three items and no more. The month name and the
+    // stream link live in the heading above it, because a 600px measure
+    // cannot fit five items on one row and the bar then wraps at every width.
+    const barHTML = (month.match(/<div class="bs-bar"[\s\S]*?\n    <\/div>/) || [""])[0];
+    check("month page: the bar holds three items, and the month heading holds the rest",
+      !/bs-bar__label/.test(barHTML) && !/bs-bar__stream/.test(barHTML) &&
+      /<div class="bm-top">/.test(month) &&
+      month.includes('<h1 class="bm-top__month">July 2026</h1>') &&
+      // the eyebrow is read from the blog page's own marked region, like the
+      // wordmark, so a rename in the editor reaches every month file
+      month.includes('<span class="eyebrow">' +
+        /\[edit:blog-eyebrow\]-->\s*<span class="eyebrow">([^<]*)</
+          .exec(readFileSync(join(REPO, "blog.html"), "utf-8"))[1] + "</span>") &&
+      month.indexOf('class="bm-top"') < month.indexOf('class="bs-bar"'),
+      barHTML.replace(/\s+/g, " ").slice(0, 160));
     check("month page: the posts are the stream's markup with p ids, and keep their source",
       /<article class="bs-post" id="p0001" data-id="0001" data-date="260711"/.test(month) &&
       month.includes('<a class="bs-post__when" href="#p0001">') &&
@@ -3491,6 +3510,81 @@ async function main() {
       /^blog-month(?: ga-[dm]-\w+| loaded)*$/.test(monthPage.cls) &&
       monthPage.figs === 2 && monthPage.brand,
       JSON.stringify(monthPage));
+
+    // MB1. The two surfaces are one column. A post used to be 504px wide on
+    // its own page against the stream's 550px, because the month wrapper
+    // took its gutter out of the 600px measure instead of adding it on.
+    // Rows are counted by vertical overlap, not by matching tops: the bar
+    // centres its items, so a short span and a taller select share a row
+    // without sharing a top edge. Two items are on one row when their
+    // vertical ranges meet.
+    const COLUMN = `(function () {
+      var post = document.querySelector('.bs-post');
+      var bar = document.getElementById('blogBar');
+      var boxes = Array.prototype.map.call(bar.children, function (c) {
+        return c.getBoundingClientRect();
+      }).sort(function (a, b) { return a.top - b.top; });
+      var rows = 0, edge = -Infinity;
+      boxes.forEach(function (b) {
+        if (b.top >= edge) rows++;
+        edge = Math.max(edge, b.bottom);
+      });
+      var input = document.querySelector('.bs-find__pill input');
+      return { post: Math.round(post.getBoundingClientRect().width),
+               barH: Math.round(bar.getBoundingClientRect().height),
+               rows: rows,
+               input: input ? Math.round(input.getBoundingClientRect().width) : 0 };
+    })()`;
+    for (const [w, mobile] of [[1280, false], [768, false], [390, true]]) {
+      await send("Emulation.setDeviceMetricsOverride",
+        { width: w, height: 900, deviceScaleFactor: 1, mobile });
+      await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
+      await sleep(1500);
+      const onStream = await evaluate(COLUMN);
+      await send("Page.navigate", { url: "http://127.0.0.1:8124/blog/2607.html" });
+      await sleep(1500);
+      const onMonth = await evaluate(COLUMN);
+      check("month page @" + w + ": a post is the same width as it is in the stream",
+        Math.abs(onStream.post - onMonth.post) <= 1,
+        "stream " + onStream.post + " vs month " + onMonth.post);
+      // MB2. one row, at every width. Five items in the bar wrapped at every
+      // width from 390 to 1600, which is what made the page look scrunched.
+      // Both bars are checked: the search box's floor is wide enough to push
+      // the picker onto a second row, and the stream's bar is the one with
+      // the least slack, because its picker carries a count.
+      check("month page @" + w + ": the bar holds one row, and so does the stream's",
+        onMonth.rows === 1 && onStream.rows === 1,
+        "stream " + onStream.barH + "px/" + onStream.rows + " row vs month " +
+        onMonth.barH + "px/" + onMonth.rows + " row");
+      // MB3. the search box is the only item that can give, so it needs a floor
+      check("month page @" + w + ": the search box stays wide enough to read",
+        onMonth.input >= 60, onMonth.input + "px of input");
+    }
+    await send("Emulation.clearDeviceMetricsOverride");
+
+    // MB4. The loop. "Read in the full stream" on a month page points at
+    // blog.html?b=YYMM. From disk that used to bounce the reader straight
+    // back to the month page they had just left, because blogGoMonth asked
+    // the protocol before it asked whether the month was already on the
+    // page. This runs over file:, which is the only place the loop closed.
+    const monthFile = pathToFileURL(join(bdir, "blog", "2607.html")).href;
+    await send("Page.navigate", { url: monthFile });
+    await sleep(2000);
+    const streamLink = await evaluate(
+      `(document.querySelector('.bm-top__stream') || {}).href || ''`);
+    await evaluate(`document.querySelector('.bm-top__stream').click()`);
+    await sleep(2200);
+    const landed = await evaluate(`({
+      path: location.pathname,
+      query: location.search,
+      stream: !!document.getElementById('blogStream'),
+      post: !!document.getElementById('s0001')
+    })`);
+    check("month page from disk: the stream link reaches the stream and stays there",
+      /blog\.html$/.test(landed.path) && !/blog\/2607\.html$/.test(landed.path) &&
+      landed.stream === true && landed.post === true,
+      "from " + streamLink.split("/").slice(-2).join("/") + " to " +
+      landed.path.split("/").pop() + landed.query);
   }
 
   // ============ PHASE 2 LIFECYCLE TESTS (against the served bundle) ============

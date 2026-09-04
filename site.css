@@ -1879,13 +1879,27 @@ ul.dd-points li::before {
 
 /* THE COLUMN. One measure, centred, with hairline sides on a wide
    screen so the stream reads as a column and not as a page of text.
-   A month page uses the same wrapper, so the two are one design. */
-.blog-wrap,
-.bs-stream {
-  width: 100%; max-width: 600px; margin-inline: auto;
+   A month page uses the same two boxes, so the two are one design.
+
+   The measure is 600px, and it is the box the bar sits in. The posts
+   sit in a second box inside it that adds the hairline sides and their
+   padding, which makes a post 550px on a wide screen.
+
+   A month page adds its gutter OUTSIDE the measure. Taking the gutter
+   out of the measure instead made a month page 504px wide against the
+   stream's 550px, so the same post was narrower on its own page and the
+   bar had 96px less room than the bar it copies. */
+/* the outer box, which is the measure, and which the bar sits in */
+.bs-stream { width: 100%; max-width: 600px; margin-inline: auto; }
+.blog-wrap {
+  width: 100%; margin-inline: auto;
+  max-width: calc(600px + var(--gutter) * 2);
+  padding-inline: var(--gutter);
+  padding-block: var(--gutter) 0;
 }
-.blog-wrap { padding-inline: var(--gutter); }
-.bs-stream {
+/* the inner box, which holds the posts */
+.bs-stream,
+.blog-month main {
   margin-top: 1.2rem;
   border-inline: 1px solid var(--line-soft);
   padding-inline: clamp(0px, 3vw, 1.5rem);
@@ -1915,12 +1929,33 @@ ul.dd-points li::before {
   -webkit-backdrop-filter: saturate(140%) blur(12px);
 }
 .blog-month .bs-bar { top: 0; margin-top: 0; }
-.bs-bar__name { font-weight: 800; letter-spacing: .04em; font-size: .9rem; color: var(--text); }
+.bs-bar__name {
+  flex: none; font-weight: 800; letter-spacing: .04em; font-size: .9rem; color: var(--text);
+}
 a.bs-bar__name:hover { color: var(--accent-bright); }
+/* The wordmark is the widest fixed item in the bar. Below the width at
+   which the search box would be squeezed under its floor, the monogram
+   replaces it and the bar stays on one row. */
+.bs-bar__short { display: none; }
+/* The two widest items give way together on a phone, so both bars stay on
+   one row. Alone, neither saves enough: the search box has a floor, and
+   what is left over must still hold the picker's longest month. */
+@media (max-width: 32rem) {
+  .bs-bar__full { display: none; }
+  .bs-bar__short { display: inline; }
+  .bs-bar__month { max-width: 8rem; font-size: .7rem; padding-inline: .5rem; }
+}
+
+/* CARRY-OVER. A month file written before the bar became three items
+   holds its month name and its stream link inside the bar. Both moved
+   to the heading block above it. These two rules keep such a file
+   readable until it is written again. Remove them with the .blog-post
+   rules, once every month file has been rebuilt. */
 .bs-bar__label {
   margin: 0; font-size: .82rem; font-weight: 600; letter-spacing: .06em; color: var(--muted);
 }
 .bs-bar__stream { font-size: .8rem; }
+
 .bs-bar__month {
   flex: none; background: var(--bg-deep); color: var(--muted);
   border: 1px solid var(--line); border-radius: 999px;
@@ -1929,8 +1964,25 @@ a.bs-bar__name:hover { color: var(--accent-bright); }
 .bs-bar__month:hover { color: var(--text); border-color: var(--accent); }
 .bs-bar__month:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* THE SEARCH PILL, in the bar's find slot, and the hits under it. */
-.bs-find { position: relative; flex: 1; min-width: 0; display: flex; justify-content: flex-end; }
+/* THE MONTH HEADING, above the bar on a month page only. It carries the
+   eyebrow, the month as the page's h1, and the way back to the stream.
+   These sit here rather than in the bar because the bar must hold one
+   row at every width, and five items in a 600px measure cannot.
+   It mirrors the eyebrow and heading blog.html puts above its own bar. */
+.bm-top { margin-bottom: 1.2rem; }
+.bm-top__month {
+  margin: .5rem 0 0; font-size: clamp(1.5rem, 4vw, 2rem); line-height: 1.1;
+}
+.bm-top__stream { display: inline-block; margin-top: .5rem; font-size: .85rem; }
+
+/* THE SEARCH PILL, in the bar's find slot, and the hits under it.
+   The floor is what stops the pill collapsing: it is the only item in
+   the bar that can give, so without a floor it shrank to an input 25px
+   wide on a month page and the reader could not see what they typed. */
+.bs-find {
+  position: relative; flex: 1 1 7.5rem; min-width: 7.5rem;
+  display: flex; justify-content: flex-end;
+}
 .bs-find__pill {
   display: flex; align-items: center; gap: .4rem;
   width: min(240px, 100%); padding: .28rem .7rem;

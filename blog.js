@@ -406,9 +406,10 @@
       return ok ? blogLoadUntil(yymm) : false;
     });
   }
-  /* The picker's three cases. From disk the month file is a page and a
-     navigation is what works; on the live site the month comes to the
-     reader. "All months" is the top of the stream. */
+  /* The picker's four cases, in the order they are asked. "All months"
+     is the top of the stream. A month already on the page is a scroll. A
+     month that is not is fetched over http, and from disk is the month
+     file itself, because a page opened from disk cannot fetch. */
   function blogGoMonth(yymm) {
     /* On a month page there is no stream to load into: every choice is a
        navigation, and the month files are siblings of this one. */
@@ -420,6 +421,14 @@
       blogStream.scrollIntoView({ block: "start" });
       return;
     }
+    /* Ask the page before asking the protocol. The stream always carries
+       the newest month, and a chain hop may have brought older ones in,
+       so the month is often already here. This test must come first: a
+       reader who follows "Read in the full stream" from blog/2609.html
+       arrives at blog.html?b=2609, and from disk a protocol test alone
+       would send them straight back to the month page they just left. */
+    var here = blogFirstOf(yymm);
+    if (here) { here.scrollIntoView({ block: "start" }); return; }
     if (location.protocol === "file:") {
       location.href = "blog/" + yymm + ".html";
       return;
