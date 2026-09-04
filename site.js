@@ -57,11 +57,11 @@
      Runs before anything else here, and only on a page that has no blog feed
      of its own, so blog.html never redirects to itself. */
   (function () {
-    /* The blog page is the one with the index container. Test for it before
+    /* The blog page is the one with the stream container. Test for it before
        redirecting: a page that IS the blog and fails this test sends itself
        to itself, forever. Rename that container and this has to change with
        it, which is why the id is named here and nowhere else. */
-    if (doc.getElementById("blogIndex")) return;
+    if (doc.getElementById("blogStream")) return;
     var m = /[?&]b=([^&]*)/.exec(location.search);
     if (!m) return;
     location.replace("blog.html?b=" + m[1]);
@@ -86,12 +86,25 @@
      read below 100% even at the very top and wrongly flip the header dark
      before any scrolling. The progress bar already runs every scroll, so doing
      this in the same rAF-throttled handler costs nothing extra. */
+  /* A month page loads this file for requestTick and the reveal, and has
+     none of the site chrome: no header, no progress bar, no nav. Every
+     reference to the chrome below is guarded, so the file is inert there
+     and still exports AMH.site. */
   var header = doc.getElementById("header");
   var progress = doc.getElementById("progress");
   var heroPortrait = doc.querySelector(".hero__portrait");
   var ticking = false;
 
-  function setScrolled(on) { header.classList.toggle("scrolled", on); }
+  /* The header is shorter once it takes its scrolled look, and the blog
+     page's bar sticks under it at --header-h. Republish the height when
+     the state flips, and again when the padding transition ends, or a
+     seam of page content shows between the two bars. */
+  var scrolledNow = null;
+  function setScrolled(on) {
+    if (!header) return;
+    header.classList.toggle("scrolled", on);
+    if (on !== scrolledNow) { scrolledNow = on; setHeaderH(); }
+  }
 
   /* Desktop reveals the header much earlier than mobile: the desktop hero
      portrait is large and off to the side, so we don't wait for much of it
@@ -104,7 +117,7 @@
     if (!heroPortrait) return null;
     var r = heroPortrait.getBoundingClientRect();
     if (r.height <= 0) return null;
-    var top = header.offsetHeight || 56;
+    var top = (header ? header.offsetHeight : 0) || 56;
     var shown = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, top);
     return shown / r.height;
   }
@@ -116,7 +129,7 @@
     setScrolled(ratio === null ? y > 24 : ratio < revealThreshold());
     var h = doc.documentElement.scrollHeight - window.innerHeight;
     var p = h > 0 ? y / h : 0;
-    progress.style.transform = "scaleX(" + p + ")";
+    if (progress) progress.style.transform = "scaleX(" + p + ")";
     ticking = false;
   }
   function requestTick() {
@@ -162,13 +175,20 @@
      breakpoint and with the scrolled state. Publish it as a custom
      property so the CSS does not have to guess. */
   function setHeaderH() {
+    if (!header) return;
     doc.documentElement.style.setProperty("--header-h", header.offsetHeight + "px");
   }
   setHeaderH();
   window.addEventListener("resize", setHeaderH);
   window.addEventListener("load", setHeaderH);
+  if (header) header.addEventListener("transitionend", function (e) {
+    if (e.target === header && /^padding/.test(e.propertyName)) setHeaderH();
+  });
 
+  /* the drawer and its links exist only on a page with the site chrome */
+  var hasNav = !!(toggle && nav && overlay);
   function setNav(open) {
+    if (!hasNav) return;
     if (open) setHeaderH();
     nav.classList.toggle("open", open);
     toggle.classList.toggle("open", open);
@@ -177,12 +197,12 @@
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
   }
   function closeNav() { setNav(false); }
-  toggle.addEventListener("click", function () {
+  if (hasNav) toggle.addEventListener("click", function () {
     setNav(!nav.classList.contains("open"));
   });
-  overlay.addEventListener("click", closeNav);
+  if (hasNav) overlay.addEventListener("click", closeNav);
 
-  nav.addEventListener("click", function (e) {
+  if (hasNav) nav.addEventListener("click", function (e) {
     var a = e.target.closest("a");
     if (!a) return;
     var href = a.getAttribute("href");
@@ -219,7 +239,7 @@
   /* Mark the nav item that names this page. It cannot be authored, because
      the chrome is the same bytes everywhere; a link with a fragment names a
      section rather than a page, so only a bare file name counts. */
-  Array.prototype.forEach.call(nav.querySelectorAll("a"), function (a) {
+  Array.prototype.forEach.call(hasNav ? nav.querySelectorAll("a") : [], function (a) {
     if (a.getAttribute("href") === HERE) a.setAttribute("aria-current", "page");
   });
 
@@ -249,7 +269,7 @@
     var frag = ownFragment(a.getAttribute("href"));
     return frag.length > 1 ? frag : "";
   }
-  var navLinks = Array.prototype.slice.call(nav.querySelectorAll("a"))
+  var navLinks = Array.prototype.slice.call(hasNav ? nav.querySelectorAll("a") : [])
     .filter(navFragment);
   var sections = navLinks
     .map(function (a) { return doc.querySelector(navFragment(a)); })

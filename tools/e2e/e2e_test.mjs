@@ -6,7 +6,8 @@ import { spawn } from "node:child_process";
 import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SERVER_PORT = 8123;
@@ -26,7 +27,7 @@ function check(name, ok, detail) {
 // emptied without touching the site. Everything else is linked through.
 const SERVE = mkdtempSync(join(tmpdir(), "ced-serve-"));
 for (const f of ["index.html", "gallery.html", "site.css", "site.js", "work.js",
-                 "blog.js", "gallery.js", "tool.js", "publish.js",
+                 "blog.js", "markdown.js", "gallery.js", "tool.js", "publish.js",
                  "aaron-portfolio-portrait-transparent.png"]) {
   try { copyFileSync(join(REPO, f), join(SERVE, f)); } catch {}
 }
@@ -135,7 +136,7 @@ const EXPECTED_REGIONS = {
   ],
   "blog.html": [
     "brand-title", "brand-sub", "nav-work", "nav-gallery", "nav-blog",
-    "nav-about", "nav-contact", "blog-eyebrow", "blog-h2", "blog-index",
+    "nav-about", "nav-contact", "blog-eyebrow", "blog-h2", "blog-stream",
     "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
     "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar",
     "blog-manifest",
@@ -156,7 +157,7 @@ const EXPECTED_REGIONS = {
 // blog page and nowhere else. A wrong order fails here, not in the browser.
 const EXPECTED_SCRIPTS = {
   "index.html": ["site.js", "work.js", "tool.js"],
-  "blog.html": ["site.js", "work.js", "blog.js", "tool.js", "publish.js"],
+  "blog.html": ["site.js", "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"],
   "gallery.html": ["site.js", "work.js", "tool.js", "gallery.js"],
 };
 
@@ -172,8 +173,8 @@ function emptyBlogPage(src) {
     /(<script id="blogManifest"[^>]*>)[\s\S]*?(<\/script>)/,
     '$1\nnext-post:0001\nnext-img:0001\n\n$2');
   return man.replace(
-    /(<!--\[edit:blog-index\]-->)[\s\S]*?(<!--\[\/edit:blog-index\]-->)/,
-    '$1\n        <div class="bs-index" id="blogIndex" data-ced="generated">\n' +
+    /(<!--\[edit:blog-stream\]-->)[\s\S]*?(<!--\[\/edit:blog-stream\]-->)/,
+    '$1\n        <div class="bs-stream" id="blogStream" data-ced="generated">\n' +
     '          <p class="bs-note">No posts yet - check back soon.</p>\n' +
     '        </div>\n        $2');
 }
@@ -1072,10 +1073,10 @@ async function main() {
   const served = await evaluate(`(() => {
     const m = document.getElementById('blogManifest');
     return { manifest: m ? m.textContent.trim() : 'missing',
-             cards: document.querySelectorAll('.bs-card').length };
+             posts: document.querySelectorAll('.bs-post').length };
   })()`);
   check("harness: the blog page under test is the suite's own empty copy",
-    /^next-post:0001\s+next-img:0001$/.test(served.manifest) && served.cards === 0,
+    /^next-post:0001\s+next-img:0001$/.test(served.manifest) && served.posts === 0,
     JSON.stringify(served));
 
   // C-nav. A shared header means a nav link names its page. site.js has to
@@ -1805,8 +1806,32 @@ async function main() {
   }
 
   // ---- the file hand-off, the path a page opened from disk takes ----
+  // A1. the first hand-off dialog of a page load points at the folder button
+  await evaluate(`window.__handoff = AMH.tool.handOff("index.html", new Error("fetch refused"))`);
+  await sleep(1400);
+  const firstAsk = await evaluate(`(function () {
+    var pt = document.querySelector('.ced-point');
+    if (!pt) return { arrow: false };
+    var btn = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return /repo folder/.test(b.textContent); });
+    var b = btn.getBoundingClientRect();
+    var curve = pt.querySelector('.ced-point__curve');
+    var tipLocal = curve.getPointAtLength(curve.getTotalLength());
+    var tip = tipLocal.matrixTransform(curve.getScreenCTM());
+    var lbl = pt.querySelector('.ced-point__label').getBoundingClientRect();
+    return { arrow: true, on: pt.classList.contains('is-on'),
+             dx: Math.round(tip.x - (b.left + b.width / 2)), dy: Math.round(tip.y - b.bottom),
+             label: pt.querySelector('.ced-point__label').textContent,
+             inView: lbl.left >= 0 && lbl.right <= innerWidth && lbl.top >= 0 && lbl.bottom <= innerHeight,
+             offset: getComputedStyle(curve).strokeDashoffset };
+  })()`);
+  check("arrow: the first hand-off points at \"Use my repo folder\", tip under its centre, label on screen",
+    firstAsk.arrow && firstAsk.on && Math.abs(firstAsk.dx) <= 2 && firstAsk.dy >= 4 && firstAsk.dy <= 9 &&
+    firstAsk.label === "Click and choose root of repo folder!" && firstAsk.inView &&
+    parseFloat(firstAsk.offset) === 0,
+    JSON.stringify(firstAsk));
+
   const wrongName = await evaluate(`(function () {
-    window.__handoff = AMH.tool.handOff("index.html", new Error("fetch refused"));
     var zone = document.querySelector('.ced-handoff__zone');
     if (!zone) return "no zone";
     var dt = new DataTransfer();
@@ -1833,6 +1858,137 @@ async function main() {
   check("hand-off: the right file is read with the File API and closes the prompt",
     handed && handed.text === "<html>HANDED OVER</html>" && handed.gone === true,
     JSON.stringify(handed).slice(0, 90));
+  const leaving = await evaluate(`(function () {
+    var p = document.querySelector('.ced-point');
+    return !p || p.classList.contains('is-off'); })()`);
+  await sleep(720);
+  check("arrow: it leaves with the dialog, through its exit",
+    leaving && await evaluate(`!document.querySelector('.ced-point')`));
+
+  // A2. placement and geometry, on targets the page has. The head is turned
+  // to the curve's direction at the tip, and the label never leaves the screen.
+  const geo = await evaluate(`(function () {
+    function measure(target) {
+      AMH.tool.point(target, "Click here first");
+      var pt = document.querySelector('.ced-point');
+      var curve = pt.querySelector('.ced-point__curve');
+      var L = curve.getTotalLength();
+      var m = curve.getScreenCTM();
+      var tip = curve.getPointAtLength(L).matrixTransform(m);
+      var near = curve.getPointAtLength(L - 2).matrixTransform(m);
+      var want = Math.atan2(tip.y - near.y, tip.x - near.x) * 180 / Math.PI;
+      var rot = parseFloat(/rotate\\(([-\\d.]+)/.exec(pt.querySelector('.ced-point__head').getAttribute('transform'))[1]);
+      var lbl = pt.querySelector('.ced-point__label').getBoundingClientRect();
+      var b = target.getBoundingClientRect();
+      var side = Math.abs(tip.y - b.bottom - 6) < 3 ? "below" : Math.abs(tip.y - b.top + 6) < 3 ? "above"
+        : tip.x > b.right ? "right" : "left";
+      var diff = Math.abs(((rot - want) + 540) % 360 - 180);
+      // where the head is DRAWN, not where its attribute says: a CSS
+      // transform once overrode the attribute and left it at the box origin
+      var hb = pt.querySelector('.ced-point__head').getBoundingClientRect();
+      var headDist = Math.hypot(hb.left + hb.width / 2 - tip.x, hb.top + hb.height / 2 - tip.y);
+      // the words must not touch the stroke or the target: sample the curve
+      // every 3px and look for a sample inside the label's box, grown by 3px
+      var hit = 0;
+      for (var q = 0; q <= L; q += 3) {
+        var sp = curve.getPointAtLength(q).matrixTransform(m);
+        if (sp.x >= lbl.left - 3 && sp.x <= lbl.right + 3 && sp.y >= lbl.top - 3 && sp.y <= lbl.bottom + 3) hit++;
+      }
+      var overTarget = !(lbl.right < b.left || lbl.left > b.right || lbl.bottom < b.top || lbl.top > b.bottom);
+      return { side: side, headOff: Math.round(diff * 10) / 10, headDist: Math.round(headDist),
+               strokeHits: hit, overTarget: overTarget,
+               inView: lbl.left >= 0 && lbl.right <= innerWidth && lbl.top >= 0 && lbl.bottom <= innerHeight,
+               tipDx: Math.round(tip.x - (b.left + b.width / 2)) };
+    }
+    var out = {};
+    // a target near the right edge: the tail must swing to the open side
+    var edge = document.createElement('button');
+    edge.textContent = 'edge'; edge.style.cssText = 'position:fixed;right:6px;top:200px;';
+    document.body.appendChild(edge);
+    out.edge = measure(edge);
+    // a target at the bottom of the screen: no room below, so a side
+    var low = document.createElement('button');
+    low.textContent = 'low'; low.style.cssText = 'position:fixed;left:40%;bottom:4px;';
+    document.body.appendChild(low);
+    out.low = measure(low);
+    // a plain target with room below
+    var mid = document.createElement('button');
+    mid.textContent = 'mid'; mid.style.cssText = 'position:fixed;left:40%;top:200px;';
+    document.body.appendChild(mid);
+    out.mid = measure(mid);
+    AMH.tool.unpoint(true);
+    edge.remove(); low.remove(); mid.remove();
+    out.gone = !document.querySelector('.ced-point');
+    return out;
+  })()`);
+  check("arrow: below when there is room, mirrored at an edge, a side when there is none",
+    geo.mid.side === "below" && geo.edge.side === "below" && geo.edge.inView &&
+    (geo.low.side === "right" || geo.low.side === "left") && Math.abs(geo.mid.tipDx) <= 2,
+    JSON.stringify(geo));
+  check("arrow: the head is turned to the curve's own direction at the tip",
+    geo.mid.headOff <= 2 && geo.edge.headOff <= 2 && geo.low.headOff <= 2,
+    JSON.stringify({ mid: geo.mid.headOff, edge: geo.edge.headOff, low: geo.low.headOff }));
+  check("arrow: the head is drawn at the tip, not at the box origin",
+    geo.mid.headDist <= 14 && geo.edge.headDist <= 14 && geo.low.headDist <= 14,
+    JSON.stringify({ mid: geo.mid.headDist, edge: geo.edge.headDist, low: geo.low.headDist }));
+  check("arrow: the label stays on screen in every placement",
+    geo.mid.inView && geo.edge.inView && geo.low.inView && geo.gone, JSON.stringify(geo));
+  check("arrow: the words never touch the stroke or cover the target",
+    geo.mid.strokeHits === 0 && geo.edge.strokeHits === 0 && geo.low.strokeHits === 0 &&
+    !geo.mid.overTarget && !geo.edge.overTarget && !geo.low.overTarget,
+    JSON.stringify({ mid: [geo.mid.strokeHits, geo.mid.overTarget], edge: [geo.edge.strokeHits, geo.edge.overTarget],
+                     low: [geo.low.strokeHits, geo.low.overTarget] }));
+
+  // A4. the entrance is staged: head, then the stroke from the tip back to
+  // the tail, then the label written out under a clip that opens
+  const staged = await evaluate(`(function () {
+    var b = document.createElement('button');
+    b.textContent = 'stage'; b.style.cssText = 'position:fixed;left:40%;top:220px;';
+    document.body.appendChild(b);
+    AMH.tool.point(b, "Click here first");
+    var pt = document.querySelector('.ced-point');
+    var curve = pt.querySelector('.ced-point__curve'), head = pt.querySelector('.ced-point__head');
+    var lbl = pt.querySelector('.ced-point__label');
+    var L = curve.getTotalLength();
+    function snap() {
+      return { head: parseFloat(getComputedStyle(head).opacity),
+               drawn: 1 - Math.abs(parseFloat(getComputedStyle(curve).strokeDashoffset)) / L,
+               clip: getComputedStyle(lbl).clipPath };
+    }
+    var out = { len: Math.round(L), t0: snap() };
+    return new Promise(function (res) {
+      setTimeout(function () { out.t1 = snap(); }, 120);
+      setTimeout(function () { out.t2 = snap(); }, 480);
+      setTimeout(function () { out.t3 = snap(); b.remove(); res(out); }, 1400);
+    });
+  })()`, { awaitPromise: true });
+  // Chrome serializes the open inset as its two-value shorthand
+  const clipOpen = /inset\(-30% -6%( -30% -6%)?\)/.test(staged.t3.clip);
+  const clipShut = /inset\(-30% 100% -30% -6%\)/.test(staged.t0.clip);
+  check("arrow: head first, then the stroke draws back to the tail, then the label writes out",
+    staged.t0.head === 0 && staged.t0.drawn <= 0.02 && clipShut &&
+    staged.t1.head > 0.3 && staged.t1.drawn < 0.5 &&
+    staged.t2.head === 1 && staged.t2.drawn > 0.6 && !/-6% -30% -6%\)/.test(staged.t2.clip) &&
+    staged.t3.head === 1 && staged.t3.drawn > 0.999 && clipOpen,
+    JSON.stringify(staged));
+
+  // A3. a click on the target takes the arrow away, through its exit
+  const clicked = await evaluate(`(function () {
+    var b = document.createElement('button');
+    b.textContent = 'go'; b.style.cssText = 'position:fixed;left:40%;top:300px;';
+    document.body.appendChild(b);
+    AMH.tool.point(b, "Now this");
+    var had = !!document.querySelector('.ced-point');
+    b.click();
+    var leaving = document.querySelector('.ced-point');
+    return new Promise(function (res) { setTimeout(function () {
+      res({ had: had, leavingOn: leaving ? leaving.classList.contains('is-on') : null,
+            gone: !document.querySelector('.ced-point') });
+      b.remove();
+    }, 800); });
+  })()`, { awaitPromise: true });
+  check("arrow: a click on the target takes it away, and it is gone after its exit",
+    clicked.had && clicked.leavingOn === false && clicked.gone, JSON.stringify(clicked));
 
   // W1. the fault that made a real drag look frozen: a drop that carries no
   // file used to return with no message at all.
@@ -2133,7 +2289,7 @@ async function main() {
     brand: (document.querySelector('.brand__title') || {}).textContent,
     endbar: !!document.querySelector('.endbar'),
     note: (document.querySelector('.bs-note') || {}).textContent,
-    feed: !!document.getElementById('blogIndex'),
+    feed: !!document.getElementById('blogStream'),
     current: (document.querySelector('.nav__links a[aria-current="page"]') || {}).textContent,
     workHref: document.querySelector('.nav__links a').getAttribute('href'),
     edit: typeof window.edit,
@@ -2261,7 +2417,7 @@ async function main() {
   const homeClean = await evaluate(`({
     engine: typeof (window.AMH && window.AMH.blog),
     takeover: document.body.classList.contains('blog-open'),
-    feed: !!document.getElementById('blogIndex'),
+    feed: !!document.getElementById('blogStream'),
     manifest: !!document.getElementById('blogManifest'),
   })`);
   check("home page carries no blog machinery",
@@ -2280,7 +2436,7 @@ async function main() {
   await sleep(1800);
   const degrade = await evaluate(`({
     note: document.querySelector('.bs-note')?.textContent || '',
-    feed: !!document.getElementById('blogIndex'),
+    feed: !!document.getElementById('blogStream'),
   })`);
   check("blog page with an empty manifest shows the no-posts note",
     degrade.feed && degrade.note.includes("No posts yet"), JSON.stringify(degrade));
@@ -2317,65 +2473,167 @@ async function main() {
     composerUI.panel && composerUI.tabs === 3 && composerUI.position === "fixed" &&
     composerUI.write === "flex" && composerUI.images === "none",
     JSON.stringify(composerUI));
-  // The tab order: date, title, the three view tabs, the body, then the
-  // buttons at the bottom. The twelve formatting buttons are not stops.
-  const tabOrder = await evaluate(`(() => {
+  // The layout reads top to bottom: the title row with the posted group on
+  // the right, the toolbar and body, the tags, the view row below, the
+  // buttons. The eleven toolbar buttons are by click.
+  const layout = await evaluate(`(() => {
     const panel = document.querySelector('.bc-panel');
-    const stops = [...panel.querySelectorAll('input, textarea, button')]
-      .filter(el => el.tabIndex !== -1 && !el.disabled &&
-                    (el.offsetWidth > 0 || el.offsetHeight > 0));
-    const name = (el) => el.className.split(' ')[0] || el.tagName.toLowerCase();
+    const order = [...panel.children].map(el => el.className.split(' ')[0]);
+    const title = panel.querySelector('.bc-title'), posted = panel.querySelector('.bc-posted');
+    const t = title.getBoundingClientRect(), p = posted.getBoundingClientRect();
     return {
-      order: stops.map(name),
-      tools: panel.querySelectorAll('.ced-tool').length,
-      toolStops: [...panel.querySelectorAll('.ced-tool')]
-        .filter(b => b.tabIndex !== -1).length,
-      first: stops.length ? name(stops[0]) : "",
-      focused: document.activeElement.className.split(' ')[0],
+      order, tools: panel.querySelectorAll('.bc-write .ced-tool').length,
+      toolStops: [...panel.querySelectorAll('.ced-tool')].filter(b => b.tabIndex !== -1).length,
+      toolLabels: [...panel.querySelectorAll('.bc-write .ced-tool')].map(b => b.textContent),
+      placeholder: title.placeholder,
+      postedRight: p.left > t.right && Math.abs(p.bottom - t.bottom) < 4,
+      widths: ['.bc-date', '.bc-time', '.bc-zone'].map(s => Math.round(panel.querySelector(s).getBoundingClientRect().width)),
+      counts: !!panel.querySelector('.bc-counts'), tags: !!panel.querySelector('.bc-tags input'),
     };
   })()`);
-  check("composer: the formatting toolbar is not in the tab order",
-    tabOrder.tools === 12 && tabOrder.toolStops === 0,
-    tabOrder.tools + " buttons, " + tabOrder.toolStops + " of them tab stops");
-  // The close X is first, which is where a dialog usually puts it. After that
-  // the order is the one the panel reads in, and the twelve toolbar buttons
-  // that used to sit between the body and Publish are gone from it.
-  check("composer: TAB runs close, date, title, the view tabs, the body, the buttons",
-    tabOrder.order.join(" ") ===
-      "ced-modal__x bc-date bc-title bc-tab bc-tab bc-tab textarea " +
-      "ced-btn ced-btn ced-btn ced-btn",
-    tabOrder.order.join(" "));
+  check("composer: the layout is head, title row, write, images, preview, tags, view row, status, buttons",
+    layout.order.join(" ") === "bc-head ced-modal__x bc-fields bc-write bc-images bc-preview bc-tags bc-tabs bc-status bc-btns",
+    layout.order.join(" "));
+  check("composer: the title is optional, and the posted group sits to its right with room for three inputs",
+    layout.placeholder === "Title (optional)" && layout.postedRight &&
+    layout.widths.every((w, i) => w >= [70, 80, 55][i]) && layout.counts && layout.tags,
+    JSON.stringify(layout).slice(0, 200));
+  check("composer: the Markdown toolbar has the eleven buttons, none of them a tab stop",
+    layout.tools === 11 && layout.toolStops === 0 &&
+    layout.toolLabels.join("|") === "H|• list|1. list|B|I|S|Link|Table|Expand|Break|Clear",
+    layout.tools + " buttons, " + layout.toolStops + " stops: " + layout.toolLabels.join("|"));
 
-  // aria-modal promises the focus stays inside, so TAB has to wrap
-  const trap = await evaluate(`(() => {
+  // The ring: title, body, the images area, Publish, Close, and nothing
+  // else. Landing on the images area shows that view; landing back on the
+  // title shows the write view. Shift walks it backwards.
+  const ring = await evaluate(`(() => {
     const panel = document.querySelector('.bc-panel');
-    const stops = [...panel.querySelectorAll('input, textarea, button')]
-      .filter(el => el.tabIndex !== -1 && !el.disabled &&
-                    (el.offsetWidth > 0 || el.offsetHeight > 0));
-    const first = stops[0], last = stops[stops.length - 1];
     const press = (shift) => {
-      const e = new KeyboardEvent('keydown',
-        { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+      const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
       document.dispatchEvent(e);
       return e.defaultPrevented;
     };
-    last.focus();
-    const wrapped = press(false);
-    const toFirst = document.activeElement === first;
-    first.focus();
-    const wrappedBack = press(true);
-    const toLast = document.activeElement === last;
-    return { modal: panel.getAttribute('aria-modal'), wrapped, toFirst,
-             wrappedBack, toLast, stops: stops.length };
+    const name = (el) => el.className.split(' ')[0] || el.tagName.toLowerCase();
+    panel.querySelector('.bc-title').focus();
+    const fwd = [], views = [], prevented = [];
+    for (let i = 0; i < 5; i++) { prevented.push(press(false)); fwd.push(name(document.activeElement)); views.push(panel.getAttribute('data-tab')); }
+    const back = [];
+    for (let i = 0; i < 5; i++) { press(true); back.push(name(document.activeElement)); }
+    const stops = [...panel.querySelectorAll('input, textarea, button, [tabindex]')].filter(el => el.tabIndex !== -1);
+    return { fwd, views, back, prevented: prevented.every(Boolean), stops: stops.map(name), modal: panel.getAttribute('aria-modal') };
   })()`);
-  check("composer: TAB off the last control returns to the first, not the page",
-    trap.modal === "true" && trap.wrapped === true && trap.toFirst === true,
-    JSON.stringify(trap));
-  check("composer: shift and TAB off the first control returns to the last",
-    trap.wrappedBack === true && trap.toLast === true, JSON.stringify(trap));
+  check("composer: TAB walks title, body, images, Publish, Close and back to the title",
+    ring.modal === "true" && ring.prevented &&
+    ring.fwd.join(" ") === "textarea bc-drop ced-btn ced-btn bc-title" &&
+    ring.views.join(" ") === "write images images images write",
+    JSON.stringify(ring).slice(0, 220));
+  check("composer: shift and TAB walks the ring backwards, and nothing else in the panel is a stop",
+    ring.back.join(" ") === "ced-btn ced-btn bc-drop textarea bc-title" &&
+    ring.stops.join(" ") === "bc-title textarea bc-drop ced-btn ced-btn",
+    JSON.stringify(ring).slice(0, 220));
 
+  // The time field follows the clock until touched, holds what is typed,
+  // and follows the clock again when blanked and left.
+  const ticker = await evaluate(`(() => {
+    const t = document.querySelector('.bc-time');
+    const start = t.value;
+    t.value = 'x'; AMH.publish.tick(); const ticked = t.value !== 'x' && /^\\d{1,2}:\\d{2} [ap]m$/.test(t.value);
+    t.dispatchEvent(new Event('focus')); t.value = '9:15 pm'; t.dispatchEvent(new Event('input', { bubbles: true }));
+    AMH.publish.tick(); const held = t.value === '9:15 pm';
+    t.value = ''; t.dispatchEvent(new Event('blur'));
+    const restarted = /^\\d{1,2}:\\d{2} [ap]m$/.test(t.value);
+    return { start, ticked, held, restarted, zone: document.querySelector('.bc-zone').value,
+             parse: [AMH.publish.timeParse('3:07 pm'), AMH.publish.timeParse('15:07'), AMH.publish.timeParse('12:00 am'),
+                     AMH.publish.timeParse('12:30pm'), AMH.publish.timeParse('nope')],
+             label: AMH.publish.timeLabel('1507') };
+  })()`);
+  check("composer: the time follows the clock, stops when touched, and follows it again when blanked",
+    /^\d{1,2}:\d{2} [ap]m$/.test(ticker.start) && ticker.ticked && ticker.held && ticker.restarted && ticker.zone.length >= 2,
+    JSON.stringify(ticker).slice(0, 200));
+  check("composer: the two time forms round-trip",
+    JSON.stringify(ticker.parse) === '["1507","1507","0000","1230",""]' && ticker.label === "3:07 pm",
+    JSON.stringify(ticker.parse) + " " + ticker.label);
+
+  // The counts: characters as typed, words as runs of letters and digits
+  const counts = await evaluate(`(() => {
+    const ta = document.querySelector('.bc-write textarea');
+    ta.value = 'One two, three\\nhttps://x.io/a [img0001,Cap] **four**';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return document.querySelector('.bc-counts').textContent;
+  })()`);
+  check("composer: the counts are live and count a tag or a URL once each",
+    counts === "52 characters, 10 words", counts);
+
+  // Every toolbar button writes its mark; a flag lands alone on its line
+  const tools = await evaluate(`(() => {
+    const ta = document.querySelector('.bc-write textarea');
+    const btn = (l) => [...document.querySelectorAll('.bc-write .ced-tool')].find(b => b.textContent === l);
+    const out = {};
+    ta.value = 'Title line'; ta.focus(); ta.setSelectionRange(3, 3);
+    btn('H').click(); out.h1 = ta.value; btn('H').click(); out.h2 = ta.value;
+    btn('H').click(); out.h3 = ta.value; btn('H').click(); out.h0 = ta.value;
+    ta.value = 'item'; ta.setSelectionRange(0, 0);
+    btn('• list').click(); out.ul = ta.value; btn('1. list').click(); out.ol = ta.value; btn('1. list').click(); out.off = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('B').click(); out.b = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('I').click(); out.i = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('S').click(); out.s = ta.value;
+    const realPrompt = window.prompt; window.prompt = () => 'https://x.io';
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('Link').click(); out.link = ta.value;
+    window.prompt = realPrompt;
+    ta.value = 'end'; ta.setSelectionRange(3, 3); btn('Table').click(); out.table = ta.value;
+    ta.value = 'before after'; ta.setSelectionRange(6, 6); btn('Expand').click(); out.expand = ta.value;
+    ta.value = 'line'; ta.setSelectionRange(4, 4); btn('Break').click(); out.brk = ta.value;
+    ta.value = '# Head **b** *i* ~~s~~ [t](https://x.io) x'; ta.setSelectionRange(0, ta.value.length); btn('Clear').click(); out.clear = ta.value;
+    return out;
+  })()`);
+  check("composer: heading cycles H2, H3, H4, plain; list buttons toggle; marks wrap the selection",
+    tools.h1 === "# Title line" && tools.h2 === "## Title line" && tools.h3 === "### Title line" && tools.h0 === "Title line" &&
+    tools.ul === "- item" && tools.ol === "1. item" && tools.off === "item" &&
+    tools.b === "some **word** here" && tools.i === "some *word* here" && tools.s === "some ~~word~~ here" &&
+    tools.link === "some [word](https://x.io) here",
+    JSON.stringify(tools).slice(0, 260));
+  check("composer: table, the two flags alone on a line, and clear formatting",
+    tools.table === "end\n| Column | Column |\n| --- | --- |\n| cell | cell |\n" &&
+    tools.expand === "before\n{expandformore}\n after" && tools.brk === "line\n{pagebreak}" &&
+    tools.clear === "Head b i s t x",
+    JSON.stringify({ table: tools.table, expand: tools.expand, brk: tools.brk, clear: tools.clear }));
+
+  // The whole row holds at 720px: nothing overflows, nothing is scrunched
+  await send("Emulation.setDeviceMetricsOverride", { width: 720, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  const narrow = await evaluate(`(() => {
+    const panel = document.querySelector('.bc-panel');
+    const f = panel.querySelector('.bc-fields');
+    return { w: innerWidth, overflow: f.scrollWidth > f.clientWidth + 1 || panel.scrollWidth > panel.clientWidth + 1,
+             title: Math.round(panel.querySelector('.bc-title').getBoundingClientRect().width),
+             widths: ['.bc-date', '.bc-time', '.bc-zone'].map(s => Math.round(panel.querySelector(s).getBoundingClientRect().width)) };
+  })()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
+  check("composer: at 720px the title row holds with no overflow and the three inputs at full width",
+    narrow.w === 720 && !narrow.overflow && narrow.title >= 150 && narrow.widths.every((w, i) => w >= [70, 80, 55][i]),
+    JSON.stringify(narrow));
+
+  // An empty title is not refused: Publish goes on to the confirm step
+  await evaluate(`document.querySelector('.bc-title').value = ''`);
+  await evaluate(`document.querySelector('.bc-write textarea').value = 'No title on this one.'`);
+  await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+  await sleep(300);
+  const untitled = await evaluate(`(() => {
+    const box = document.querySelector('.bc-wizard');
+    const r = { step: box && box.getAttribute('data-step'), status: document.querySelector('.bc-status').textContent };
+    if (box) [...box.querySelectorAll('.ced-modal__btns button')].find(b => b.textContent === 'Cancel').click();
+    return r;
+  })()`);
+  check("composer: an empty title is allowed, and Publish reaches the confirm step",
+    untitled.step === "confirm" && !/title/i.test(untitled.status), JSON.stringify(untitled));
+
+  // The draft carries the tags, the time and the zone, and an old draft
+  // without them restores with the fields at their defaults
   await evaluate(`document.querySelector('.bc-title').value = 'Draft probe'`);
   await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Draft body.</p>'`);
+  await evaluate(`document.querySelector('.bc-tags').querySelector('input').value = 'xr planetarium'`);
+  await evaluate(`(() => { const t = document.querySelector('.bc-time'); t.dispatchEvent(new Event('focus')); t.value = '9:15 pm'; t.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('.bc-zone').value = 'Paris'; })()`);
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Save Draft').click()`);
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Close').click()`);   // confirm auto-accepted
   await sleep(300);
@@ -2386,9 +2644,26 @@ async function main() {
   const draft = await evaluate(`({
     title: document.querySelector('.bc-title').value,
     body: document.querySelector('.bc-write textarea').value,
+    tags: document.querySelector('.bc-tags input').value,
+    time: document.querySelector('.bc-time').value,
+    zone: document.querySelector('.bc-zone').value,
   })`);
-  check("Save/Restore Draft round-trips", draft.title === "Draft probe" && draft.body === "<p>Draft body.</p>",
+  check("Save/Restore Draft round-trips the title, body, tags, time and zone",
+    draft.title === "Draft probe" && draft.body === "<p>Draft body.</p>" && draft.tags === "xr planetarium" &&
+    draft.time === "9:15 pm" && draft.zone === "Paris",
     JSON.stringify(draft));
+  const oldDraft = await evaluate(`(() => {
+    localStorage.setItem('amh-blog-draft', JSON.stringify({ date: '260101', title: 'Old', body: 'old body', when: Date.now() }));
+    [...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Restore Draft').click();
+    const t = document.querySelector('.bc-time');
+    const before = t.value; t.value = 'x'; AMH.publish.tick();
+    return { title: document.querySelector('.bc-title').value, tags: document.querySelector('.bc-tags input').value,
+             ticking: t.value !== 'x', zone: document.querySelector('.bc-zone').value.length >= 2, before };
+  })()`);
+  check("composer: a draft from before the new fields restores with the clock ticking and no tags",
+    oldDraft.title === "Old" && oldDraft.tags === "" && oldDraft.ticking && oldDraft.zone,
+    JSON.stringify(oldDraft));
+  await evaluate(`document.querySelector('.bc-time').value = ''; document.querySelector('.bc-time').dispatchEvent(new Event('blur'));`);
 
   // BL3. compose the real post: two dropped canvas images, one toggled to png
   await evaluate(`
@@ -2453,13 +2728,217 @@ async function main() {
   check("non-image drop rejected with an error note",
     await evaluate(`!!document.querySelector('.bc-err')`));
 
+  // ---- the Markdown renderer, against its fixture ----
+  // MD1. every case in tools/e2e/fixtures/markdown.txt renders byte for
+  // byte in the page. The fixture is the contract: a feature outside it
+  // is text, and the last case proves that for three common ones.
+  const mdRaw = readFileSync(join(REPO, "tools/e2e/fixtures/markdown.txt"), "utf8").replace(/\r\n/g, "\n");
+  const mdCases = mdRaw.split("\n====\n").slice(1).map((c) => {
+    const nl = c.indexOf("\n");
+    const [src, exp] = c.slice(nl + 1).split("\n----\n");
+    return { name: c.slice(0, nl), src, exp: exp.replace(/\n$/, "") };
+  });
+  const mdOut = await evaluate(`(function (cases) {
+    return cases.map(function (c) { return AMH.markdown.render(c.src); });
+  })(${JSON.stringify(mdCases.map((c) => ({ src: c.src })))})`);
+  const mdBad = mdCases.filter((c, i) => mdOut[i] !== c.exp);
+  check("markdown: every fixture case renders byte for byte (" + mdCases.length + " cases)",
+    mdCases.length >= 16 && mdBad.length === 0,
+    mdBad.length ? mdBad[0].name + ": " + firstDiff(mdOut[mdCases.indexOf(mdBad[0])], mdBad[0].exp) : "");
+  check("markdown: the fixture holds the out-of-set case and the mixed case",
+    mdCases.some((c) => /out of the set/.test(c.name)) && mdCases.some((c) => /^mixed/.test(c.name)));
+  // MD2. with a date, an image tag run becomes figures through the same
+  // tag renderer an HTML post uses; a tag inside code stays code
+  const mdFig = await evaluate(`(function () {
+    var html = AMH.markdown.render("Text.\\n\\n[img0001,Cap one|Alt one]\\n\\n\`[img0002]\` in code.", { date: "260711" });
+    return html;
+  })()`);
+  check("markdown: with a date the tag run becomes figures, and a tag in code does not",
+    /<p>Text\.<\/p>\n<figure class="bp-fig"><img src="\.\.\/blog\/260711_img0001\.jpg" loading="lazy" alt="Alt one" \/><figcaption>Cap one<\/figcaption><\/figure>\n?<p><code>&#91;img0002\]<\/code> in code\.<\/p>$/.test(mdFig),
+    mdFig.slice(0, 220));
+  // MD3. the plain-text form of the mixed case, for excerpts and search
+  const mdMixed = mdCases.find((c) => /^mixed/.test(c.name));
+  const mdText = await evaluate(`AMH.markdown.text(${JSON.stringify(mdMixed.src)})`);
+  check("markdown: text() strips every mark, keeps code and link text, and names captions",
+    mdText === "A day at the dome We ran the planetarium test with the new headset. See the notes. " +
+      "(Dome and headset The dome at dusk) What worked Tracking held for ten twenty minutes " +
+      "The sync() call, at last even on the old rig Ship it. Rig Frames old 58 new 90 $ run --dome ok " +
+      "The rest is for another day.",
+    mdText.slice(0, 200));
+  // MD4. raw HTML passes through, so the tag check before a publish is
+  // still what catches an unbalanced tag
+  const mdTag = await evaluate(`(function () {
+    var html = AMH.markdown.render("A <b>bold start.\\n\\nNo close.");
+    return { html: html, problem: AMH.tool.tagCheck(html) };
+  })()`);
+  check("markdown: raw HTML passes through and the tag check still catches an unbalanced tag",
+    mdTag.html === "<p>A <b>bold start.</p>\n<p>No close.</p>" && !!mdTag.problem,
+    JSON.stringify(mdTag).slice(0, 160));
+  // MD5. the trunk names its seven sections in its header
+  const mdSrc = readFileSync(join(REPO, "markdown.js"), "utf8");
+  const mdSections = (mdSrc.slice(0, mdSrc.indexOf("(function")).match(/\b[1-7]\. [A-Z][A-Z ]+/g) || []).length;
+  check("markdown: the trunk is a seven-section manifold, named in its header", mdSections === 7, String(mdSections));
+
   // BL4. publish: capture the zip via the patched anchor click
   await evaluate(ZIP_CAPTURE);
+
+  // PW1. a publish that fails shows the failedStep step and keeps the post. Done
+  // first, on the same page load, because a failedStep build sets no flag and
+  // the real publish below must still be allowed.
+  await evaluate(`(function () {
+    window.__realPristine = AMH.tool.pristine;
+    AMH.tool.pristine = function () { return Promise.reject(new Error("forced failure for the suite")); };
+  })()`);
+  const failStep = await pressPublish();
+  await sleep(700);
+  const failedStep = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    var r = { step: box ? box.getAttribute('data-step') : 'none',
+              head: box ? box.querySelector('.ced-modal__head').textContent : '',
+              body: box ? box.querySelector('.bc-wiz__body').textContent : '',
+              title: document.querySelector('.bc-title').value,
+              publishEnabled: ![...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled };
+    var close = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; });
+    if (close) close.click();
+    r.closed = !document.querySelector('.bc-wizard');
+    AMH.tool.pristine = window.__realPristine;
+    return r;
+  })()`);
+  check("wizard: a failed publish shows the failed step, and the composer keeps the post",
+    failStep !== "timeout" && failedStep.step === "failed" && /Publish failed/.test(failedStep.head) &&
+    /forced failure/.test(failedStep.body) && /Nothing was written/.test(failedStep.body) &&
+    failedStep.title === "E2E first post" && failedStep.publishEnabled && failedStep.closed,
+    failStep + " " + JSON.stringify(failedStep).slice(0, 220));
+
+  // PW2. the confirm step replaces the browser box: the two lists, the
+  // reminder, the checkbox, and no window.confirm at all
+  const dcBefore = dialogCount;
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+  await sleep(400);
+  const confirmStep = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    if (!box) return { step: 'none' };
+    return {
+      step: box.getAttribute('data-step'),
+      spliced: [...box.querySelectorAll('.bc-wiz__file[data-how=spliced]')].map(function (f) { return f.textContent; }),
+      regen: [...box.querySelectorAll('.bc-wiz__file[data-how=regenerated]')].map(function (f) { return f.textContent; }),
+      reminder: /clean and synced/.test(box.textContent),
+      checkbox: !!box.querySelector('.bc-wiz__noremind'),
+      btns: [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }),
+      focused: document.activeElement && document.activeElement.textContent,
+    };
+  })()`);
+  check("wizard: the confirm step names what is spliced and what is regenerated",
+    confirmStep.step === "confirm" && confirmStep.spliced.indexOf("blog.html") !== -1 &&
+    confirmStep.regen.indexOf("blog/2607.html") !== -1 && confirmStep.regen.indexOf("sitemap.xml") !== -1 &&
+    confirmStep.reminder && confirmStep.checkbox &&
+    JSON.stringify(confirmStep.btns) === '["Cancel","Build the bundle"]' &&
+    confirmStep.focused === "Build the bundle",
+    JSON.stringify(confirmStep).slice(0, 240));
+
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => /Build the bundle/.test(b.textContent)).click()`);
+  await sleep(200);
+  const progressStep = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    return { step: box && box.getAttribute('data-step'),
+             rows: box ? box.querySelectorAll('.bc-wiz__rows li').length : 0,
+             now: box ? [...box.querySelectorAll('.bc-wiz__rows li')].filter(function (l) { return l.className === 'is-now'; }).length : 0 };
+  })()`);
+  check("wizard: the progress step lists the work in seven rows and paces itself",
+    progressStep.step === "progress" && progressStep.rows === 7 && progressStep.now === 1,
+    JSON.stringify(progressStep));
+  // the Files step exists for a page opened from disk; over HTTP the build
+  // reads its own bytes and Build goes straight to the progress step
+  check("wizard: over HTTP there is no Files step between Confirm and the build",
+    progressStep.step !== "files" && progressStep.step === "progress", progressStep.step);
+
   let zipB64 = null;
   for (let i = 0; i < 30 && !zipB64; i++) { await sleep(500); zipB64 = await evaluate(`window.__zipB64`); }
   const pubStatus = await evaluate(`document.querySelector('.bc-status').textContent`);
   check("publish produced a bundle", !!zipB64, pubStatus.slice(0, 80));
+  check("wizard: the browser confirm box is gone from the publish path",
+    dialogCount === dcBefore, "dialogs=" + (dialogCount - dcBefore));
+
+  // PW3. the done step: what happened, where the zip went, the list
+  let doneStep = null;
+  for (let i = 0; i < 20 && !(doneStep && doneStep.step === "done"); i++) {
+    await sleep(300);
+    doneStep = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      if (!box) return { step: 'none' };
+      return {
+        step: box.getAttribute('data-step'),
+        head: box.querySelector('.ced-modal__head').textContent,
+        body: box.querySelector('.bc-wiz__body').textContent,
+        elapsed: parseInt(box.getAttribute('data-elapsed') || '0', 10),
+        spliced: [...box.querySelectorAll('.bc-wiz__file[data-how=spliced]')].map(function (f) { return f.textContent; }).sort(),
+        regen: [...box.querySelectorAll('.bc-wiz__file[data-how=regenerated]')].map(function (f) { return f.textContent; }).sort(),
+        added: [...box.querySelectorAll('.bc-wiz__file[data-how=added]')].length,
+        checks: [...box.querySelectorAll('.bc-wiz__checks input')].map(function (c) { return c.getAttribute('data-check') + (c.disabled ? '!' : ''); }),
+        btns: [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }),
+        url: (box.querySelector('.bc-wiz__body a') || {}).textContent || '',
+        publishDisabled: [...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled,
+      };
+    })()`);
+  }
+  check("wizard: the done step says what was published, where the zip went, and what is in it",
+    doneStep.step === "done" && /Published p0001/.test(doneStep.head) &&
+    /blog-publish-260711\.zip/.test(doneStep.body) && /Downloads folder/.test(doneStep.body) &&
+    JSON.stringify(doneStep.spliced) === '["blog.html","index.html"]' &&
+    JSON.stringify(doneStep.regen) ===
+      '["blog/2607.html","feed.xml","robots.txt","search.js","sitemap.xml"]' &&
+    /* Publish stays live now: the staging layer means the next bundle
+       builds on this one rather than fighting it */
+    doneStep.added === 4 && /blog\/2607\.html#p0001$/.test(doneStep.url) &&
+    !doneStep.publishDisabled,
+    JSON.stringify(doneStep).slice(0, 300));
+  check("wizard: the seven rows each held for the minimum, so the steps could be read",
+    doneStep.elapsed >= 7 * 350 - 100, "elapsed " + doneStep.elapsed + "ms");
+  check("wizard: the list is extract, review, commit, push, and a live box the page owns",
+    JSON.stringify(doneStep.checks) === '["extract","review","commit","push","live!"]' &&
+    JSON.stringify(doneStep.btns) === '["Close","Download again","Compose another"]',
+    JSON.stringify(doneStep.checks) + " " + JSON.stringify(doneStep.btns));
+
+  // PW4. a tick is remembered in the record, and the panel line reads it
+  const ticked = await evaluate(`(function () {
+    var cb = document.querySelector('.bc-wizard .bc-wiz__checks input[data-check=extract]');
+    cb.click();
+    var rec = JSON.parse(sessionStorage.getItem('amh-publish-pending') || 'null');
+    if (!AMH.tool.editorOn()) window.edit();
+    var line = document.querySelector('.ced-publish');
+    return { checked: cb.checked, rec: rec && rec.checks.extract, id: rec && rec.id,
+             line: line ? line.textContent : '', hidden: line ? line.hidden : true };
+  })()`);
+  check("wizard: a tick is kept in the record, and the panel line counts it",
+    ticked.checked && ticked.rec === true && ticked.id === "0001" && !ticked.hidden &&
+    /p0001 is in a bundle that is not live yet\. 1 of 4 steps ticked\./.test(ticked.line),
+    JSON.stringify(ticked).slice(0, 200));
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
+
+  // PW5. the record clears itself when the page carries the bundle's stamp.
+  // The served page's manifest is empty, so the stamp is put on it by hand,
+  // and a wrong stamp first, which must not clear anything.
+  const live = await evaluate(`(function () {
+    var rec = JSON.parse(sessionStorage.getItem('amh-publish-pending'));
+    var man = document.getElementById('blogManifest');
+    var before = AMH.publish.checkLive();
+    /* the record clears on the stamp the page ARRIVED with, so the layer
+       can never answer yes to its own reflection. arrive() is the page's
+       own lifecycle hook, run again because the manifest changed under it. */
+    man.textContent = man.textContent.replace(/\\n*$/, '') + '\\nstamp:zzzzzz\\n';
+    AMH.publish.arrive();
+    var wrong = !sessionStorage.getItem('amh-publish-pending');
+    man.textContent = man.textContent.replace('stamp:zzzzzz', 'stamp:' + rec.stamp);
+    AMH.publish.arrive();
+    var after = !sessionStorage.getItem('amh-publish-pending');
+    var line = document.querySelector('.ced-publish');
+    return { stamp: rec.stamp, before: before, wrong: wrong, after: after,
+             rec: sessionStorage.getItem('amh-publish-pending'), hidden: line ? line.hidden : null };
+  })()`);
+  check("wizard: the record clears when the page carries this bundle's stamp, and not before",
+    /^[0-9a-z]{6}$/.test(live.stamp) && live.before === false && live.wrong === false &&
+    live.after === true && live.rec === null && live.hidden === true,
+    JSON.stringify(live).slice(0, 160));
 
   let zipFiles = {};
   if (zipB64) {
@@ -2468,7 +2947,7 @@ async function main() {
     check("bundle has the full publish layout", JSON.stringify(names) === JSON.stringify([
       "blog/260711_img0001.jpg", "blog/260711_img0002.png", "blog/2607.html",
       "imgsources/260711_img0001_original.png", "imgsources/260711_img0002_original.png",
-      "blog.html", "index.html", "robots.txt", "sitemap.xml",
+      "blog.html", "index.html", "robots.txt", "sitemap.xml", "search.js", "feed.xml",
     ].sort()), names.join(", "));
 
     // The home page is in this bundle because the highlights block changed.
@@ -2501,24 +2980,171 @@ async function main() {
       manSpan.includes("next-post:0002") && manSpan.includes("next-img:0003") &&
       manSpan.includes("2607110001E2E first post"),
       manSpan.replace(/\s+/g, " "));
+
+    // ST1. every generated file carries the stamp it was built under: the
+    // manifest names the publish and the month, and sitemap.xml, robots.txt
+    // and the month file each say which one wrote them
+    const pubStamp = (/\nstamp:([0-9a-z]{6})\n/.exec(manSpan) || [])[1];
+    const moStamp = (/\nmonth:2607=([0-9a-z]{6})\n/.exec(manSpan) || [])[1];
+    const month0 = zipFiles["blog/2607.html"].toString("utf8");
+    const monthHead = (/<!-- GENERATED[^>]*stamp:([0-9a-z]{6})/.exec(month0) || [])[1];
+    const smHead = (/<!-- GENERATED[^>]*stamp:([0-9a-z]{6})/.exec(zipFiles["sitemap.xml"].toString("utf8")) || [])[1];
+    const rbHead = (/# GENERATED[^\n]*stamp:([0-9a-z]{6})/.exec(zipFiles["robots.txt"].toString("utf8")) || [])[1];
+    check("stamp: the manifest names the publish and the month, and the record holds the publish stamp",
+      !!pubStamp && !!moStamp && live.stamp === pubStamp,
+      JSON.stringify({ pubStamp, moStamp, rec: live.stamp }));
+    check("stamp: sitemap.xml, robots.txt and the month file each carry the stamp that wrote them",
+      smHead === pubStamp && rbHead === pubStamp && monthHead === moStamp,
+      JSON.stringify({ smHead, rbHead, monthHead }));
+    // the two stamps are what the plan says: the month's is the hash of its
+    // joined blocks, the publish's is the hash of the payload without its
+    // own stamp line, chained to the previous stamp (none, on a first publish)
+    const joined = month0.slice(month0.indexOf("<main>\n") + 7, month0.indexOf("\n    </main>"));
+    const payload = (/<script id="blogManifest"[^>]*>([\s\S]*?)<\/script>/.exec(manSpan) || [])[1] || "";
+    const recomputed = await evaluate(`({
+      month: AMH.tool.stamp(${JSON.stringify(joined)}),
+      publish: AMH.tool.stamp("\\n" + ${JSON.stringify(payload.replace(/\nstamp:[^\n]*/, ""))}),
+      known: [AMH.tool.stamp(""), AMH.tool.stamp("a"), AMH.tool.stamp("hello world")],
+    })`);
+    check("stamp: six base36 characters from FNV-1a, checked against three known inputs",
+      JSON.stringify(recomputed.known) === '["ztntfp","r9wi7g","n91413"]', JSON.stringify(recomputed.known));
+    check("stamp: the month stamp hashes the joined blocks; the publish stamp hashes the payload, chained",
+      recomputed.month === moStamp && recomputed.publish === pubStamp,
+      JSON.stringify({ recomputed, moStamp, pubStamp }));
+
+    // SR0. the two generators on a known post: the words with the image
+    // tags taken out, the captions as their own field, and a pack that
+    // round-trips through the one unpacker
+    const unit = await evaluate(`(function () {
+      var post = { id: "0042", date: "260903", time: "1839", zone: "EDT",
+                   title: "A day", tags: "xr planetarium", format: "md",
+                   source: "Words **here**.\\n\\n[img0001,Cap one|Alt one][png0002,Cap two]\\n\\nMore.",
+                   staticBody: "" };
+      var entry = AMH.publish.searchEntry(post, "");
+      return AMH.publish.searchPack({ v: 1, stamp: "zzz999", posts: [entry] }, "zzz999")
+        .then(function (packed) {
+          return AMH.search.unpack(packed.text).then(function (back) {
+            return { entry: entry, plain: packed.plain,
+                     same: JSON.stringify(back.posts[0]) === JSON.stringify(entry),
+                     stamp: back.stamp, head: packed.text.split("\\n")[0] };
+          });
+        });
+    })()`, { awaitPromise: true });
+    check("search: an entry holds the words without the image tags, and the captions apart",
+      unit.entry.text === "Words here. More." &&
+      JSON.stringify(unit.entry.caps) === '["Cap one Alt one","Cap two"]' &&
+      unit.entry.tags === "xr planetarium" && unit.entry.time === "1839" && unit.entry.zone === "EDT",
+      JSON.stringify(unit.entry).slice(0, 220));
+    check("search: pack and unpack round-trip a table, with the stamp in the header",
+      unit.same && unit.stamp === "zzz999" && unit.plain === false && /stamp:zzz999/.test(unit.head),
+      JSON.stringify({ same: unit.same, stamp: unit.stamp, head: unit.head }).slice(0, 180));
+
+    // SR1. the packed index the publish ships: a classic script whose one
+    // line is base64 of gzip of the table, with the publish stamp in its
+    // header comment
+    const searchFile = zipFiles["search.js"].toString("utf8");
+    const searchStamp = (/GENERATED[^*]*stamp:([0-9a-z]{6})/.exec(searchFile) || [])[1];
+    const packed = (/window\.AMH_SEARCH = "([^"]*)";/.exec(searchFile) || [])[1] || "";
+    let searchTable = null;
+    try {
+      searchTable = JSON.parse(gunzipSync(Buffer.from(packed, "base64")).toString("utf8"));
+    } catch (e) { searchTable = { error: e.message }; }
+    check("search: the file is one packed line, stamped by the publish that wrote it",
+      searchStamp === pubStamp && packed.length > 0 && packed.indexOf("plain:") !== 0 &&
+      searchTable && searchTable.v === 1 && searchTable.stamp === pubStamp,
+      JSON.stringify({ searchStamp, pubStamp, bytes: searchFile.length }).slice(0, 160));
+    const e1 = (searchTable.posts || [])[0] || {};
+    check("search: the entry carries the post's words, captions, tags, time and zone",
+      (searchTable.posts || []).length === 1 && e1.id === "0001" && e1.date === "260711" &&
+      /^\d{4}$/.test(e1.time) && e1.zone.length >= 2 && e1.title === "E2E first post" &&
+      /^First e2e post/.test(e1.text) && !/\[img0001/.test(e1.text) &&
+      JSON.stringify(e1.caps) === '["Cap one Alt one","Cap two"]',
+      JSON.stringify(e1).slice(0, 220));
+    check("search: the thumbnail is a small WebP made from the post's first image",
+      /^data:image\/webp;base64,/.test(e1.thumb || "") && e1.thumb.length < 2048,
+      (e1.thumb || "").slice(0, 40) + " len " + (e1.thumb || "").length);
+
+    // FD1. the feed: Atom, the post's own anchor as its id, the time at
+    // its zone, and a summary cut from the index's own text
+    const feed = zipFiles["feed.xml"].toString("utf8");
+    const feedStamp = (/GENERATED[^>]*stamp:([0-9a-z]{6})/.exec(feed) || [])[1];
+    check("feed: it is Atom, names the site and itself, and carries the publish stamp",
+      feedStamp === pubStamp && /^<\?xml version="1\.0" encoding="UTF-8"\?>/.test(feed) &&
+      feed.includes('<feed xmlns="http://www.w3.org/2005/Atom">') &&
+      feed.includes("<title>AARON M. HARRIS - Blog</title>") &&
+      feed.includes('<link rel="self" href="https://aaronmichaelharris.com/feed.xml" />') &&
+      feed.includes("<id>https://aaronmichaelharris.com/feed.xml</id>"),
+      feed.slice(0, 240).replace(/\n/g, " "));
+    const entry = (/<entry>[\s\S]*?<\/entry>/.exec(feed) || [""])[0];
+    check("feed: the entry's id and link are the post's own anchor, with the title and a summary",
+      (feed.match(/<entry>/g) || []).length === 1 &&
+      entry.includes("<title>E2E first post</title>") &&
+      entry.includes('<link href="https://aaronmichaelharris.com/blog/2607.html#p0001" />') &&
+      entry.includes("<id>https://aaronmichaelharris.com/blog/2607.html#p0001</id>") &&
+      /<summary type="text">First e2e post/.test(entry),
+      entry.replace(/\n/g, " ").slice(0, 220));
+    check("feed: the entry's time is the post's own, at the zone it names",
+      /<updated>2026-07-11T\d\d:\d\d:00-0[45]:00<\/updated>/.test(entry),
+      (entry.match(/<updated>[^<]*/) || [""])[0]);
+
+    // ST2. one fixture, both parsers: the pristine-source parser in
+    // publish.js and the live-tag parser in blog.js must agree line for
+    // line, and a line neither understands is reported, not lost
+    const FIXTURE = "\nnext-post:0007\nnext-img:0012\nstamp:abc123\nmonth:2607=k9d2m1\nmonth:2606=zz00aa\n" +
+      "months:2607 2606\n2606100002June post|2607110001E2E first post\nbogus line here\n";
+    const parsers = await evaluate(`(function () {
+      var warned = [];
+      var ow = console.warn;
+      console.warn = function (m) { warned.push(String(m)); };
+      var fx = ${JSON.stringify(FIXTURE)};
+      var a = AMH.publish.manifest('<script id="blogManifest" type="text/plain">' + fx + '</scr' + 'ipt>');
+      var tag = document.getElementById('blogManifest');
+      var saved = tag.textContent;
+      tag.textContent = fx;
+      var b = AMH.blog.parseManifest();
+      tag.textContent = saved;
+      console.warn = ow;
+      function pick(o) { return { nextPost: o.nextPost, nextImg: o.nextImg, stamp: o.stamp,
+        monthStamps: o.monthStamps, months: o.months,
+        ids: o.entries.map(function (e) { return e.date + e.id + e.title; }) }; }
+      return { a: pick(a), b: pick(b), warned: warned };
+    })()`);
+    const wantParsed = JSON.stringify({ nextPost: 7, nextImg: 12, stamp: "abc123",
+      monthStamps: { "2606": "zz00aa", "2607": "k9d2m1" }, months: ["2607", "2606"],
+      ids: ["2606100002June post", "2607110001E2E first post"] });
+    check("manifest: both parsers read counters, stamp, month lines and entries alike from one fixture",
+      JSON.stringify(parsers.a) === wantParsed && JSON.stringify(parsers.b) === wantParsed,
+      JSON.stringify(parsers.a) + " | " + JSON.stringify(parsers.b));
+    check("manifest: a line neither parser understands is reported by both, and skipped",
+      parsers.warned.length === 2 && parsers.warned.every((w) => /bogus line here/.test(w)),
+      JSON.stringify(parsers.warned));
     // a publish writes two regions on this page now: the manifest and the
     // index card for the post. Everything else must still be untouched.
     check("bundle blog.html byte-identical outside the manifest and the index",
-      stripSpans(outIdx, ["blog-index", "blog-manifest"]) ===
-      stripSpans(srcIdx, ["blog-index", "blog-manifest"]));
-    const cardSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-index]-->"),
-      outIdx.indexOf("<!--[/edit:blog-index]-->"));
-    check("bundle: the index card carries the excerpt and links to the month",
-      /<article class="bs-card" id="p0001" data-month="2607">/.test(cardSpan) &&
-      /class="bs-card__excerpt">First e2e post/.test(cardSpan) &&
-      /href="blog\/2607\.html#p0001">Read more/.test(cardSpan),
-      cardSpan.replace(/\s+/g, " ").slice(0, 170));
-    check("bundle: the index carries a summary, not the post",
-      !/\[img0001/.test(cardSpan) && !/blog-post__body/.test(cardSpan),
-      "clean");
+      stripSpans(outIdx, ["blog-stream", "blog-manifest"]) ===
+      stripSpans(srcIdx, ["blog-stream", "blog-manifest"]));
+    const streamSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-stream]-->"),
+      outIdx.indexOf("<!--[/edit:blog-stream]-->"));
+    // ST-A. the stream is the newest month in full, in the A markup: the
+    // "s" id, the byline with the time as the permanent link, the body
+    // with root-relative image paths, and no source block anywhere.
+    check("stream: the post is written in full, with an s id and the byline",
+      /<article class="bs-post" id="s0001" data-id="0001" data-date="260711"/.test(streamSpan) &&
+      /<img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent\.png" alt="" \/>/.test(streamSpan) &&
+      streamSpan.includes("<b>AARON M. HARRIS</b>") &&
+      /<a class="bs-post__when" href="blog\/2607\.html#p0001"><time datetime="2026-07-11T\d\d:\d\d">July 11, 2026 · \d{1,2}:\d\d [ap]m<\/time><span class="bs-post__zone">[^<]+<\/span><\/a>/.test(streamSpan) &&
+      /<h3 class="bs-post__title">E2E first post<\/h3>/.test(streamSpan),
+      streamSpan.replace(/\s+/g, " ").slice(0, 260));
+    check("stream: the body is the whole post, with root paths and no source block",
+      streamSpan.includes('<div class="bs-post__body">') &&
+      streamSpan.includes('<figure class="bp-fig"><img src="blog/260711_img0001.jpg"') &&
+      !streamSpan.includes('src="../blog/') && !streamSpan.includes("x-blog-source") &&
+      streamSpan.includes("Tail paragraph with <strong>bold</strong>") &&
+      streamSpan.includes('<p class="bm-older bm-older--end">This is the first month.</p>'),
+      streamSpan.replace(/\s+/g, " ").slice(0, 200));
 
     const month = zipFiles["blog/2607.html"].toString("utf8");
-    const srcM = /<scr[i]pt type="text\/x-blog-source">\n([\s\S]*?)\n<\/scr[i]pt>/.exec(month);
+    const srcM = /<scr[i]pt type="text\/x-blog-source" data-format="md">\n([\s\S]*?)\n<\/scr[i]pt>/.exec(month);
     const decoded = srcM ? srcM[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
     check("month file: article shell + static figures + head parity",
       month.includes('id="p0001"') && month.includes('data-date="260711"') &&
@@ -2531,6 +3157,13 @@ async function main() {
       decoded.includes("[img0001,Cap one|Alt one][png0002,Cap two]") &&
       decoded.includes("Escape probe: &lt;/scr" + "ipt&gt; as text"),
       decoded.slice(0, 90));
+    // the only month is the first month: no prev, the end note, and the
+    // two scripts for the chain, in the site's order
+    check("chain: the first month says so, carries no prev, and loads site.js then blog.js",
+      !/rel="prev"/.test(month) && month.includes('<p class="bm-older bm-older--end">This is the first month.</p>') &&
+      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>/.test(month) &&
+      !/tool\.js|publish\.js/.test(month),
+      (month.match(/bm-older[^\n]*/) || [""])[0]);
 
     check("bundle ships no stylesheet (site.css is a repo file)",
       !Object.keys(zipFiles).some((n) => n.endsWith(".css")),
@@ -2558,11 +3191,28 @@ async function main() {
     const brand = /class="brand__title full">([^<]*)</.exec(
       readFileSync(join(REPO, "index.html"), "utf-8"))[1];
     check("month page carries the site wordmark, not a copy of the words",
-      month.includes('<a class="bm-head__brand" href="../index.html">' + brand + "</a>"),
-      (/bm-head__brand[^>]*>([^<]*)</.exec(month) || [])[1] + " vs " + brand);
+      month.includes('<a class="bs-bar__name" href="../index.html">' + brand + "</a>"),
+      (/bs-bar__name[^>]*>([^<]*)</.exec(month) || [])[1] + " vs " + brand);
     check("month page links back to the blog page, brand still home",
       month.includes('href="../blog.html?b=2607"') && month.includes('href="../index.html"'),
-      (/bm-head__stream" href="([^"]+)"/.exec(month) || [])[1]);
+      (/bs-bar__stream" href="([^"]+)"/.exec(month) || [])[1]);
+    // MP1. the month page is the stream's own design: the same bar, the
+    // same post markup with "p" ids, and its own month list for the picker
+    check("month page: the same bar as the stream, with the find slot and the picker",
+      /<div class="bs-bar" id="blogBar">/.test(month) && month.includes('id="blogFind"') &&
+      month.includes('<select class="bs-bar__month" id="blogMonth"') &&
+      month.includes('<h1 class="bs-bar__label">July 2026</h1>'),
+      (month.match(/<div class="bs-bar"[\s\S]*?<\/div>/) || [""])[0].replace(/\s+/g, " ").slice(0, 200));
+    check("month page: the posts are the stream's markup with p ids, and keep their source",
+      /<article class="bs-post" id="p0001" data-id="0001" data-date="260711"/.test(month) &&
+      month.includes('<a class="bs-post__when" href="#p0001">') &&
+      month.includes('<img class="bs-post__avatar" src="../aaron-portfolio-portrait-transparent.png"') &&
+      month.includes('<div class="bs-post__body">') && month.includes('data-format="md"') &&
+      !/class="blog-post"/.test(month),
+      (month.match(/<article[^>]*>/) || [""])[0]);
+    check("month page: it states its own month list, for the picker",
+      /<script id="blogManifest" type="text\/plain" data-ced="blog">\nmonths:2607\n<\/script>/.test(month),
+      (month.match(/months:[^\n]*/) || [""])[0]);
     check("published images are real files (jpg magic + png magic)",
       zipFiles["blog/260711_img0001.jpg"][0] === 0xFF && zipFiles["blog/260711_img0001.jpg"][1] === 0xD8 &&
       zipFiles["blog/260711_img0002.png"][1] === 0x50);
@@ -2579,6 +3229,28 @@ async function main() {
       writeFileSync(join(bdir, name), data);
     }
   }
+  // Publish through the wizard. Clicks Publish, then the confirm step's
+  // Build button when it appears. With the reminder switched off the step is
+  // a notice that proceeds on its own, so the helper also returns when the
+  // wizard has moved past the confirm step by itself.
+  async function pressPublish() {
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    for (let i = 0; i < 30; i++) {
+      await sleep(150);
+      const r = await evaluate(`(function () {
+        var box = document.querySelector('.bc-wizard');
+        if (!box) return "none";
+        var step = box.getAttribute('data-step');
+        if (step === 'confirm') {
+          var b = [...box.querySelectorAll('.ced-modal__btns button')].find(function (x) { return /Build the bundle/.test(x.textContent); });
+          if (b) { b.click(); return "built"; }
+        }
+        return step;
+      })()`);
+      if (r === "built" || r === "progress" || r === "done" || r === "failed") return r;
+    }
+    return "timeout";
+  }
   async function capturePublish() {
     let b64 = null;
     for (let i = 0; i < 30 && !b64; i++) { await sleep(500); b64 = await evaluate(`window.__zipB64`); }
@@ -2588,7 +3260,7 @@ async function main() {
     writeBundle(zipFiles);
     // The stylesheet and the four script trunks are repo files, not bundle
     // files. Copy them in so the served bundle behaves like the deployed site.
-    for (const f of ["site.css", "site.js", "work.js", "blog.js", "tool.js",
+    for (const f of ["site.css", "site.js", "work.js", "blog.js", "markdown.js", "tool.js",
                      "publish.js", "index.html"]) {
       writeFileSync(join(bdir, f), readFileSync(join(REPO, f)));
     }
@@ -2598,47 +3270,211 @@ async function main() {
     await sleep(1500);
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
-    check("bundle: the blog page shows its index",
-      await evaluate(`!!document.getElementById('blogIndex')`));
+    check("bundle: the blog page shows its stream",
+      await evaluate(`!!document.getElementById('blogStream')`));
     await sleep(600);
-    // No fetch happens here at all: the cards are in the page. That is what
+    // No fetch happens here at all: the posts are in the page. That is what
     // makes this page readable when it is opened from disk.
-    const index = await evaluate(`({
-      cards: document.querySelectorAll('.bs-card').length,
-      card: !!document.getElementById('p0001'),
-      title: (document.querySelector('#p0001 h3') || {}).textContent || '',
-      excerpt: (document.querySelector('#p0001 .bs-card__excerpt') || {}).textContent || '',
-      more: (document.querySelector('#p0001 .bs-card__more') || { getAttribute: () => '' }).getAttribute('href') || '',
-      months: document.querySelectorAll('.bs-months button').length,
+    await evaluate(`window.__blogFetches = 0; (function () { const of = window.fetch;
+      window.fetch = function () { window.__blogFetches++; return of.apply(this, arguments); }; })();`);
+    const stream = await evaluate(`({
+      posts: document.querySelectorAll('.bs-post').length,
+      post: !!document.getElementById('s0001'),
+      title: (document.querySelector('#s0001 .bs-post__title') || {}).textContent || '',
+      when: (document.querySelector('#s0001 .bs-post__when') || { getAttribute: () => '' }).getAttribute('href') || '',
+      figs: document.querySelectorAll('#s0001 .bs-post__body figure.bp-fig img').length,
+      imgOk: [...document.querySelectorAll('#s0001 .bs-post__body img')].every(i => i.naturalWidth > 0),
+      body: (document.querySelector('#s0001 .bs-post__body') || {}).textContent || '',
+      fetches: window.__blogFetches,
     })`);
-    check("bundle: the index lists the published post, with a link to its month",
-      index.cards === 1 && index.card && index.title === "E2E first post" &&
-      /^First e2e post/.test(index.excerpt) && index.more === "blog/2607.html#p0001",
-      JSON.stringify(index));
+    check("bundle: the stream carries the published post in full, images and all",
+      stream.posts === 1 && stream.post && stream.title === "E2E first post" &&
+      stream.when === "blog/2607.html#p0001" && stream.figs === 2 && stream.imgOk &&
+      /Tail paragraph with bold/.test(stream.body) && stream.fetches === 0,
+      JSON.stringify(stream).slice(0, 240));
+    // FN1. the grammar, every case in tools/e2e/fixtures/queries.txt run
+    // through the page's own parser
+    const qRaw = readFileSync(join(REPO, "tools/e2e/fixtures/queries.txt"), "utf8").replace(/\r/g, "");
+    const qCases = qRaw.split("\n").filter((l) => l.indexOf("\t") !== -1)
+      .map((l) => ({ q: l.slice(0, l.indexOf("\t")), want: l.slice(l.indexOf("\t") + 1) }));
+    const parsed = await evaluate(`(function (qs) {
+      return qs.map(function (q) { return JSON.stringify(AMH.search.parse(q)); });
+    })(${JSON.stringify(qCases.map((c) => c.q))})`);
+    const qBad = qCases.filter((c, i) => parsed[i] !== c.want);
+    check("find: every query in the fixture parses as the fixture says (" + qCases.length + " cases)",
+      qCases.length >= 10 && qBad.length === 0,
+      qBad.length ? JSON.stringify(qBad[0].q) + " got " + parsed[qCases.indexOf(qBad[0])] : "");
+
+    // FN2. the matcher and the passage, on a table built here so every
+    // rule is exercised whatever the blog happens to hold
+    const matched = await evaluate(`(function () {
+      var posts = [
+        { id: "0001", date: "260711", title: "Planetarium test run", tags: "xr planetarium",
+          text: "We ran the dome projection test today and the headset finally agreed with it.",
+          caps: ["Dome and headset, same frame."], thumb: "" },
+        { id: "0002", date: "260712", title: "Quiet week", tags: "notes",
+          text: "Nothing to report.", caps: [], thumb: "" }
+      ];
+      function ids(q) {
+        var g = AMH.search.parse(q);
+        return posts.filter(function (p) { return AMH.search.match(p, g); })
+          .map(function (p) { return p.id; }).join(",");
+      }
+      function pass(q, i) { return AMH.search.passage(posts[i || 0], AMH.search.parse(q)); }
+      return {
+        word: ids("dome"), caption: ids("frame"), tagWord: ids("planetarium"),
+        tagOnly: ids("#xr"), tagMiss: ids("#dome"),
+        phrase: ids('"dome projection"'), phraseApart: ids('"projection dome"'),
+        andBoth: ids("dome headset"), andMiss: ids("dome nothing"),
+        or: ids("dome, nothing"), none: ids("absent"),
+        passWord: pass("projection"), passCap: pass("frame"), passTag: pass("#xr")
+      };
+    })()`);
+    check("find: a word, a caption and a tag each find the right posts, and or and and hold",
+      matched.word === "0001" && matched.caption === "0001" && matched.tagWord === "0001" &&
+      matched.tagOnly === "0001" && matched.tagMiss === "" &&
+      matched.andBoth === "0001" && matched.andMiss === "" &&
+      matched.or === "0001,0002" && matched.none === "",
+      JSON.stringify(matched).slice(0, 240));
+    check("find: a phrase matches in order and not apart",
+      matched.phrase === "0001" && matched.phraseApart === "",
+      matched.phrase + " | " + matched.phraseApart);
+    check("find: the passage marks the hit, reaches into a caption, and stands in for a tag query",
+      matched.passWord.hit === "projection" && /dome $/.test(matched.passWord.before) &&
+      matched.passCap.hit === "frame" && /Dome and headset/.test(matched.passCap.before) &&
+      matched.passTag.hit === "" && /^We ran the dome/.test(matched.passTag.before),
+      JSON.stringify(matched.passWord) + " " + JSON.stringify(matched.passTag).slice(0, 90));
+
+    // FN3. the pill: it is in the bar, it loads nothing until it is
+    // focused, and typing brings the list up
+    const pill = await evaluate(`(function () {
+      var before = [].slice.call(document.querySelectorAll('script[src]'))
+        .filter(function (s) { return /search\.js$/.test(s.getAttribute('src')); }).length;
+      var input = document.querySelector('.bs-find__pill input');
+      input.focus();
+      return new Promise(function (res) { setTimeout(function () {
+        var after = [].slice.call(document.querySelectorAll('script[src]'))
+          .filter(function (s) { return /search\.js$/.test(s.getAttribute('src')); }).length;
+        input.value = 'e2e';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(function () {
+          var list = document.querySelector('.bs-find__list');
+          var hit = list.querySelector('.bs-find__hit');
+          res({ inBar: !!document.querySelector('#blogBar .bs-find'),
+                placeholder: input.placeholder, before: before, after: after,
+                open: !list.hidden,
+                count: (list.querySelector('.bs-find__count') || {}).textContent || '',
+                href: hit ? hit.getAttribute('href') : '',
+                title: hit ? hit.querySelector('b').textContent : '',
+                date: hit ? hit.querySelector('small').textContent : '',
+                thumb: hit ? hit.querySelector('.bs-find__thumb').tagName : '',
+                mark: hit ? (hit.querySelector('mark') || {}).textContent || '' : '',
+                role: list.getAttribute('role') });
+        }, 500);
+      }, 900); });
+    })()`, { awaitPromise: true });
+    check("find: the pill sits in the bar and loads the index only when it is focused",
+      pill.inBar && pill.before === 0 && pill.after === 1 &&
+      pill.placeholder === "Search posts, tags, captions" && pill.role === "listbox",
+      JSON.stringify(pill).slice(0, 200));
+    check("find: typing opens the list with the count, the post, its date and the marked hit",
+      pill.open && pill.count === "1 post" && pill.href === "blog/2607.html#p0001" &&
+      pill.title === "E2E first post" && /July 11, 2026/.test(pill.date) &&
+      pill.thumb === "IMG" && pill.mark === "e2e",
+      JSON.stringify(pill).slice(0, 240));
+
+    // FN4. a hit for a post that is on this page scrolls to it; Escape
+    // and a click outside close the list
+    const click = await evaluate(`(function () {
+      var list = document.querySelector('.bs-find__list');
+      var input = document.querySelector('.bs-find__pill input');
+      var hit = list.querySelector('.bs-find__hit');
+      var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      hit.dispatchEvent(ev);
+      return new Promise(function (res) { setTimeout(function () {
+        var out = { prevented: ev.defaultPrevented, closed: list.hidden,
+                    path: location.pathname,
+                    target: !!document.querySelector('.bs-post.is-target#s0001') };
+        /* and the two ways it closes */
+        input.value = 'e2e'; input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(function () {
+          out.reopened = !list.hidden;
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          out.escaped = list.hidden;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          setTimeout(function () {
+            document.body.click();
+            out.outside = list.hidden;
+            res(out);
+          }, 400);
+        }, 400);
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("find: a hit for a post on this page scrolls to it rather than leaving",
+      click.prevented && click.closed && /blog\.html$/.test(click.path) && click.target,
+      JSON.stringify(click).slice(0, 200));
+    check("find: Escape closes the list, and so does a click outside it",
+      click.reopened && click.escaped && click.outside, JSON.stringify(click).slice(0, 200));
+
+    // FN5. the arrows walk the list and Enter takes the one they are on
+    const keys = await evaluate(`(function () {
+      var input = document.querySelector('.bs-find__pill input');
+      var list = document.querySelector('.bs-find__list');
+      input.value = 'e2e'; input.dispatchEvent(new Event('input', { bubbles: true }));
+      return new Promise(function (res) { setTimeout(function () {
+        function press(k) { input.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); }
+        press('ArrowDown');
+        var at = list.querySelectorAll('.bs-find__hit.is-at').length;
+        press('Enter');
+        setTimeout(function () {
+          res({ at: at, closed: list.hidden, target: !!document.querySelector('.is-target#s0001') });
+        }, 300);
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("find: the arrows move through the hits and Enter opens the one they are on",
+      keys.at === 1 && keys.closed && keys.target, JSON.stringify(keys));
+
+    // SR2. the loader: nothing is fetched until something asks, then the
+    // script tag brings the index in and it is unpacked once
+    const loaded = await evaluate(`(function () {
+      var before = [].slice.call(document.querySelectorAll('script[src]')).map(function (s) { return s.getAttribute('src'); });
+      return AMH.search.load().then(function (table) {
+        var after = [].slice.call(document.querySelectorAll('script[src]')).map(function (s) { return s.getAttribute('src'); });
+        return AMH.search.load().then(function (again) {
+          return AMH.search.tags().then(function (tags) {
+            return { before: before.indexOf('search.js') !== -1,
+                     after: after.indexOf('search.js') !== -1,
+                     tagsCount: after.filter(function (s) { return s === 'search.js'; }).length,
+                     posts: table.posts.length, same: table === again,
+                     id: table.posts[0].id, text: table.posts[0].text.slice(0, 20),
+                     tags: tags };
+          });
+        });
+      });
+    })()`, { awaitPromise: true });
+    // the pill above already proved nothing loads until it is asked for;
+    // what matters here is that asking twice loads once
+    check("search: the index is fetched once however many times it is asked for",
+      loaded.after === true && loaded.tagsCount === 1 && loaded.same,
+      JSON.stringify(loaded).slice(0, 200));
+    check("search: load() gives the table and tags() counts the tags",
+      loaded.posts === 1 && loaded.id === "0001" && /^First e2e post/.test(loaded.text) &&
+      JSON.stringify(loaded.tags) === "[]",
+      JSON.stringify(loaded).slice(0, 200));
+
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=p0001" });
     await sleep(2200);
-    check("bundle: ?b=p0001 deep link lands on the post",
-      await evaluate(`!!document.getElementById('blogIndex') &&
-        !!document.querySelector('.bs-card.is-target#p0001')`));
+    check("bundle: ?b=p0001 deep link lands on the post in the stream",
+      await evaluate(`!!document.querySelector('.bs-post.is-target#s0001')`));
     const postCanon = await evaluate(`document.querySelector('link[rel="canonical"]').getAttribute('href')`);
-    check("bundle: a month in view makes the month file canonical",
-      /\/blog\/2607\.html$/.test(postCanon), postCanon);
-
-    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=2607" });
-    await sleep(2200);
-    const byMonth = await evaluate(`({
-      post: !!document.getElementById('p0001'),
-      on: (document.querySelector('.bs-months button.on') || {}).textContent || '',
-      note: (document.querySelector('.bs-note') || {}).textContent || '',
-    })`);
-    check("bundle: ?b=2607 deep link lands on the month",
-      byMonth.post && /July/.test(byMonth.on) && !byMonth.note, JSON.stringify(byMonth));
+    check("bundle: the blog page stays canonical for itself",
+      /\/blog\.html$/.test(postCanon), postCanon);
 
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=p9999" });
     await sleep(2200);
     const unknown = await evaluate(`({
       note: (document.querySelector('.bs-note') || {}).textContent || '',
-      post: !!document.getElementById('p0001'),
+      post: !!document.getElementById('s0001'),
     })`);
     check("bundle: an unknown target says so and shows the latest",
       /wasn't found/.test(unknown.note) && unknown.post, JSON.stringify(unknown));
@@ -2647,10 +3483,13 @@ async function main() {
     const monthPage = await evaluate(`({
       cls: document.body.className,
       figs: document.querySelectorAll('figure.bp-fig').length,
-      brand: !!document.querySelector('.bm-head__brand'),
+      brand: !!document.querySelector('.bs-bar__name'),
     })`);
+    // the figures and the brand are in the file; the classes on the body
+    // are the two trunks saying they ran, and nothing else
     check("bundle: standalone month page renders statically",
-      monthPage.cls === "blog-month" && monthPage.figs === 2 && monthPage.brand,
+      /^blog-month(?: ga-[dm]-\w+| loaded)*$/.test(monthPage.cls) &&
+      monthPage.figs === 2 && monthPage.brand,
       JSON.stringify(monthPage));
   }
 
@@ -2665,54 +3504,569 @@ async function main() {
     await evaluate(`document.querySelector('.bc-date').value = '260610'`);
     await evaluate(`document.querySelector('.bc-title').value = 'June post'`);
     await evaluate(`document.querySelector('.bc-write textarea').value = '<p>June body.</p>'`);
+    // PW6. with the reminder switched off the confirm step is a notice that
+    // proceeds on its own, and the done step offers the reminder back
+    await evaluate(`localStorage.setItem('amh-publish-noremind', '1')`);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await sleep(300);
+    const notice = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      return { step: box && box.getAttribute('data-step'),
+               text: box ? box.querySelector('.bc-wiz__body').textContent : '',
+               regen: box ? [...box.querySelectorAll('.bc-wiz__file[data-how=regenerated]')].map(function (f) { return f.textContent; }) : [],
+               btns: box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [] };
+    })()`);
+    // a backdated month leaves the month after it with a wrong prev, so
+    // that month is written again and the lists say so before the build
+    check("chain: a publish that creates a month names its neighbour among the files written whole",
+      notice.regen.indexOf("blog/2606.html") !== -1 && notice.regen.indexOf("blog/2607.html") !== -1,
+      notice.regen.join(", "));
+    check("wizard: with the reminder off, a notice says so and proceeds on its own",
+      notice.step === "notice" && /You chose not to see the reminder/.test(notice.text) &&
+      JSON.stringify(notice.btns) === '["Cancel"]', JSON.stringify(notice).slice(0, 160));
     const zip2 = await capturePublish();
+    let done2 = null;
+    for (let i = 0; i < 20 && !(done2 && done2.step === "done"); i++) {
+      await sleep(300);
+      done2 = await evaluate(`(function () {
+        var box = document.querySelector('.bc-wizard');
+        return { step: box && box.getAttribute('data-step'),
+                 btns: box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [] };
+      })()`);
+    }
+    const remindAgain = await evaluate(`(function () {
+      var b = [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (x) { return /Show the reminder again/.test(x.textContent); });
+      if (b) b.click();
+      return { cleared: localStorage.getItem('amh-publish-noremind') === null,
+               gone: ![...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].some(function (x) { return /Show the reminder again/.test(x.textContent); }) };
+    })()`);
+    check("wizard: the done step can switch the reminder back on",
+      done2.step === "done" && done2.btns.indexOf("Show the reminder again") !== -1 &&
+      remindAgain.cleared && remindAgain.gone, JSON.stringify(done2) + " " + JSON.stringify(remindAgain));
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
     check("P2: second post published into an earlier month", !!zip2 && !!zip2["blog/2606.html"],
       zip2 ? Object.keys(zip2).sort().join(", ") : "no zip");
     if (zip2) {
       const man2 = zip2["blog.html"].toString("utf8");
       check("P2: manifest entries date-sorted with permanent ids",
         man2.includes("2606100002June post|2607110001E2E first post") && man2.includes("next-post:0003"));
+      // the month this publish did not touch keeps the line it had, the new
+      // month gets one, and the publish stamp moves on
+      const before2 = readFileSync(join(bdir, "blog.html"), "utf8");
+      const kept2607 = (/\nmonth:2607=([0-9a-z]{6})/.exec(before2) || [])[1];
+      const prevStamp = (/\nstamp:([0-9a-z]{6})/.exec(before2) || [])[1];
+      check("stamp: a publish into another month keeps the untouched month's line and adds its own",
+        !!kept2607 && man2.includes("month:2607=" + kept2607) && /\nmonth:2606=[0-9a-z]{6}\n/.test(man2) &&
+        !!prevStamp && !man2.includes("stamp:" + prevStamp),
+        (man2.match(/\n(stamp|month)[^\n]*/g) || []).join(" ") + " was " + kept2607 + "/" + prevStamp);
       writeBundle(zip2);
+      // the chain after a backdated month: the new month is the first, and
+      // the month after it was written again to point at it
+      const m2606c = zip2["blog/2606.html"].toString("utf8");
+      const m2607c = zip2["blog/2607.html"] ? zip2["blog/2607.html"].toString("utf8") : "";
+      // the index keeps every other post and gains this one
+      const t2 = JSON.parse(gunzipSync(Buffer.from(
+        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip2["search.js"].toString("utf8")) || [])[1],
+        "base64")).toString("utf8"));
+      check("search: a second publish adds its entry and keeps the first, oldest first",
+        t2.posts.length === 2 && t2.posts[0].id === "0002" && t2.posts[1].id === "0001" &&
+        t2.posts[0].title === "June post" && t2.posts[1].thumb.length > 100,
+        t2.posts.map((e) => e.id + ":" + e.date).join(" "));
+      check("chain: the backdated month is the first month, and its neighbour now points at it",
+        m2606c.includes('class="bm-older bm-older--end"') && !/rel="prev"/.test(m2606c) &&
+        m2607c.includes('<link rel="prev" href="2606.html" />') && m2607c.includes('<link rel="prefetch" href="2606.html" />') &&
+        m2607c.includes('<a class="bm-older" href="2606.html" rel="prev">Older posts: June 2026</a>') &&
+        m2607c.includes('id="p0001"'),
+        (m2607c.match(/bm-older[^\n]*/) || ["no 2607 in the bundle"])[0]);
     }
 
-    // P2-2. the index fetches nothing, ever. There is no month cache to test
-    // because there is no month load: the cards are in the page.
+    // PW7. arriving on a page that carries the bundle's own stamp clears
+    // the layer: the upload has happened, and there is nothing to stage.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    const arrived = await evaluate(`({
+      rec: sessionStorage.getItem('amh-publish-pending'),
+      lineHidden: (document.querySelector('.ced-publish') || { hidden: true }).hidden,
+      chips: document.querySelectorAll('.bs-post__staged').length,
+    })`);
+    check("layer: arriving on a page that carries the bundle clears the layer and its chips",
+      arrived.rec === null && arrived.lineHidden === true && arrived.chips === 0,
+      JSON.stringify(arrived).slice(0, 200));
+    await evaluate(`sessionStorage.removeItem('amh-publish-pending'); window.edit();`);
+
+    // ---- the month chain, on the served bundle: 2607 points at 2606 ----
+    // CH1. a month page boots with the two scripts and no console error,
+    // and site.js is inert there: it has no chrome to drive
+    exceptions.length = 0;
+    await send("Page.navigate", { url: B + "blog/2607.html" });
+    await waitLoaded();
+    await sleep(800);
+    const monthBoot = await evaluate(`({
+      site: !!(window.AMH && AMH.site && AMH.site.requestTick), blog: !!(window.AMH && AMH.blog),
+      work: !!(window.AMH && AMH.work && AMH.work.lightbox),
+      index: !!document.getElementById('blogStream'), month: document.body.classList.contains('blog-month'),
+      link: (document.querySelector('.bm-older') || {}).textContent || '',
+      scripts: [...document.querySelectorAll('script[src]')].map(s => s.getAttribute('src')).join(' '),
+    })`);
+    check("chain: a month page boots with site.js and blog.js and no console error",
+      exceptions.length === 0 && monthBoot.site && monthBoot.blog && monthBoot.work &&
+      !monthBoot.index && monthBoot.month &&
+      monthBoot.scripts === "../site.js ../work.js ../blog.js" && monthBoot.link === "Older posts: June 2026",
+      JSON.stringify(monthBoot).slice(0, 200) + " " + exceptions.join(" | ").slice(0, 120));
+    // MP2. a month page has the bar with its own picker, folds nothing,
+    // and zooms
+    const monthPage = await evaluate(`(function () {
+      var sel = document.getElementById('blogMonth');
+      var img = document.querySelector('.bp-fig img');
+      var out = {
+        bar: !!document.getElementById('blogBar'),
+        barTop: getComputedStyle(document.querySelector('.bs-bar')).top,
+        options: [].map.call(sel.options, function (o) { return o.value; }),
+        posts: document.querySelectorAll('.bs-post').length,
+        old: document.querySelectorAll('.blog-post').length,
+        buttons: document.querySelectorAll('.bs-more').length,
+        cursor: img ? getComputedStyle(img).cursor : ''
+      };
+      if (img) img.click();
+      return new Promise(function (res) { setTimeout(function () {
+        out.zoomed = !!(window.AMH.work && AMH.work.lightbox.isOpen());
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        /* the viewer marks the rest of the page inert while it is up, so
+           the next check waits for it to be gone before it clicks */
+        setTimeout(function () { out.closed = !AMH.work.lightbox.isOpen(); res(out); }, 600);
+      }, 700); });
+    })()`, { awaitPromise: true });
+    check("month page: the bar sticks at the top, the picker lists its months, and nothing is folded",
+      monthPage.bar && monthPage.barTop === "0px" &&
+      JSON.stringify(monthPage.options) === '["","2607","2606"]' &&
+      monthPage.posts === 1 && monthPage.old === 0 && monthPage.buttons === 0,
+      JSON.stringify(monthPage).slice(0, 220));
+    const monthFind = await evaluate(`(function () {
+      var input = document.querySelector('.bs-find__pill input');
+      if (!input) return Promise.resolve({ pill: false });
+      input.focus();
+      return new Promise(function (res) { setTimeout(function () {
+        input.value = 'e2e'; input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(function () {
+          var hit = document.querySelector('.bs-find__hit');
+          res({ pill: true, href: hit ? hit.getAttribute('href') : '',
+                open: !document.querySelector('.bs-find__list').hidden });
+        }, 600);
+      }, 1200); });
+    })()`, { awaitPromise: true });
+    check("month page: the pill is there too, and its hits are sibling month files",
+      monthFind.pill && monthFind.open && monthFind.href === "2607.html#p0001",
+      JSON.stringify(monthFind));
+    check("month page: an image zooms there too, and Escape closes the viewer",
+      monthPage.cursor === "zoom-in" && monthPage.zoomed && monthPage.closed,
+      JSON.stringify(monthPage).slice(0, 180));
+
+    // CH2. the click appends the older month under a divider, moves the
+    // link on, replaces the URL and the title, and puts focus on the divider
+    await evaluate(`document.querySelector('.bm-older').click()`);
+    await sleep(900);
+    const walked = await evaluate(`({
+      divider: (document.querySelector('.bm-divider') || {}).textContent || '',
+      posts: [...document.querySelectorAll('main .bs-post')].map(a => a.id).join(' '),
+      sources: document.querySelectorAll('main script[type="text/x-blog-source"]').length,
+      older: (document.querySelector('.bm-older') || {}).textContent || '',
+      end: !!document.querySelector('.bm-older--end'),
+      path: location.pathname, title: document.title,
+      focused: document.activeElement && document.activeElement.className,
+      dividerBorder: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider')),
+      firstAppended: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider + .bs-post')),
+    })`);
+    check("chain: Older posts appends June under a divider and the link becomes the end note",
+      walked.divider === "June 2026" && walked.posts === "p0001 p0002" && walked.sources === 1 &&
+      walked.end && /first month/.test(walked.older),
+      JSON.stringify(walked).slice(0, 240));
+    check("chain: the URL and the title follow the month reached, and focus lands on the divider",
+      /\/blog\/2606\.html$/.test(walked.path) && /June 2026/.test(walked.title) && walked.focused === "bm-divider" &&
+      walked.dividerBorder === "1px" && walked.firstAppended === "0px",
+      JSON.stringify(walked).slice(0, 240));
+    // CH3. a month that cannot be loaded says so in the link's place and
+    // stays a link; a second click while busy does nothing
+    await send("Page.navigate", { url: B + "blog/2607.html" });
+    await sleep(800);
+    const failed = await evaluate(`(function () {
+      var a = document.querySelector('.bm-older');
+      a.setAttribute('href', '2605.html');
+      a.click();
+      return new Promise(function (res) { setTimeout(function () {
+        var b = document.querySelector('.bm-older');
+        res({ text: b.textContent, href: b.getAttribute('href'), busy: b.getAttribute('aria-busy'), tag: b.tagName });
+      }, 700); });
+    })()`, { awaitPromise: true });
+    check("chain: a month that cannot be loaded says so and the link still works",
+      failed.text === "Could not load May 2026. Open it instead." && failed.href === "2605.html" &&
+      failed.busy === null && failed.tag === "A", JSON.stringify(failed));
+    const busy = await evaluate(`(function () {
+      var a = document.querySelector('.bm-older');
+      a.setAttribute('href', '2606.html');
+      var calls = 0;
+      var real = window.fetch;
+      window.fetch = function () { calls++; return new Promise(function () {}); };
+      a.click(); a.click(); a.click();
+      var r = { calls: calls, busy: a.getAttribute('aria-busy'), text: a.textContent };
+      window.fetch = real;
+      return r;
+    })()`);
+    check("chain: a second click while a month is loading does nothing",
+      busy.calls === 1 && busy.busy === "true" && busy.text === "Loading June 2026...", JSON.stringify(busy));
+    // CH4. from disk the click is a navigation: the page after it is the
+    // older month as a page of its own
+    await send("Page.navigate", { url: pathToFileURL(join(bdir, "blog/2607.html")).href });
+    await sleep(800);
+    await evaluate(`document.querySelector('.bm-older').click()`);
+    await sleep(800);
+    const onDisk = await evaluate(`({ protocol: location.protocol, path: location.pathname,
+      end: !!document.querySelector('.bm-older--end'), divider: !!document.querySelector('.bm-divider') })`);
+    check("chain: from disk Older posts opens the older month as a page",
+      onDisk.protocol === "file:" && /2606\.html$/.test(onDisk.path) && onDisk.end && !onDisk.divider,
+      JSON.stringify(onDisk));
+    // CH5. a month emptied by a delete: the month after it points back
+    // past it. First a post that creates May, then its deletion.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260501'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'May post'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = '<p>May.</p>'`);
+    await pressPublish();
+    const zipMay = await capturePublish();
+    const mayId = zipMay ? (/\n(?:[^\n]*\|)?260501(\d{4})May post/.exec(zipMay["blog.html"].toString("utf8")) || [])[1] : null;
+    check("chain: a new first month is written as the first, and the month after it points at it",
+      !!zipMay && !!mayId && zipMay["blog/2605.html"].toString("utf8").includes("bm-older--end") &&
+      !!zipMay["blog/2606.html"] && zipMay["blog/2606.html"].toString("utf8").includes('href="2605.html" rel="prev">Older posts: May 2026'),
+      zipMay ? Object.keys(zipMay).sort().join(", ") + " id " + mayId : "no zip");
+    if (zipMay) writeBundle(zipMay);
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.edit(${JSON.stringify(mayId || "0000")})`);
+    await sleep(1200);
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
+    const zipMayGone = await capturePublish();
+    check("chain: a delete that empties the first month repairs the month after it",
+      !!zipMayGone && !zipMayGone["blog/2605.html"] &&
+      (zipMayGone["ORPHANS.txt"] || Buffer.from("")).toString("utf8").includes("blog/2605.html") &&
+      !!zipMayGone["blog/2606.html"] && zipMayGone["blog/2606.html"].toString("utf8").includes("This is the first month."),
+      zipMayGone ? Object.keys(zipMayGone).sort().join(", ") : "no zip");
+    if (zipMayGone) {
+      writeBundle(zipMayGone);
+      rmSync(join(bdir, "blog/2605.html"), { force: true });
+      rmSync(join(bdir, "ORPHANS.txt"), { force: true });
+    }
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close')?.click()`);
+
+    // P2-2. the stream shows the newest month and loads nothing until it
+    // is asked to. Two months are deployed now, so the stream is July and
+    // the way back to June is a link.
     await send("Page.navigate", { url: B + "blog.html" });
     await sleep(2200);
     await evaluate(`
       window.__blogFetches = 0;
       const of = window.fetch;
       window.fetch = function (u) {
-        if (String(u).indexOf('blog/') === 0) window.__blogFetches++;
+        if (String(u).indexOf('blog/') !== -1) window.__blogFetches++;
         return of.apply(this, arguments);
       };`);
     await evaluate(`AMH.blog.show("", false)`);
-    await sleep(1800);
-    const nav2 = await evaluate(`({
-      months: document.querySelectorAll('.bs-months button').length,
-      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
-      fetches: window.__blogFetches,
-    })`);
-    check("P2: the month filter lists both months; the index is newest first",
-      nav2.months === 2 && JSON.stringify(nav2.posts) === '["p0001","p0002"]',
-      JSON.stringify(nav2));
-    // filtering to a month and back hides and shows cards that are already
-    // there, so nothing can be fetched however many times it is done
-    await evaluate(`AMH.blog.show("2606", false)`);
-    await sleep(900);
-    await evaluate(`AMH.blog.show("", false)`);
     await sleep(1200);
-    const again = await evaluate(`({
+    const nav2 = await evaluate(`({
+      posts: [...document.querySelectorAll('.bs-post')].map(a => a.id),
+      older: (document.querySelector('.bm-older') || { getAttribute: () => '' }).getAttribute('href'),
+      label: (document.querySelector('.bm-older') || {}).textContent || '',
       fetches: window.__blogFetches,
-      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
-      shown: [...document.querySelectorAll('.bs-card')].filter(c => !c.hidden).length,
     })`);
-    check("P2: filtering the index fetches nothing, which is why disk works",
-      again.fetches === 0 && nav2.fetches === 0 &&
-      JSON.stringify(again.posts) === '["p0001","p0002"]' && again.shown === 2,
-      "fetches " + nav2.fetches + " -> " + again.fetches +
-      " posts=" + again.posts.join(",") + " shown=" + again.shown);
+    check("P2: the stream is the newest month, and the way back to June is a link",
+      JSON.stringify(nav2.posts) === '["s0001"]' && nav2.older === "blog/2606.html" &&
+      /Older posts: June 2026/.test(nav2.label) && nav2.fetches === 0,
+      JSON.stringify(nav2));
+    // ---- the cuts ----
+    // CUT1. the rules, one post per rule. The bodies are built here so the
+    // limits are the only thing under test: CUT_SOFT is 12 lines or 900
+    // characters, CUT_HARD is 40 lines or 3000 characters.
+    const cuts = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      function post(id, inner) {
+        var a = document.createElement('article');
+        a.className = 'bs-post';
+        a.id = 's' + id;
+        a.setAttribute('data-id', id);
+        a.setAttribute('data-date', '260711');
+        a.innerHTML = '<div class="bs-post__body">' + inner + '</div>';
+        stream.appendChild(a);
+        return a;
+      }
+      function ps(n, word) { var o = ''; for (var i = 0; i < n; i++) o += '<p>' + (word || 'line ' + i) + '</p>'; return o; }
+      var made = {
+        short: post('9001', ps(3)),
+        soft: post('9002', ps(20)),
+        flag: post('9003', ps(3) + '<span class="bp-cut" data-cut="soft"></span>' + ps(6)),
+        hard: post('9004', ps(60)),
+        both: post('9005', ps(3) + '<span class="bp-cut" data-cut="hard"></span>' + ps(6) +
+                            '<span class="bp-cut" data-cut="soft"></span>' + ps(6)),
+        fig: post('9006', ps(11) + '<figure class="bp-fig"><img alt="" /><figcaption>cap</figcaption></figure>' + ps(6)),
+        head: post('9007', ps(11) + '<h3>A heading</h3>' + ps(6)),
+        chars: post('9008', '<p>' + new Array(200).join('word ') + '</p><p>a</p><p>b</p>')
+      };
+      var folded = AMH.blog.cut();
+      function look(el) {
+        var body = el.querySelector('.bs-post__body');
+        var blocks = [].slice.call(body.children);
+        var btn = body.querySelector('.bs-more');
+        var shown = blocks.filter(function (b) { return !b.hidden && b.tagName !== 'BUTTON'; });
+        return {
+          kind: btn ? btn.getAttribute('data-more') : '',
+          label: btn ? btn.textContent : '',
+          shown: shown.length,
+          lastShown: shown.length ? shown[shown.length - 1].tagName : '',
+          hidden: blocks.filter(function (b) { return b.hidden; }).length
+        };
+      }
+      var out = { folded: folded };
+      Object.keys(made).forEach(function (k) { out[k] = look(made[k]); });
+      return out;
+    })()`);
+    check("cuts: a short post is not folded, and a long one gets Expand for more",
+      cuts.short.kind === "" && cuts.short.hidden === 0 &&
+      cuts.soft.kind === "soft" && cuts.soft.label === "Expand for more" &&
+      cuts.soft.shown === 12 && cuts.soft.hidden === 8,
+      JSON.stringify({ short: cuts.short, soft: cuts.soft }));
+    check("cuts: a soft flag puts the cut where the flag is, whatever the length",
+      cuts.flag.kind === "soft" && cuts.flag.shown === 3 && cuts.flag.hidden === 7,
+      JSON.stringify(cuts.flag));
+    check("cuts: a post past both limits folds at the soft one first",
+      cuts.hard.kind === "soft" && cuts.hard.shown === 12 && cuts.hard.hidden === 48,
+      JSON.stringify(cuts.hard));
+    check("cuts: a hard flag before the soft cut wins, and the soft cut is dropped",
+      cuts.both.kind === "hard" && cuts.both.shown === 3, JSON.stringify(cuts.both));
+    check("cuts: the block that crosses the limit is shown whole, so a figure is never split",
+      cuts.fig.kind === "soft" && cuts.fig.lastShown === "FIGURE" && cuts.fig.shown === 12,
+      JSON.stringify(cuts.fig));
+    check("cuts: a heading is never left with nothing under it",
+      cuts.head.kind === "soft" && cuts.head.lastShown === "P" && cuts.head.shown === 13,
+      JSON.stringify(cuts.head));
+    check("cuts: the character limit folds a post that is short in lines",
+      cuts.chars.kind === "soft" && cuts.chars.shown === 1 && cuts.chars.hidden === 2,
+      JSON.stringify(cuts.chars));
+    check("cuts: every folded post was counted once", cuts.folded === 7, String(cuts.folded));
+
+    // CUT2. the reveal: Expand opens as far as the hard cut and hands over
+    // to Read more; Read more opens the rest; the buttons go with the press
+    const reveal = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      var a = document.createElement('article');
+      a.className = 'bs-post'; a.id = 's9009'; a.setAttribute('data-id', '9009');
+      a.setAttribute('data-date', '260711');
+      var ps = '';
+      for (var i = 0; i < 70; i++) ps += '<p>line ' + i + '</p>';
+      a.innerHTML = '<div class="bs-post__body">' + ps + '</div>';
+      stream.appendChild(a);
+      /* a soft flag early and the hard limit later: both controls, in turn */
+      var body = a.querySelector('.bs-post__body');
+      var flag = document.createElement('span');
+      flag.className = 'bp-cut'; flag.setAttribute('data-cut', 'soft');
+      body.insertBefore(flag, body.children[4]);
+      AMH.blog.cut();
+      function state() {
+        var blocks = [].slice.call(body.children);
+        var btn = body.querySelector('.bs-more');
+        return { kind: btn ? btn.getAttribute('data-more') : '',
+                 shown: blocks.filter(function (b) { return !b.hidden && b.tagName === 'P'; }).length,
+                 buttons: body.querySelectorAll('.bs-more').length };
+      }
+      var first = state();
+      body.querySelector('.bs-more').click();
+      var second = state();
+      body.querySelector('.bs-more').click();
+      var third = state();
+      a.remove();
+      return { first: first, second: second, third: third };
+    })()`);
+    check("cuts: Expand opens as far as the hard cut and hands over to Read more",
+      reveal.first.kind === "soft" && reveal.first.shown === 4 &&
+      reveal.second.kind === "hard" && reveal.second.shown === 40 && reveal.second.buttons === 1,
+      JSON.stringify(reveal).slice(0, 200));
+    check("cuts: Read more opens the rest and the last button goes with it",
+      reveal.third.kind === "" && reveal.third.shown === 70 && reveal.third.buttons === 0,
+      JSON.stringify(reveal.third));
+
+    // ZM1. a click on any image in a post opens the shared viewer at that
+    // image, and the set is that post's own images in order
+    const zoom = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      var a = document.createElement('article');
+      a.className = 'bs-post'; a.id = 's9100'; a.setAttribute('data-id', '9100');
+      a.setAttribute('data-date', '260711');
+      a.innerHTML = '<div class="bs-post__body">' +
+        '<figure class="bp-fig"><img src="blog/260711_img0001.jpg" alt="Alt one" />' +
+        '<figcaption>Cap one</figcaption></figure>' +
+        '<figure class="bp-fig"><img src="blog/260711_img0002.png" alt="Alt two" />' +
+        '<figcaption>Cap two</figcaption></figure></div>';
+      stream.appendChild(a);
+      var second = a.querySelectorAll('.bp-fig img')[1];
+      second.click();
+      return new Promise(function (res) { setTimeout(function () {
+        var lb = document.querySelector('.lightbox');
+        var out = { open: !!lb && AMH.work.lightbox.isOpen(),
+                    cursor: getComputedStyle(second).cursor,
+                    caption: (document.querySelector('.lightbox__caption') || {}).textContent || '',
+                    src: (document.querySelector('.lightbox__img--active') || {}).getAttribute('src') || '' };
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        setTimeout(function () {
+          out.closed = !AMH.work.lightbox.isOpen();
+          a.remove();
+          res(out);
+        }, 500);
+      }, 700); });
+    })()`, { awaitPromise: true });
+    check("zoom: a click on a figure opens the viewer at that image, and Escape closes it",
+      zoom.open && /260711_img0002\.png$/.test(zoom.src) && /Cap two/.test(zoom.caption) &&
+      zoom.cursor === "zoom-in" && zoom.closed,
+      JSON.stringify(zoom).slice(0, 200));
+
+    // FT1. a tag chip filters the feed in place: it does not leave the
+    // page, the posts without the tag go, and the line says what is on
+    const tagFilter = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      function post(id, tags) {
+        var a = document.createElement('article');
+        a.className = 'bs-post'; a.id = 's' + id;
+        a.setAttribute('data-id', id); a.setAttribute('data-date', '260711');
+        a.setAttribute('data-tags', tags);
+        a.innerHTML = '<div class="bs-post__body"><p>body</p></div>' +
+          '<div class="bs-post__tags"><a href="blog.html?t=' + tags.split(' ')[0] + '">#' +
+          tags.split(' ')[0] + '</a></div>';
+        stream.appendChild(a);
+        return a;
+      }
+      var a = post('9201', 'xr planetarium'), b = post('9202', 'notes');
+      var chip = a.querySelector('.bs-post__tags a');
+      var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      chip.dispatchEvent(ev);
+      return new Promise(function (res) { setTimeout(function () {
+        var line = document.querySelector('.bs-showing');
+        var out = { prevented: ev.defaultPrevented, search: location.search,
+                    kept: !a.hidden, gone: b.hidden,
+                    line: line ? line.textContent : '',
+                    clear: !!(line && line.querySelector('.bs-showing__clear')) };
+        if (line) line.querySelector('.bs-showing__clear').click();
+        setTimeout(function () {
+          out.afterClear = { kept: !a.hidden, shown: !b.hidden,
+                             line: !!document.querySelector('.bs-showing'),
+                             search: location.search };
+          a.remove(); b.remove();
+          res(out);
+        }, 300);
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("tags: a chip filters the feed in place and the address carries the filter",
+      tagFilter.prevented && tagFilter.search === "?t=xr" && tagFilter.kept && tagFilter.gone,
+      JSON.stringify(tagFilter).slice(0, 200));
+    check("tags: the line says what is showing, and clear puts every post back",
+      /Showing/.test(tagFilter.line) && /#xr/.test(tagFilter.line) && /1 post here/.test(tagFilter.line) &&
+      tagFilter.clear && tagFilter.afterClear.shown && tagFilter.afterClear.kept &&
+      !tagFilter.afterClear.line && tagFilter.afterClear.search === "",
+      JSON.stringify(tagFilter).slice(0, 240));
+
+    // FT2. ?t= on arrival filters the same way, and lists the posts with
+    // that tag that this page does not hold
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?t=e2e" });
+    await sleep(2200);
+    const onArrival = await evaluate(`({
+      line: (document.querySelector('.bs-showing') || {}).textContent || '',
+      shown: [...document.querySelectorAll('.bs-post')].filter(p => !p.hidden).length,
+      hidden: [...document.querySelectorAll('.bs-post')].filter(p => p.hidden).length,
+    })`);
+    check("tags: ?t= on arrival filters the page, and an unknown tag hides every post",
+      /Showing/.test(onArrival.line) && onArrival.shown === 0 && onArrival.hidden === 1,
+      JSON.stringify(onArrival));
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
+    await sleep(2200);
+
+    // CUT3. the bar: it sticks under the fixed header, and the picker lists
+    // the months newest first with All months at the top
+    const bar = await evaluate(`(function () {
+      var el = document.getElementById('blogBar');
+      var sel = document.getElementById('blogMonth');
+      var before = el.getBoundingClientRect().top;
+      window.scrollTo(0, 1200);
+      return new Promise(function (res) { setTimeout(function () {
+        var after = el.getBoundingClientRect().top;
+        var head = document.getElementById('header').getBoundingClientRect().bottom;
+        window.scrollTo(0, 0);
+        res({ position: getComputedStyle(el).position, before: Math.round(before),
+              after: Math.round(after), head: Math.round(head),
+              options: [].map.call(sel.options, function (o) { return o.value + ':' + o.textContent; }),
+              find: !!document.getElementById('blogFind'),
+              pill: !!document.querySelector('#blogFind .bs-find__pill input') });
+      }, 800); });
+    })()`, { awaitPromise: true });
+    check("bar: it sticks under the site header once the heading scrolls away",
+      bar.position === "sticky" && bar.before > bar.after && Math.abs(bar.after - bar.head) <= 2,
+      JSON.stringify(bar).slice(0, 200));
+    check("bar: the picker lists All months and then each month, newest first",
+      JSON.stringify(bar.options) === '[":All months","2607:July 2026 (1)","2606:June 2026 (1)"]' &&
+      bar.find && bar.pill, JSON.stringify(bar.options) + " pill=" + bar.pill);
+
+    // the injected posts go before the loader tests read the stream
+    await evaluate(`[...document.querySelectorAll('.bs-post')].forEach(function (p) {
+      if (p.id >= 's9000') p.remove(); });`);
+
+    // ST-B. the loader at the root: the older month is appended into the
+    // stream, its paths lose the step up, its ids become "s", and the
+    // address bar stays on blog.html
+    await evaluate(`document.querySelector('.bm-older').click()`);
+    await sleep(1200);
+    const walkedRoot = await evaluate(`({
+      posts: [...document.querySelectorAll('.bs-post')].map(a => a.id),
+      shapes: [...document.querySelectorAll('.bs-post')].map(a => a.className),
+      divider: (document.querySelector('.bm-divider') || {}).textContent || '',
+      byline: (document.querySelector('#s0002 .bs-post__by b') || {}).textContent || '',
+      when: (document.querySelector('#s0002 .bs-post__when') || { getAttribute: () => '' }).getAttribute('href'),
+      title: (document.querySelector('#s0002 .bs-post__title') || {}).textContent || '',
+      end: !!document.querySelector('.bm-older--end'),
+      path: location.pathname, search: location.search,
+      sources: document.querySelectorAll('script[type="text/x-blog-source"]').length,
+      up: [...document.querySelectorAll('#blogStream [src],#blogStream [href]')]
+        .filter(e => (e.getAttribute('src') || e.getAttribute('href') || '').indexOf('../') === 0).length,
+      old: document.querySelectorAll('.blog-post').length,
+    })`);
+    check("P2: the loader appends June into the stream, in the stream's own markup",
+      JSON.stringify(walkedRoot.posts) === '["s0001","s0002"]' &&
+      walkedRoot.shapes.every((c) => c === "bs-post") && walkedRoot.old === 0 &&
+      walkedRoot.divider === "June 2026" && walkedRoot.byline === "AARON M. HARRIS" &&
+      walkedRoot.when === "blog/2606.html#p0002" && walkedRoot.title === "June post",
+      JSON.stringify(walkedRoot).slice(0, 260));
+    check("P2: it rewrites the paths and the ids, keeps no source, and stays on blog.html",
+      walkedRoot.up === 0 && walkedRoot.sources === 0 && walkedRoot.end &&
+      /blog\.html$/.test(walkedRoot.path) && walkedRoot.search === "",
+      JSON.stringify(walkedRoot).slice(0, 260));
+    // the appended post's images resolve from the root: a path left at
+    // "../blog/..." would 404 here and nowhere else
+    const appendedImgs = await evaluate(`[...document.querySelectorAll('#blogStream img')].map(i => i.getAttribute('src')).join(' ')`);
+    check("P2: no appended path keeps the step up out of blog/",
+      !/\.\.\//.test(appendedImgs), appendedImgs.slice(0, 160));
+
+    // CUT4. the picker, with June already on the page: it scrolls to that
+    // month's first post rather than leaving the page
+    const pickLoaded = await evaluate(`(function () {
+      var sel = document.getElementById('blogMonth');
+      sel.value = '2606';
+      sel.dispatchEvent(new Event('change'));
+      return new Promise(function (res) { setTimeout(function () {
+        var post = document.querySelector('.bs-post[data-date^="2606"]');
+        var top = post ? post.getBoundingClientRect().top : 9999;
+        res({ path: location.pathname, scrolled: window.scrollY > 0, top: Math.round(top) });
+      }, 500); });
+    })()`, { awaitPromise: true });
+    check("bar: picking a month that is on the page scrolls to it and stays put",
+      pickLoaded.path.endsWith("/blog.html") && pickLoaded.scrolled && Math.abs(pickLoaded.top) < 200,
+      JSON.stringify(pickLoaded));
 
     // P2-3. edit a published post's body (same title/date)
     await send("Page.navigate", { url: B + "blog.html" });
@@ -2737,7 +4091,7 @@ async function main() {
     await evaluate(`
       var t = document.querySelector('.bc-write textarea');
       t.value = t.value + '\\n<p>EDITED BODY</p>';`);
-    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await pressPublish();
     const zip3 = await capturePublish();
     // index.html is absent because the manifest entry did not change, so the
     // highlights block renders the same bytes it already has. A publish that
@@ -2748,8 +4102,17 @@ async function main() {
       !zip3["ORPHANS.txt"] && !Object.keys(zip3).some((n) => /img\d{4}\.(jpg|png)$/.test(n)),
       zip3 ? Object.keys(zip3).sort().join(", ") : "no zip");
     if (zip3) {
-      check("P2: body republish leaves blog.html byte-identical (no manifest change)",
-        zip3["blog.html"].equals(readFileSync(join(bdir, "blog.html"))));
+      // the manifest's stamp and the month's line change at every publish,
+      // and the post's own card follows its body; nothing else on the page
+      // does
+      const stampLines = /\n(stamp|month):[^\n]*/g;
+      const was = readFileSync(join(bdir, "blog.html"), "utf8");
+      const now = zip3["blog.html"].toString("utf8");
+      check("P2: body republish changes only the stamp lines and the post in the stream",
+        stripSpans(was, ["blog-stream"]).replace(stampLines, "") === stripSpans(now, ["blog-stream"]).replace(stampLines, "") &&
+        (was.match(stampLines) || []).join() !== (now.match(stampLines) || []).join() &&
+        /bs-post__body[\s\S]*EDITED BODY/.test(now),
+        firstDiff(stripSpans(was, ["blog-stream"]).replace(stampLines, ""), stripSpans(now, ["blog-stream"]).replace(stampLines, "")));
       writeBundle(zip3);
     }
 
@@ -2761,7 +4124,7 @@ async function main() {
     await sleep(1200);
     await evaluate(`document.querySelector('.bc-date').value = '260609'`);
     await evaluate(`document.querySelector('.bc-title').value = 'Moved post'`);
-    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await pressPublish();
     const zip4 = await capturePublish();
     check("P2: cross-month move produced a bundle", !!zip4,
       zip4 ? Object.keys(zip4).sort().join(", ") : "no zip");
@@ -2794,16 +4157,16 @@ async function main() {
     await sleep(400);
     await sleep(600);
     const after4 = await evaluate(`({
-      months: document.querySelectorAll('.bs-months button').length,
-      posts: [...document.querySelectorAll('.bs-card')].map(a => a.id),
-      title: (document.querySelector('#p0001 h3') || {}).textContent,
-      more: [...document.querySelectorAll('.bs-card__more')].map(a => a.getAttribute('href')),
-      editBtns: document.querySelectorAll('.bs-card .bs-retry').length,
+      posts: [...document.querySelectorAll('.bs-post')].map(a => a.id),
+      title: (document.querySelector('#s0001 .bs-post__title') || {}).textContent,
+      when: [...document.querySelectorAll('.bs-post__when')].map(a => a.getAttribute('href')),
+      editBtns: document.querySelectorAll('.bs-post .bs-retry').length,
+      end: !!document.querySelector('.bm-older--end'),
     })`);
-    check("P2: after the move the index is one June month, both cards relinked",
-      after4.months === 1 && JSON.stringify(after4.posts) === '["p0002","p0001"]' &&
-      after4.title === "Moved post" && after4.editBtns === 2 &&
-      after4.more.every(h => h.indexOf("blog/2606.html#") === 0),
+    check("P2: after the move the stream is the one June month, both posts relinked",
+      JSON.stringify(after4.posts) === '["s0002","s0001"]' &&
+      after4.title === "Moved post" && after4.editBtns === 2 && after4.end &&
+      after4.when.every(h => h.indexOf("blog/2606.html#") === 0),
       JSON.stringify(after4));
 
     // P2-6. delete a post (keeps the month, which still has p0001)
@@ -2814,6 +4177,14 @@ async function main() {
     await sleep(1200);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
     const zip5 = await capturePublish();
+    if (zip5 && zip5["search.js"]) {
+      const t5 = JSON.parse(gunzipSync(Buffer.from(
+        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip5["search.js"].toString("utf8")) || [])[1],
+        "base64")).toString("utf8"));
+      check("search: a delete takes that post out of the index and leaves the rest",
+        !t5.posts.some((e) => e.id === "0002") && t5.posts.some((e) => e.id === "0001"),
+        t5.posts.map((e) => e.id).join(" "));
+    }
     check("P2: delete bundle removes entry, regenerates month",
       !!zip5 && !zip5["blog.html"].toString("utf8").includes("June post") &&
       !!zip5["blog/2606.html"] && !zip5["blog/2606.html"].toString("utf8").includes('id="p0002"') &&
@@ -2827,14 +4198,292 @@ async function main() {
     await evaluate(ZIP_CAPTURE);
     await evaluate(`window.edit.blog.rebuild()`);
     const zip6 = await capturePublish();
-    check("P2: rebuild ships all months + shared files, no blog.html",
+    // blog.html is in every rebuild bundle now: the manifest is written
+    // again from the month files and carries a new stamp. index.html is
+    // not, because no entry changed and the highlights are the same bytes.
+    check("P2: rebuild ships all months, the shared files and blog.html, not index.html",
       !!zip6 && !!zip6["blog/2606.html"] && !!zip6["sitemap.xml"] &&
-      !!zip6["robots.txt"] && !zip6["blog.html"],
+      !!zip6["robots.txt"] && !!zip6["blog.html"] && !zip6["index.html"],
       zip6 ? Object.keys(zip6).sort().join(", ") : "no zip");
     if (zip6) {
+      const t6 = JSON.parse(gunzipSync(Buffer.from(
+        (/window\.AMH_SEARCH = "([^"]*)";/.exec(zip6["search.js"].toString("utf8")) || [])[1],
+        "base64")).toString("utf8"));
+      const t6prev = JSON.parse(gunzipSync(Buffer.from(
+        (/window\.AMH_SEARCH = "([^"]*)";/.exec(readFileSync(join(bdir, "search.js"), "utf8")) || [])[1],
+        "base64")).toString("utf8"));
+      check("search: a rebuild writes the index again from the sources, keeping the thumbnails",
+        t6.posts.length === t6prev.posts.length &&
+        JSON.stringify(t6.posts.map((e) => e.id + e.text)) ===
+          JSON.stringify(t6prev.posts.map((e) => e.id + e.text)) &&
+        t6.posts.every((e, i) => e.thumb === t6prev.posts[i].thumb) &&
+        t6.stamp !== t6prev.stamp,
+        t6.posts.map((e) => e.id + ":" + e.thumb.length).join(" "));
       check("P2: rebuild is idempotent (matches the deployed month byte-for-byte)",
         zip6["blog/2606.html"].equals(readFileSync(join(bdir, "blog/2606.html"))));
+      writeBundle(zip6);
     }
+
+    // P2-8. the manifest is derivable. A rebuild takes the entry list from
+    // the month files, so a title changed by hand in the file reaches the
+    // manifest, the console names the difference, and the highlights
+    // follow. The counters never go down, even when the manifest holds a
+    // larger one than the posts need.
+    const m2606h = readFileSync(join(bdir, "blog/2606.html"), "utf8");
+    writeFileSync(join(bdir, "blog/2606.html"), m2606h.replace('data-title="Moved post"', 'data-title="Hand title"'));
+    const idx8 = readFileSync(join(bdir, "blog.html"), "utf8");
+    writeFileSync(join(bdir, "blog.html"), idx8.replace(/next-post:\d{4}/, "next-post:0009"));
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.__warned = []; (function () { var ow = console.warn;
+      console.warn = function (m) { window.__warned.push(String(m)); ow.apply(console, arguments); }; })()`);
+    await evaluate(`window.edit.blog.rebuild()`);
+    const zip8 = await capturePublish();
+    const warned8 = await evaluate(`window.__warned`);
+    const man8 = zip8 && zip8["blog.html"] ? zip8["blog.html"].toString("utf8") : "";
+    check("rebuild: a title changed by hand in the month file wins, and the manifest is written from the files",
+      !!zip8 && man8.includes("2606090001Hand title") && !man8.includes("Moved post"),
+      (man8.match(/\d{10}[^|\n<]*/g) || []).join(" | ") || "no zip");
+    check("rebuild: every difference it writes is named on the console",
+      warned8.some((w) => /p0001 is "Hand title"/.test(w) && /The month file wins/.test(w)),
+      JSON.stringify(warned8).slice(0, 220));
+    check("rebuild: the counters never go down",
+      man8.includes("next-post:0009") && man8.includes("next-img:0003"),
+      (man8.match(/next-(post|img):\d{4}/g) || []).join(" "));
+    check("rebuild: a changed entry reaches the home page highlights",
+      !!zip8 && !!zip8["index.html"] && zip8["index.html"].toString("utf8").includes("Hand title"),
+      zip8 ? Object.keys(zip8).sort().join(", ") : "no zip");
+    if (zip8) {
+      const mo8 = zip8["blog/2606.html"].toString("utf8");
+      const ms8 = (/GENERATED[^>]*stamp:([0-9a-z]{6})/.exec(mo8) || [])[1];
+      check("rebuild: the rebuilt month file carries the title and a month stamp the manifest repeats",
+        mo8.includes('<h3 class="bs-post__title">Hand title</h3>') && !!ms8 && man8.includes("month:2606=" + ms8),
+        "stamp " + ms8);
+      writeBundle(zip8);
+    }
+
+    // P2-9. the two codes. BLG-E10: a month file from another publish is
+    // warned about at the hand-off, with both stamps, and taken anyway.
+    // BLG-E11: a manifest that changed under the composer stops the publish
+    // with the code, and the composer keeps the post.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    const e10 = await evaluate(`(function () {
+      var warned = [];
+      var ow = console.warn;
+      console.warn = function (m) { warned.push(String(m)); };
+      var p = AMH.tool.handOff("blog/2606.html", new Error("fetch refused"));
+      var zone = document.querySelector('.ced-handoff__zone');
+      var dt = new DataTransfer();
+      dt.items.add(new File(["<!DOCTYPE html>\\n<!-- GENERATED by the blog.html publish engine on 2026-01-01; " +
+        "stamp:000000; hand edits are overwritten -->\\n<html></html>"], "2606.html", { type: "text/html" }));
+      zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return p.then(function (txt) {
+        console.warn = ow;
+        return { took: /stamp:000000/.test(txt), gone: !document.querySelector('.ced-handoff__zone'),
+                 warned: warned.filter(function (w) { return /BLG-E10/.test(w); }) };
+      });
+    })()`, { awaitPromise: true });
+    check("BLG-E10: a month file from another publish is warned about, with both stamps, and taken",
+      e10.took && e10.gone && e10.warned.length === 1 &&
+      /2606\.html says 000000, the page says [0-9a-z]{6}\./.test(e10.warned[0]),
+      JSON.stringify(e10).slice(0, 220));
+    await sleep(800);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260615'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'Stale manifest post'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Never built.</p>'`);
+    const idx9 = readFileSync(join(bdir, "blog.html"), "utf8");
+    writeFileSync(join(bdir, "blog.html"), idx9.replace("next-img:0003", "next-img:0004"));
+    const step9 = await pressPublish();
+    await sleep(900);
+    const e11 = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      var r = { step: box ? box.getAttribute('data-step') : 'none',
+                body: box ? box.querySelector('.bc-wiz__body').textContent : '',
+                title: document.querySelector('.bc-title').value, zip: window.__zipB64 };
+      var close = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; });
+      if (close) close.click();
+      return r;
+    })()`);
+    writeFileSync(join(bdir, "blog.html"), idx9);
+    check("BLG-E11: a manifest that changed under the composer stops the publish with the code; the composer keeps the post",
+      step9 !== "timeout" && e11.step === "failed" && /BLG-E11/.test(e11.body) &&
+      /Reload the page and compose again/.test(e11.body) && /Save the draft, reload/.test(e11.body) &&
+      e11.title === "Stale manifest post" && !e11.zip,
+      step9 + " " + JSON.stringify(e11).slice(0, 220));
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Close').click()`);
+    await sleep(300);
+
+    // P2-10. an old HTML post opens in HTML mode and republishes as HTML.
+    // The served month is put into the pre-V047 shape first: no format on
+    // the source block, which is what every post published before it has.
+    const m2606x = readFileSync(join(bdir, "blog/2606.html"), "utf8");
+    writeFileSync(join(bdir, "blog/2606.html"), m2606x.replace(/ data-format="(?:md|html)"/g, ""));
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.edit("0001")`);
+    await sleep(1200);
+    const htmlMode = await evaluate(`({
+      mode: document.querySelector('.bc-panel').getAttribute('data-mode'),
+      status: document.querySelector('.bc-status').textContent,
+      tools: [...document.querySelectorAll('.bc-write .ced-tool')].map(b => b.textContent).join('|'),
+      title: document.querySelector('.bc-title').value,
+    })`);
+    check("HTML mode: a post from before V047 opens as HTML, with the HTML toolbar and the note",
+      htmlMode.mode === "html" && /written in HTML\. It stays HTML/.test(htmlMode.status) &&
+      /^B\|I\|Link\|BR\|/.test(htmlMode.tools) && /H3\|P$/.test(htmlMode.tools) && htmlMode.title === "Hand title",
+      JSON.stringify(htmlMode).slice(0, 220));
+    await pressPublish();
+    const zip10 = await capturePublish();
+    const mo10 = zip10 && zip10["blog/2606.html"] ? zip10["blog/2606.html"].toString("utf8") : "";
+    const blk10 = (/<article class="bs-post" id="p0001"[\s\S]*?<\/article>/.exec(mo10) || [])[0] || "";
+    check("HTML mode: it republishes as html, with the body, the title and the source unchanged",
+      /data-format="html"/.test(blk10) && blk10.includes("EDITED BODY") && blk10.includes('data-title="Hand title"') &&
+      blk10.includes('<h3 class="bs-post__title">Hand title</h3>') &&
+      blk10.includes("[img0001,Cap one|Alt one][png0002,Cap two]"),
+      blk10.slice(0, 220).replace(/\s+/g, " ") || "no block");
+    if (zip10) writeBundle(zip10);
+
+    // P2-11. a Markdown post with a table, a flag, an image, tags, a time
+    // and a zone, and no title. The image number is the manifest's next.
+    const nextImg = (/next-img:(\d{4})/.exec(readFileSync(join(bdir, "blog.html"), "utf8")) || [])[1];
+    const MD_SRC = "We ran the **dome** test.\n\n| Rig | Frames |\n| --- | ---: |\n| new | 90 |\n\n" +
+      "{expandformore}\n\n[img" + nextImg + ",Dome at dusk|The dome]\n\nThe rest.";
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260615'`);
+    await evaluate(`document.querySelector('.bc-title').value = ''`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = ${JSON.stringify(MD_SRC)}`);
+    await evaluate(`document.querySelector('.bc-tags input').value = '#xr, planetarium xr'`);
+    await evaluate(`(() => { const t = document.querySelector('.bc-time'); t.dispatchEvent(new Event('focus'));
+      t.value = '6:39 pm'; t.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('.bc-zone').value = 'EDT'; })()`);
+    await evaluate(`(function () {
+      var cv = document.createElement('canvas'); cv.width = 800; cv.height = 600;
+      var cx = cv.getContext('2d'); cx.fillStyle = '#224466'; cx.fillRect(0, 0, 800, 600);
+      return new Promise(function (res) { cv.toBlob(function (b) {
+        var dt = new DataTransfer(); dt.items.add(new File([b], 'dome.png', { type: 'image/png' }));
+        document.querySelector('.bc-drop').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        res(true);
+      }, 'image/png'); });
+    })()`, { awaitPromise: true });
+    for (let i = 0; i < 20; i++) {
+      if ((await evaluate(`document.querySelectorAll('.bc-card').length`)) === 1) break;
+      await sleep(300);
+    }
+    await evaluate(`[...document.querySelectorAll('.bc-tab')].find(b => b.textContent === 'Preview').click()`);
+    await sleep(400);
+    const preview = await evaluate(`({
+      table: !!document.querySelector('.bc-preview table'), strong: !!document.querySelector('.bc-preview strong'),
+      img: (document.querySelector('.bc-preview .bs-post__body img') || {}).src || '',
+      h2: !!document.querySelector('.bc-preview .bs-post__title'),
+      time: (document.querySelector('.bc-preview time') || {}).textContent || '',
+      zone: (document.querySelector('.bc-preview .bs-post__zone') || {}).textContent || '' })`);
+    check("Markdown: the preview renders through the renderer, the image in place, no h2 without a title",
+      preview.table && preview.strong && /^blob:/.test(preview.img) && !preview.h2 &&
+      /6:39 pm/.test(preview.time) && /EDT/.test(preview.zone),
+      JSON.stringify(preview).slice(0, 200));
+    await pressPublish();
+    const zip11 = await capturePublish();
+    const man11 = zip11 && zip11["blog.html"] ? zip11["blog.html"].toString("utf8") : "";
+    const mo11 = zip11 && zip11["blog/2606.html"] ? zip11["blog/2606.html"].toString("utf8") : "";
+    const newId = (/\n(?:[^\n]*\|)?260615(\d{4})We ran the dome test\. Rig\.\.\./.exec(man11) || [])[1];
+    const blk11 = newId ? (new RegExp('<article class="bs-post" id="p' + newId + '"[\\s\\S]*?</article>').exec(mo11) || [])[0] || "" : "";
+    check("Markdown: a titleless post gets a derived manifest title, an empty data-title and no h2",
+      !!newId && blk11.includes('data-title=""') && !/bs-post__title/.test(blk11),
+      "id " + newId + " " + (man11.match(/\n[^\n]*We ran[^\n]*/) || [""])[0].slice(0, 120));
+    check("Markdown: the month file carries the rendered HTML, the facts and the Markdown source",
+      blk11.includes('data-time="1839"') && blk11.includes('data-zone="EDT"') && blk11.includes('data-tags="xr planetarium"') &&
+      blk11.includes('<time datetime="2026-06-15T18:39">June 15, 2026 · 6:39 pm</time>' +
+        '<span class="bs-post__zone">EDT</span>') &&
+      blk11.includes("<table>") && blk11.includes('<span class="bp-cut" data-cut="soft"></span>') &&
+      blk11.includes('<figure class="bp-fig"><img src="../blog/260615_img' + nextImg + '.jpg"') &&
+      blk11.includes('data-format="md"') && blk11.includes(MD_SRC),
+      blk11.slice(0, 300).replace(/\s+/g, " ") || "no block");
+    // the stream shows the newest month, which is June, and this post is
+    // in it: the whole post, rendered, with no title and so no h3
+    const stream11 = man11.slice(man11.indexOf("<!--[edit:blog-stream]-->"),
+      man11.indexOf("<!--[/edit:blog-stream]-->"));
+    check("Markdown: the stream carries the new post whole, with no title and no h3",
+      stream11.includes('<article class="bs-post" id="s' + newId + '"') &&
+      stream11.includes('data-tags="xr planetarium"') && stream11.includes("<table>") &&
+      stream11.includes('<span class="bp-cut" data-cut="soft"></span>') &&
+      !/id="s0004"[\s\S]*?bs-post__title/.test(stream11) &&
+      stream11.includes('<a href="blog.html?t=xr">#xr</a>'),
+      stream11.replace(/\s+/g, " ").slice(0, 240));
+    if (zip11) writeBundle(zip11);
+
+    // P2-12. a rebuild of a month with both kinds regenerates both kinds, the
+    // same bytes, and the post reopens as the Markdown that was typed
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.rebuild()`);
+    const zip12 = await capturePublish();
+    const mo12 = zip12 && zip12["blog/2606.html"] ? zip12["blog/2606.html"].toString("utf8") : "";
+    check("rebuild: a month with both kinds regenerates both kinds, byte for byte",
+      (mo12.match(/data-format="html"/g) || []).length === 1 && (mo12.match(/data-format="md"/g) || []).length === 1 &&
+      !!zip12 && zip12["blog/2606.html"].equals(readFileSync(join(bdir, "blog/2606.html"))),
+      mo12 ? firstDiff(mo12, readFileSync(join(bdir, "blog/2606.html"), "utf8")) : "no zip");
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(`window.edit.blog.edit(${JSON.stringify(newId || "0000")})`);
+    await sleep(1200);
+    const reopened = await evaluate(`(() => {
+      const t = document.querySelector('.bc-time'); const before = t.value; AMH.publish.tick();
+      return { body: document.querySelector('.bc-write textarea').value, title: document.querySelector('.bc-title').value,
+        tags: document.querySelector('.bc-tags input').value, time: t.value, held: t.value === before,
+        zone: document.querySelector('.bc-zone').value, mode: document.querySelector('.bc-panel').getAttribute('data-mode') };
+    })()`);
+    check("Markdown: a post reopens as the Markdown that was typed, with its tags, time and zone, and the clock off",
+      reopened.body === MD_SRC && reopened.title === "" && reopened.tags === "xr planetarium" &&
+      reopened.time === "6:39 pm" && reopened.held && reopened.zone === "EDT" && reopened.mode === "md",
+      JSON.stringify(reopened).slice(0, 200));
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Close').click()`);
+    await sleep(300);
+
+    // FT3. the composer offers the blog's tags with their counts, takes
+    // one on a click, and still keeps anything typed that is not on the list
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(`window.edit.blog()`);
+    await sleep(400);
+    const tagMenu = await evaluate(`(function () {
+      var input = document.querySelector('.bc-tags input');
+      input.focus();
+      return new Promise(function (res) { setTimeout(function () {
+        input.value = 'x'; input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(function () {
+          var menu = document.querySelector('.bc-tags__menu');
+          var opts = [].map.call(menu.querySelectorAll('.bc-tags__opt'),
+            function (o) { return o.getAttribute('data-tag') + ':' + o.querySelector('small').textContent; });
+          var first = menu.querySelector('.bc-tags__opt');
+          if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+          var took = input.value;
+          input.value = took + 'brandnew';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          setTimeout(function () {
+            res({ opts: opts, took: took, hidden: menu.hidden, kept: input.value });
+          }, 200);
+        }, 300);
+      }, 900); });
+    })()`, { awaitPromise: true });
+    check("tags: the composer offers the blog's tags with counts and takes one on a click",
+      JSON.stringify(tagMenu.opts) === '["xr:1"]' && tagMenu.took === "xr ",
+      JSON.stringify(tagMenu).slice(0, 200));
+    check("tags: a tag the blog has never used is not refused",
+      tagMenu.kept === "xr brandnew" && tagMenu.hidden,
+      JSON.stringify(tagMenu).slice(0, 160));
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Close').click()`);
+    await sleep(300);
 
     // P2-7. the highlights region is optional. Someone who deletes it from
     // index.html has changed their mind about the block, not about blogging:
@@ -2851,7 +4500,7 @@ async function main() {
     await evaluate(`document.querySelector('.bc-date').value = '260620'`);
     await evaluate(`document.querySelector('.bc-title').value = 'Post with no highlights block'`);
     await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Still published.</p>'`);
-    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await pressPublish();
     const zip7 = await capturePublish();
     check("P2: a deleted highlights region does not fail the publish",
       !!zip7 && !!zip7["blog/2606.html"] &&
@@ -2860,8 +4509,329 @@ async function main() {
     check("P2: and the home page is left out rather than written wrong",
       !!zip7 && !zip7["index.html"],
       zip7 && zip7["index.html"] ? "index.html was written anyway" : "left out");
+
+    // ---- the staging layer ----
+    // LY1. two posts in one page load. The second bundle is built on the
+    // first, so the newest zip is the whole of what is not yet uploaded.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260720'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'Layer one'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = 'The first of two.'`);
+    await pressPublish();
+    const zipL1 = await capturePublish();
+    const doneL1 = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      var btns = box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [];
+      var rec = JSON.parse(sessionStorage.getItem('amh-publish-pending') || 'null');
+      return { btns: btns, files: rec ? Object.keys(rec.files || {}).sort() : [],
+               images: rec ? rec.images : null, stamp: rec ? rec.stamp : "" };
+    })()`);
+    check("layer: a bundle leaves its text files staged, and names the images it cannot keep",
+      !!zipL1 && doneL1.files.indexOf("blog.html") !== -1 && doneL1.files.indexOf("search.js") !== -1 &&
+      doneL1.files.indexOf("feed.xml") !== -1 && doneL1.files.indexOf("blog/2607.html") !== -1 &&
+      JSON.stringify(doneL1.images) === "[]" && /^[0-9a-z]{6}$/.test(doneL1.stamp),
+      JSON.stringify(doneL1).slice(0, 240));
+    /* the zip lands before the paced rows finish, so the Done step and
+       its Compose another button are not there yet */
+    for (let i = 0; i < 25; i++) {
+      const step = await evaluate(`(document.querySelector('.bc-wizard') || { getAttribute: () => '' }).getAttribute('data-step')`);
+      if (step === "done") break;
+      await sleep(300);
+    }
+    // the post is on the page at once, and says it is not uploaded
+    const staged = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      var again = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return /Compose another/.test(b.textContent); });
+      var out = { chips: document.querySelectorAll('.bs-post__staged').length,
+                  onPage: !!document.querySelector('.bs-post[data-date="260720"]'),
+                  again: !!again };
+      if (again) again.click();
+      return out;
+    })()`);
+    check("layer: the new post is on the page at once, wearing the chip that says so",
+      staged.chips === 1 && staged.onPage && staged.again, JSON.stringify(staged));
+    await sleep(600);
+    const second = await evaluate(`({
+      panels: document.querySelectorAll('.bc-panel').length,
+      wizard: !!document.querySelector('.bc-wizard'),
+      title: (document.querySelector('.bc-title') || {}).value,
+    })`);
+    /* the capture holds the first zip until it is cleared, and a stale
+       one returns at once and reads the page mid-build */
+    await evaluate(`window.__zipB64 = null`);
+    await evaluate(`document.querySelector('.bc-date').value = '260721'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'Layer two'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = 'The second of two.'`);
+    const pressed = await pressPublish();
+    const why = await evaluate(`({
+      step: (document.querySelector('.bc-wizard') || { getAttribute: () => 'none' }).getAttribute('data-step'),
+      body: (document.querySelector('.bc-wiz__body') || {}).textContent || '',
+      status: (document.querySelector('.bc-status') || {}).textContent || '',
+    })`);
+    const zipL2 = await capturePublish();
+    const manL2 = zipL2 && zipL2["blog.html"] ? zipL2["blog.html"].toString("utf8") : "";
+    check("layer: a second publish in the same page load carries the first one too",
+      !!zipL2 && /Layer one/.test(manL2) && /Layer two/.test(manL2) &&
+      !!zipL2["blog/2607.html"] &&
+      /Layer one/.test(zipL2["blog/2607.html"].toString("utf8")) &&
+      /Layer two/.test(zipL2["blog/2607.html"].toString("utf8")),
+      manL2 ? (manL2.match(/\n\d{10}[^\n<]*/g) || []).join(" | ").slice(0, 200)
+        : "no zip: " + pressed + " " + JSON.stringify(second) + " " + JSON.stringify(why).slice(0, 300));
+    for (let i = 0; i < 25; i++) {
+      const step = await evaluate(`(document.querySelector('.bc-wizard') || { getAttribute: () => '' }).getAttribute('data-step')`);
+      if (step === "done") break;
+      await sleep(300);
+    }
+    const twoChips = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      var out = { chips: document.querySelectorAll('.bs-post__staged').length,
+                  posts: document.querySelectorAll('.bs-post').length };
+      /* the zip again, from the layer alone */
+      var dl = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return /Download again/.test(b.textContent); });
+      window.__zipB64 = null;
+      if (dl) dl.click();
+      return out;
+    })()`);
+    check("layer: both staged posts wear the chip",
+      twoChips.chips === 2 && twoChips.posts === 2, JSON.stringify(twoChips));
+    const again = await capturePublish();
+    check("layer: Download again rebuilds the zip from the layer, text and all",
+      !!again && !!again["blog.html"] && !!again["search.js"] &&
+      /Layer two/.test(again["blog.html"].toString("utf8")) &&
+      !Object.keys(again).some((n) => /\.(jpg|png)$/.test(n)),
+      again ? Object.keys(again).sort().join(", ") : "no zip");
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Close').click()`);
+
+    // LY2. an authored region is never replaced from the layer
+    const authored = await evaluate(`(function () {
+      var h2 = document.querySelector('.blog-page h2');
+      var was = h2.textContent;
+      h2.textContent = 'AUTHORED, NOT STAGED';
+      AMH.publish.staged();
+      return { after: h2.textContent, was: was };
+    })()`);
+    check("layer: it replaces the machine-owned regions and leaves an authored one alone",
+      authored.after === "AUTHORED, NOT STAGED", JSON.stringify(authored));
+
+    // LY3. the layer is dropped when the page arrives carrying its stamp
+    if (zipL2) writeBundle(zipL2);
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    const cleared = await evaluate(`({
+      rec: sessionStorage.getItem('amh-publish-pending'),
+      posts: document.querySelectorAll('.bs-post').length,
+      chips: document.querySelectorAll('.bs-post__staged').length,
+    })`);
+    check("layer: the upload clears it, and the posts stay because the server has them now",
+      cleared.rec === null && cleared.posts === 2 && cleared.chips === 0,
+      JSON.stringify(cleared));
+
+    // LY4. a layer over the size rule is refused, and says why
+    const tooBig = await evaluate(`(function () {
+      var warned = [];
+      var ow = console.warn;
+      console.warn = function (m) { warned.push(String(m)); };
+      var big = new Array(2200).join("x".repeat(2000));
+      var rec = { kind: "publish", id: "9999", zip: "big.zip", stamp: "aaaaaa", checks: {} };
+      var kept = AMH.tool.layerKeep(rec, { "blog.html": big }, []);
+      console.warn = ow;
+      var back = AMH.tool.layer();
+      AMH.tool.layerSave(null);
+      return { kept: kept, files: Object.keys(back.files || {}).length,
+               over: !!back.overSize, warned: warned.join(" ") };
+    })()`);
+    check("layer: a bundle over the size rule is not staged, and says so",
+      tooBig.kept === false && tooBig.files === 0 && tooBig.over &&
+      /over the .* the staging layer keeps/.test(tooBig.warned),
+      JSON.stringify(tooBig).slice(0, 200));
+
+    /* the layer is the tab's, so it is cleared before anything else runs */
+    await evaluate(`AMH.tool.layerSave(null)`);
   }
+  // ST-C. the index's markup and its styles are retired: no page, no
+  // script and no stylesheet names them any more.
+  const retired = ["bs-card", "bs-index", "bs-months", "bm-head", "bs-month ", "bs-end"];
+  const searched = ["index.html", "gallery.html", "blog.html", "site.css", "site.js",
+                    "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"];
+  const stillThere = [];
+  for (const f of searched) {
+    const text = readFileSync(join(REPO, f), "utf-8");
+    for (const cls of retired) if (text.includes(cls)) stillThere.push(f + ":" + cls.trim());
+  }
+  check("style: the retired index classes appear in no page, script or stylesheet",
+    stillThere.length === 0, stillThere.join(", "));
+
   try { bs?.kill(); } catch {}
+
+  // ============ THE FILES STEP (a page opened from disk) ============
+  // The suite opens its served copy of blog.html as a file. A fetch from a
+  // file page is refused by the browser, which is the real trigger for the
+  // hand-off, so nothing on this path is simulated.
+  const DISK = pathToFileURL(join(SERVE, "blog.html")).href;
+  exceptions.length = 0;
+  const diskBlog = readFileSync(join(SERVE, "blog.html"), "utf8");
+  const diskHome = readFileSync(join(SERVE, "index.html"), "utf8");
+  // a blob URL cannot be fetched back on a file page, so the bytes are taken
+  // where the publish hands them to the browser
+  const ZIP_DIRECT = `window.__zipB64 = null; AMH.tool.download = function (name, blob) {
+    var fr = new FileReader();
+    fr.onload = function () { window.__zipB64 = String(fr.result).split(',')[1]; };
+    fr.readAsDataURL(blob); };`;
+  async function composeOnDisk() {
+    await send("Page.navigate", { url: DISK });
+    await sleep(2200);
+    await evaluate(ZIP_DIRECT);
+    await evaluate(`window.__hand = []; document.addEventListener('ced:handoff', function (e) {
+      window.__hand.push((e.detail.open ? '+' : '-') + e.detail.path); });`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.bc-date').value = '260711'`);
+    await evaluate(`document.querySelector('.bc-title').value = 'From disk'`);
+    await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Written from a file page.</p>'`);
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+    await sleep(300);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => /Build the bundle/.test(b.textContent)).click()`);
+    await sleep(1400);   /* the arrow's entrance */
+  }
+  async function dropInto(selector, name, text) {
+    await evaluate(`(function () {
+      var zone = document.querySelector(${JSON.stringify(selector)});
+      var dt = new DataTransfer();
+      dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)}, { type: "text/html" }));
+      zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    })()`);
+  }
+  async function waitDone() {
+    let d = null;
+    for (let i = 0; i < 25 && !(d && d.step === "done"); i++) {
+      await sleep(300);
+      d = await evaluate(`(function () {
+        var box = document.querySelector('.bc-wizard');
+        return { step: box && box.getAttribute('data-step'), hand: window.__hand,
+                 dialog: !!document.querySelector('.ced-handoff__zone'),
+                 stampLine: /Publish stamp: [0-9a-z]{6}/.test(box ? box.textContent : '') };
+      })()`);
+    }
+    return d;
+  }
+
+  // D1. the step names every file first and points at the folder button.
+  // Continue hands the reads to the hand-off, and the progress row says so
+  // while each dialog is up.
+  await composeOnDisk();
+  const filesStep = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    var pt = document.querySelector('.ced-point');
+    var btn = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return /repo folder/.test(b.textContent); });
+    var b = btn && btn.getBoundingClientRect();
+    var curve = pt && pt.querySelector('.ced-point__curve');
+    var tip = curve && curve.getPointAtLength(curve.getTotalLength()).matrixTransform(curve.getScreenCTM());
+    return { protocol: location.protocol, step: box && box.getAttribute('data-step'),
+      items: box ? [...box.querySelectorAll('.ced-handoff__item')].map(function (i) { return i.className.replace('ced-handoff__item ', '') + ':' + i.textContent; }) : [],
+      btns: box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [],
+      zone: !!(box && box.querySelector('.bc-wiz__zone')),
+      label: pt ? pt.querySelector('.ced-point__label').textContent : '',
+      /* the tip touches the button: below it when there is room, at a side
+         when the box sits low, so the measure is "on the button's edge" */
+      near: !!(tip && b) && tip.x >= b.left - 12 && tip.x <= b.right + 12 &&
+            tip.y >= b.top - 12 && tip.y <= b.bottom + 12,
+      focused: document.activeElement && document.activeElement.textContent };
+  })()`);
+  check("files step: from disk the wizard names every file the publish reads before it builds",
+    filesStep.protocol === "file:" && filesStep.step === "files" &&
+    JSON.stringify(filesStep.items) ===
+      '["is-wait:blog.html","is-wait:index.html","is-wait is-opt:search.js"]' &&
+    JSON.stringify(filesStep.btns) === '["Cancel","Use my repo folder","Continue"]' && filesStep.zone,
+    JSON.stringify(filesStep).slice(0, 260));
+  check("files step: the arrow points at the folder button and says what to choose",
+    filesStep.label === "Click and choose root of repo folder!" && filesStep.near &&
+    filesStep.focused === "Use my repo folder",
+    JSON.stringify({ label: filesStep.label, near: filesStep.near, focused: filesStep.focused }));
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Continue').click()`);
+  await sleep(500);
+  const waiting = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    var row = box && box.querySelector('.bc-wiz__rows li.is-now');
+    var note = document.querySelector('.ced-handoff .ced-modal__status');
+    return { step: box && box.getAttribute('data-step'), row: row ? row.textContent : '',
+             dialog: !!document.querySelector('.ced-handoff__zone'), note: note ? note.textContent : '' };
+  })()`);
+  check("files step: Continue starts the build, and the progress row says it waits for the hand-off",
+    waiting.step === "progress" && waiting.row === "Waiting for you: hand over blog.html" && waiting.dialog &&
+    /This publish needs the deployed bytes of these files/.test(waiting.note),
+    JSON.stringify(waiting).slice(0, 240));
+  await dropInto(".ced-handoff__zone", "blog.html", diskBlog);
+  await sleep(1900);   /* the rows pace themselves at STEP_MS while the work waits again */
+  const second = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    var row = box && box.querySelector('.bc-wiz__rows li.is-now');
+    var head = document.querySelector('.ced-handoff .ced-modal__head');
+    return { row: row ? row.textContent : '', head: head ? head.textContent : '' };
+  })()`);
+  check("files step: the second read asks the same way, and the row follows it",
+    /index\.html/.test(second.head) && second.row === "Waiting for you: hand over index.html",
+    JSON.stringify(second));
+  await dropInto(".ced-handoff__zone", "index.html", diskHome);
+  await sleep(1400);
+  // the packed index is the third read, and this site has none yet: the
+  // dialog offers the answer that is not "give up", and the build carries on
+  const absent = await evaluate(`(function () {
+    var head = document.querySelector('.ced-handoff .ced-modal__head');
+    var btn = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return /Not on disk/.test(b.textContent); });
+    if (btn) btn.click();
+    return { head: head ? head.textContent : '', answered: !!btn };
+  })()`);
+  check("files step: a file that may not exist is asked for last and answered without giving up",
+    /search\.js/.test(absent.head) && absent.answered, JSON.stringify(absent));
+  const zipD1 = await capturePublish();
+  const doneD1 = await waitDone();
+  check("files step: a publish from disk builds through the hand-offs and reaches Done with a stamp",
+    !!zipD1 && !!zipD1["blog.html"] && !!zipD1["blog/2607.html"] && !!zipD1["search.js"] &&
+    /\nstamp:[0-9a-z]{6}\n/.test(zipD1["blog.html"].toString("utf8")) &&
+    doneD1 && doneD1.step === "done" && doneD1.stampLine &&
+    JSON.stringify(doneD1.hand) ===
+      '["+blog.html","-blog.html","+index.html","-index.html","+search.js","-search.js"]',
+    JSON.stringify(doneD1).slice(0, 240) + (zipD1 ? " " + Object.keys(zipD1).sort().join(",") : " no zip"));
+
+  // D2. with the folder given, the step closes itself and the build runs
+  // through with no dialog at all
+  await composeOnDisk();
+  await evaluate(`(function () {
+    function fileH(text, name) { return { kind: "file", getFile: function () {
+      return Promise.resolve(new File([text], name, { type: "text/html" })); } }; }
+    function dirH(entries) { return { kind: "directory",
+      getDirectoryHandle: function (n) { return entries[n] && entries[n].kind === "directory"
+        ? Promise.resolve(entries[n]) : Promise.reject(new DOMException("no " + n, "NotFoundError")); },
+      getFileHandle: function (n) { return entries[n] && entries[n].kind === "file"
+        ? Promise.resolve(entries[n]) : Promise.reject(new DOMException("no " + n, "NotFoundError")); } }; }
+    window.__picked = 0;
+    window.showDirectoryPicker = function () { window.__picked++; return Promise.resolve(dirH({
+      "blog.html": fileH(${JSON.stringify(diskBlog)}, "blog.html"),
+      "index.html": fileH(${JSON.stringify(diskHome)}, "index.html") })); };
+    [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')]
+      .find(function (b) { return /repo folder/.test(b.textContent); }).click();
+  })()`);
+  await sleep(600);
+  const throughD2 = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    return { step: box && box.getAttribute('data-step'), picked: window.__picked,
+             dialog: !!document.querySelector('.ced-handoff__zone'),
+             arrowOn: !!document.querySelector('.ced-point.is-on') };
+  })()`);
+  const zipD2 = await capturePublish();
+  const doneD2 = await waitDone();
+  check("files step: the folder closes the step by itself and the build runs through with no dialog",
+    throughD2.picked === 1 && throughD2.step === "progress" && !throughD2.dialog && !throughD2.arrowOn &&
+    doneD2 && doneD2.step === "done" && doneD2.hand.length === 0 &&
+    !!zipD2 && !!zipD2["blog/2607.html"] && !!zipD2["index.html"],
+    JSON.stringify(throughD2) + " " + JSON.stringify(doneD2).slice(0, 160));
+  check("files step: no page exception on the file page",
+    exceptions.length === 0, exceptions.slice(0, 2).join(" | "));
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

@@ -162,6 +162,11 @@
   var modal = null, scrim = null, ta = null, modalTitle = null, modalStatus = null;
   var altIn = null, srcLine = null;
   var pendingChip = null;
+  /* The last bundle publish.js built, until the site shows it. The line is
+     on every page because a person may be anywhere when they wonder whether
+     they pushed it. publish.js owns the record; this only reads it. */
+  var publishLine = null;
+  var PUBLISH_KEY = "amh-publish-pending";
   var openRegion = null;     /* text region in the modal */
   var openImage = null;      /* {g, index, entry} while the modal edits an image */
   var drawerHooked = false;
@@ -925,6 +930,8 @@
     "background:rgba(240,180,41,.12);color:var(--c-yellow);font:700 .64rem/1.5 Consolas,monospace;" +
     "letter-spacing:.06em;padding:.4rem .8rem;text-align:left;cursor:pointer;}" +
     ".ced-pending:hover{background:rgba(240,180,41,.2);}" +
+    ".ced-publish{background:rgba(74,165,232,.1);color:var(--accent-bright);}" +
+    ".ced-publish:hover{background:rgba(74,165,232,.18);}" +
     ".ced-handoff__zone{margin:.8rem 1.1rem;padding:1.6rem 1rem;border-radius:10px;" +
     "border:2px dashed var(--accent);background:rgba(74,165,232,.06);text-align:center;" +
     "cursor:pointer;display:flex;flex-direction:column;gap:.35rem;}" +
@@ -955,6 +962,32 @@
     ".ced-btn:hover{border-color:var(--accent);color:var(--text);}" +
     ".ced-btn--accent{border-color:var(--accent);color:var(--accent-bright);}" +
     ".ced-scrim{position:fixed;inset:0;z-index:3200;background:rgba(4,6,10,.72);}" +
+    /* the tutorial arrow: above every dialog, below the launcher */
+    ".ced-point{position:fixed;z-index:3400;pointer-events:none;}" +
+    ".ced-point svg{display:block;overflow:visible;}" +
+    ".ced-point path{fill:none;stroke:var(--accent-bright,#6fbcf2);stroke-width:2.4;stroke-linecap:round;" +
+    "stroke-linejoin:round;filter:drop-shadow(0 0 6px rgba(74,165,232,.55));}" +
+    /* Three stages, one class. The head shows first, at the tip. The stroke
+       then draws from the tip back to the tail: a negative dash offset
+       running to zero reveals a path from its end, and the path is written
+       tail first. Last, the label writes itself out under a clip that
+       opens left to right, the way handwriting arrives. The delays put the
+       stages end to end; the exit runs them in the other order. */
+    ".ced-point__curve{stroke-dasharray:var(--pt-len);stroke-dashoffset:var(--pt-off);" +
+    "transition:stroke-dashoffset .45s var(--ease,ease) .15s;}" +
+    ".ced-point__head{opacity:0;transition:opacity .15s ease;}" +
+    ".ced-point__label{position:absolute;white-space:nowrap;font:600 22px/1.2 Caveat,'Segoe Script'," +
+    "'Bradley Hand',cursive;color:var(--accent-bright,#6fbcf2);text-shadow:0 0 10px rgba(74,165,232,.35);" +
+    "clip-path:inset(-30% 100% -30% -6%);transition:clip-path .55s cubic-bezier(.4,0,.2,1) .58s;}" +
+    /* the head is placed by its SVG transform attribute, which a CSS
+       transform would override; nothing here sets transform on it */
+    ".ced-point.is-on .ced-point__curve{stroke-dashoffset:0;}" +
+    ".ced-point.is-on .ced-point__head{opacity:1;}" +
+    ".ced-point.is-on .ced-point__label{clip-path:inset(-30% -6% -30% -6%);}" +
+    ".ced-point.is-off .ced-point__label{transition-delay:0s;transition-duration:.3s;}" +
+    ".ced-point.is-off .ced-point__curve{transition-delay:.2s;transition-duration:.3s;}" +
+    ".ced-point.is-off .ced-point__head{transition-delay:.46s;}" +
+    ".ced-point.is-still *{transition:none !important;}" +
     ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
     "width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--panel);" +
     "border:1px solid var(--line);border-radius:14px;box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
@@ -1073,6 +1106,28 @@
     pendingChip.hidden = c.changes === 0;
   }
 
+  /* Read the record and say where it stands. Four of its boxes are the
+     person's; the fifth, live, is the page's and clears the record. */
+  function refreshPublishLine() {
+    if (!publishLine) return;
+    var rec = null;
+    try {
+      var raw = window.sessionStorage.getItem(PUBLISH_KEY);
+      rec = raw ? JSON.parse(raw) : null;
+    } catch (err) {}
+    publishLine.hidden = !rec;
+    if (!rec) return;
+    var done = ["extract", "review", "commit", "push"].filter(function (k) {
+      return rec.checks && rec.checks[k];
+    }).length;
+    var what = rec.kind === "rebuild" ? "The rebuild"
+      : "p" + rec.id + (rec.kind === "delete" ? " deletion" : "");
+    publishLine.textContent = what +
+      " is in a bundle that is not live yet. " + done + " of 4 steps ticked." +
+      (AMH.publish ? " Checklist." : " Open blog.html for the checklist.");
+  }
+  AMH.tool.publishLine = refreshPublishLine;
+
   function refreshDirtyUI() {
     regions.forEach(function (r) {
       if (r.chip) r.chip.classList.toggle("ced-edited", r.edited);
@@ -1111,6 +1166,18 @@
       else api.pending();
     });
     panel.appendChild(pendingChip);
+
+    publishLine = doc.createElement("button");
+    publishLine.type = "button";
+    publishLine.className = "ced-pending ced-publish";
+    publishLine.hidden = true;
+    publishLine.title = "The last bundle you built. Click for the list of what to do with it.";
+    publishLine.addEventListener("click", function () {
+      if (AMH.publish && AMH.publish.checklist) AMH.publish.checklist();
+      else console.info("[copy editor] the checklist opens on blog.html.");
+    });
+    panel.appendChild(publishLine);
+    refreshPublishLine();
 
     panelList = doc.createElement("div");
     panelList.className = "ced-panel__list";
@@ -1327,6 +1394,7 @@
 
   function teardownUI() {
     pendingChip = null;
+    publishLine = null;
     closeModal();
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
@@ -1722,6 +1790,22 @@
   function escAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
+  /* Six base36 characters from a 32-bit FNV-1a hash of the text. A publish
+     writes one into every file it generates, so a file can say which
+     publish it came from. Six characters, always: the hash is reduced to
+     36^6 before it is written, so two stamps have one width and one shape.
+     It is a fingerprint, not a secret, and a collision is a warning at
+     worst: the publisher rehashes when a new stamp equals the last one. */
+  var STAMP_SPACE = 2176782336;   /* 36^6 */
+  function stamp(text) {
+    var h = 0x811c9dc5;
+    var s = String(text);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return ("00000" + (h % STAMP_SPACE).toString(36)).slice(-6);
+  }
   /* serialize a gallery's model into tidy authored <img> lines and splice
      them between the gallery's own tags. Indentation is read from the source
      span so the output matches the file's hand-written style. An empty
@@ -1784,12 +1868,19 @@
      DOM, which is what keeps everything outside an edited region byte-exact.
      no-store because a stale copy would silently revert an earlier change.
 
-     Phase 2 Part 4 adds the offline fallback here, and only here. */
+     The hand-off below is the offline fallback, here and only here. */
   function pristine(path) {
     path = path || currentPage();
     if (!isManaged(path)) {
       return Promise.reject(new Error(path + " is not a managed page - add it to MANAGED_PAGES"));
     }
+    /* The staging layer first. A bundle that has been built but not yet
+       uploaded is the truth about this site as the person means it, and
+       the next bundle has to build on it rather than on the bytes the
+       server still serves. This one branch is what lets several posts be
+       made in one sitting and uploaded once. */
+    var staged = layerFile(path);
+    if (staged !== null) return Promise.resolve(staged);
     return fetch(path, { cache: "no-store" }).then(
       function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status + " fetching " + path);
@@ -1800,6 +1891,114 @@
          asking someone to find the file. */
       function (netErr) { return handOff(path, netErr); }
     );
+  }
+
+  /* ---------------- the staging layer ----------------
+
+     A publish, a delete or a rebuild builds a zip and leaves it to the
+     person to upload. Until they do, the site they see and the site the
+     server serves are two different things. The layer is the difference:
+     the text files the last bundle wrote, kept for the tab.
+
+     Everything reads through it. pristine() answers from it, so the next
+     bundle splices what the last one wrote and the newest zip is always
+     the whole of what is not yet live. The page reads from it too, so a
+     post shows on the blog the moment it is published and carries a chip
+     saying it is not uploaded yet.
+
+     Text only. Image bytes cannot live in storage, which holds a few
+     megabytes and no place for photographs, so the layer names the
+     images it cannot keep and the zip built again says which they are.
+
+     It clears itself: when a page loads carrying the layer's stamp, the
+     upload has happened and there is nothing left to remember. */
+  var LAYER_KEY = "amh-publish-pending";
+  var LAYER_MAX = 4 * 1024 * 1024;
+
+  function layerRead() {
+    try {
+      var raw = window.sessionStorage.getItem(LAYER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) { return null; }
+  }
+  function layerWrite(rec) {
+    try {
+      if (rec) window.sessionStorage.setItem(LAYER_KEY, JSON.stringify(rec));
+      else window.sessionStorage.removeItem(LAYER_KEY);
+    } catch (err) {
+      console.warn("[copy editor] the staging layer could not be kept (" +
+        (err && err.message ? err.message : "storage refused it") +
+        "). Upload the bundle you have before you make another post.");
+      return false;
+    }
+    if (AMH.tool.publishLine) AMH.tool.publishLine();
+    return true;
+  }
+  /* One file from the layer, or null when the layer does not hold it. */
+  function layerFile(path) {
+    var rec = layerRead();
+    return rec && rec.files && typeof rec.files[path] === "string" ? rec.files[path] : null;
+  }
+  /* Put a bundle's text files in the layer beside the record of it.
+     Refuses a layer over the size rule rather than losing the tab's
+     storage to it: the record stays, the files do not, and the next
+     bundle reads the deployed bytes as it did before. */
+  function layerKeep(rec, files, images) {
+    rec.files = files || {};
+    rec.images = images || [];
+    var size = JSON.stringify(rec).length;
+    if (size > LAYER_MAX) {
+      console.warn("[copy editor] this bundle is " + Math.round(size / 1024) +
+        " KB, over the " + Math.round(LAYER_MAX / 1024) + " KB the staging layer keeps. " +
+        "It is not staged: upload it before you make another post.");
+      rec.files = {};
+      rec.images = images || [];
+      rec.overSize = true;
+    }
+    layerWrite(rec);
+    return !rec.overSize;
+  }
+
+  /* The page, read from the layer.
+
+     Only the machine-owned regions are replaced, and only with the
+     editor on: the layer is the author's own unpublished work, not
+     something a visitor should see. An authored region is never touched,
+     because the layer holds a generated copy of it and the person may
+     have edited it since.
+
+     Nothing is written. This changes what is on screen and no file. */
+  function layerApply(force) {
+    /* force is the moment a bundle is built: the person publishing IS
+       the author, whatever the editor's visual state, and the post they
+       have made has to appear */
+    if (!active && !force) return 0;
+    var text = layerFile(currentPage());
+    if (text === null) return 0;
+    var n = 0;
+    regions.forEach(function (r) {
+      if (!r.el || r.el.getAttribute("data-ced") === null) return;
+      var inner = regionFrom(text, r.slug);
+      if (inner === null || inner === r.el.innerHTML) return;
+      r.el.innerHTML = inner;
+      n++;
+    });
+    return n;
+  }
+  /* One region's inner HTML out of a source string. */
+  function regionFrom(text, slug) {
+    var open = "<!--[edit:" + slug + "]-->";
+    var a = text.indexOf(open);
+    if (a < 0) return null;
+    var b = text.indexOf("<!--[/edit:" + slug + "]-->", a);
+    if (b < 0) return null;
+    var span = text.slice(a + open.length, b);
+    var lt = span.indexOf("<");
+    if (lt === -1) return null;
+    var gt = span.indexOf(">", lt);
+    var lastClose = span.lastIndexOf("</");
+    if (gt === -1 || lastClose <= gt) return null;
+    return span.slice(gt + 1, lastClose);
   }
 
   /* ---------------- the file hand-off wizard ----------------
@@ -1820,15 +2019,17 @@
      the console, and they are what a bug report should quote. */
 
   var ERR = {
-    "BLG-E01": "This page was opened from disk, so the editor cannot read its own published bytes.",
-    "BLG-E02": "That drag carried no file. Some sources hand over a link instead of a file. Use the button, or drag from a file manager.",
+    "BLG-E01": "This page was opened from disk. The editor cannot read its own published bytes.",
+    "BLG-E02": "That drag carried no file. Some sources hand over a link, not a file. Use the button, or drag from a file manager.",
     "BLG-E03": "That is the wrong file for this step.",
-    "BLG-E04": "That file could not be read.",
-    "BLG-E05": "That file carries no editable regions, so it is not a page this editor writes.",
-    "BLG-E06": "That file is missing a region this publish has to write.",
-    "BLG-E07": "Cancelled. No file was provided.",
-    "BLG-E08": "That folder holds none of the files this publish needs.",
-    "BLG-E09": "Not on disk. The publish treats this file as one it has to create."
+    "BLG-E04": "The file could not be read.",
+    "BLG-E05": "This file has no editable regions. The editor does not write this page.",
+    "BLG-E06": "This file does not have a region this publish must write.",
+    "BLG-E07": "Cancelled. No file was given.",
+    "BLG-E08": "That folder has none of the files this publish needs.",
+    "BLG-E09": "Not on disk. The publish creates this file.",
+    "BLG-E10": "This month file is from a different publish than the blog page you opened. The publish overwrites it with the version this page knows.",
+    "BLG-E11": "The live manifest is different from the page you loaded. Reload the page and compose again. Save Draft first."
   };
 
   /* Say a code the same way every time, and put it where a console search
@@ -1908,9 +2109,27 @@
      be present. It warns and lets the user continue, because the editor
      legitimately holds edits that are not in the file yet. */
   function verifyFile(path, text) {
+    var want = path.replace(/^.*\//, "");
+    /* A month file has no regions. Its check is the stamp in its first
+       comment against the month's line in the manifest this page carries:
+       a file from another publish is overwritten with the version this
+       page knows, and the person should hear that before it happens. A
+       file with no stamp is from before V044 and gets no check; a rebuild
+       gives it one. */
+    var mo = /^blog\/(\d{4})\.html$/.exec(path);
+    if (mo) {
+      var fs = /GENERATED by the blog\.html publish engine[^>]*?stamp:([0-9a-z]{6})/.exec(text.slice(0, 600));
+      var page = monthStampOnPage(mo[1]);
+      if (fs && page && fs[1] !== page) {
+        return { ok: true, warn: true, code: "BLG-E10",
+                 detail: want + " says " + fs[1] + ", the page says " + page + "." };
+      }
+      return { ok: true, count: 0 };
+    }
     var marks = text.match(/<!--\[edit:[\w-]+\]-->/g) || [];
     if (!marks.length) {
-      return { ok: true, warn: true, code: "BLG-E05", detail: "" };
+      return { ok: true, warn: true, code: "BLG-E05",
+               detail: 'The file is named "' + want + '" and has no markers. The publish continues.' };
     }
     var slugs = {};
     marks.forEach(function (m) { slugs[m.slice(11, -4)] = true; });
@@ -1925,10 +2144,19 @@
     });
     if (missing.length) {
       return { ok: true, warn: true, code: "BLG-E06",
-               detail: missing.slice(0, 4).join(", ") +
-                       (missing.length > 4 ? " and " + (missing.length - 4) + " more" : "") };
+               detail: "Missing: " + missing.slice(0, 4).join(", ") +
+                       (missing.length > 4 ? " and " + (missing.length - 4) + " more" : "") +
+                       ". The export reports what it cannot splice." };
     }
     return { ok: true, count: marks.length };
+  }
+  /* The stamp the loaded page's manifest holds for a month, or "" when
+     the page has no manifest or the month has no line. blog.js reads the
+     tag; it loads before this file on the pages that have one. */
+  function monthStampOnPage(yymm) {
+    var B = window.AMH && window.AMH.blog;
+    if (!B || !B.parseManifest) return "";
+    return (B.parseManifest().monthStamps || {})[yymm] || "";
   }
 
   /* A file dropped anywhere but a drop target makes the browser open it,
@@ -1960,6 +2188,19 @@
     /* already said to be absent: an optional file answers null and the
        caller carries on, which is what it would have done at a 404 */
     if (skipped[path]) return Promise.resolve(null);
+    /* Two reads of one file can be in flight at once: the publish reads a
+       page's pristine bytes and builds the page from them in parallel, and
+       over HTTP that is two fetches. From disk it was two dialogs for one
+       file, and the second never closed. The second ask now waits on the
+       first dialog. */
+    if (asking[path]) return asking[path];
+    asking[path] = askOnce(path, netErr).then(
+      function (v) { delete asking[path]; return v; },
+      function (e) { delete asking[path]; throw e; });
+    return asking[path];
+  }
+  var asking = {};
+  function askOnce(path, netErr) {
     var want = path.replace(/^.*\//, "");
     var mayBeAbsent = isOptional(path);
     /* the folder is already in hand: read from it, and open the dialog only
@@ -1990,12 +2231,90 @@
      the real gate, and it fails loudly and names what it could not find. */
   function verifyWarn(path, want, text) {
     var v = verifyFile(path, text);
-    if (v.warn) {
-      errText(v.code, v.detail
-        ? "Missing: " + v.detail + ". The export will report anything it cannot splice."
-        : 'The file is named "' + want + '" and holds no markers. Continuing anyway.');
-    }
+    if (v.warn) errText(v.code, v.detail);
   }
+
+  /* ---------------- taking files, from a drop, a choice or a folder ----------------
+
+     The hand-off dialog and the publish wizard's Files step both take files
+     the same three ways. What is taken is kept for the page load, so every
+     later ask is answered from memory. Each function resolves with the
+     count taken; none rejects for a file it could not read, because one
+     bad file is a fact about that file, and the ask for it comes round
+     again. */
+
+  /* Every path a caller still needs: not in hand, not said to be absent. */
+  function stillWanted(paths) {
+    return paths.filter(function (pp) { return !handed[pp] && !skipped[pp]; });
+  }
+  function keep(pp, text) {
+    verifyWarn(pp, pp.replace(/^.*\//, ""), text);
+    handed[pp] = text;
+  }
+  /* Files chosen or dropped together, matched by name to the paths still
+     wanted. A person chose these by hand, so the name is the match. */
+  function takeFiles(files, paths) {
+    var byName = {};
+    Array.prototype.forEach.call(files || [], function (f) { byName[f.name] = f; });
+    var jobs = stillWanted(paths).filter(function (pp) { return !!byName[pp.replace(/^.*\//, "")]; });
+    return Promise.all(jobs.map(function (pp) {
+      return readFile(byName[pp.replace(/^.*\//, "")])
+        .then(function (text) { keep(pp, text); }, function () {});
+    })).then(function () { return jobs.length; });
+  }
+  /* The fallback folder input. The browser hands over every file in the
+     tree, so the match is on the full path under the picked folder, and
+     never on the bare name: the tree holds a test fixture with the same
+     name as a month file, and a name match let the last one seen win. */
+  function takeFolder(files, paths) {
+    var byPath = {};
+    Array.prototype.forEach.call(files || [], function (f) {
+      var rel = f.webkitRelativePath
+        ? f.webkitRelativePath.replace(/^[^\/]+\//, "")
+        : f.name;
+      byPath[rel] = f;
+    });
+    var jobs = stillWanted(paths).filter(function (pp) { return !!byPath[pp]; });
+    return Promise.all(jobs.map(function (pp) {
+      return readFile(byPath[pp]).then(function (text) { keep(pp, text); }, function () {});
+    })).then(function () { return jobs.length; });
+  }
+  /* The File System Access path. Only the named files are opened. The
+     handle is kept, so no later ask in this page load opens a dialog. An
+     optional file the folder lacks is marked absent here, as the dialog's
+     own button would mark it. */
+  function takeDirectory(handle, paths) {
+    repoDir = handle;
+    var took = 0;
+    return Promise.all(stillWanted(paths).map(function (pp) {
+      return readFromRepo(pp).then(function (text) {
+        if (text === null) {
+          if (isOptional(pp)) { skipped[pp] = true; errText("BLG-E09", "Wanted: " + pp + "."); }
+          return;
+        }
+        keep(pp, text);
+        took++;
+      }, function (err) { errText("BLG-E04", err && err.message); });
+    })).then(function () { return took; });
+  }
+  function hasPicker() { return typeof window.showDirectoryPicker === "function"; }
+  /* Pick the folder with the API, so the browser opens only the files that
+     are asked for and never counts the tree. Resolves with the count taken,
+     or null when the picker was closed. A browser with no API needs a
+     folder input, which each caller owns. */
+  function pickRepo(paths) {
+    return window.showDirectoryPicker({ id: "amh-repo", mode: "read" }).then(
+      function (handle) { return takeDirectory(handle, paths); },
+      function (err) {
+        if (err && err.name === "AbortError") return null;
+        throw errObj("BLG-E04", err && err.message ? err.message : "");
+      });
+  }
+  /* The one label the arrow gives the folder button, wherever the button
+     is. One pick answers every ask, and the root of the repo is the folder
+     to pick, which the button alone does not say. */
+  var REPO_LABEL = "Click and choose root of repo folder!";
+  function pointRepo(btn) { pointAt(btn, REPO_LABEL); }
 
   /* The dialog itself: drop, choose, or pick the repo folder. */
   function handOffDialog(path, want, mayBeAbsent, netErr) {
@@ -2027,9 +2346,14 @@
 
       var note = doc.createElement("div");
       note.className = "ced-modal__status";
-      note.textContent = ERR["BLG-E01"] + " Hand it the file from your repo and " +
-        "the export continues as normal." +
-        (mayBeAbsent ? " This one may not exist yet. If it does not, say so and " +
+      /* the same sentence the wizard's progress row answers to: the two
+         boxes are one job, and each says so */
+      note.textContent = (required().length > 1
+        ? "This publish needs the deployed bytes of these files. Give it the files from " +
+          "your repo, or give it the repo folder once."
+        : "This publish needs the deployed bytes of this file. Give it the file from " +
+          "your repo, or give it the repo folder once.") +
+        (mayBeAbsent ? " This file may not exist yet. If it does not, say so, and " +
                        "the publish creates it." : "");
 
       var list = doc.createElement("div");
@@ -2057,8 +2381,8 @@
       all.type = "button";
       all.className = "ced-btn";
       all.textContent = "Use my repo folder";
-      all.title = "Pick the folder once. Only the files this publish needs are read from it, " +
-        "and it is not asked for again.";
+      all.title = "Choose the root of your repo folder one time. The publish reads only the " +
+        "files it needs from it, and does not ask again.";
       var spacer = doc.createElement("span");
       spacer.className = "ced-spacer";
       /* An optional file needs an answer that is not "give up". Cancel
@@ -2070,7 +2394,7 @@
         absent.type = "button";
         absent.className = "ced-btn";
         absent.textContent = "Not on disk yet";
-        absent.title = "The publish will create this file.";
+        absent.title = "The publish creates this file.";
       }
 
       var cancel = doc.createElement("button");
@@ -2078,9 +2402,16 @@
       cancel.className = "ced-btn";
       cancel.textContent = "Cancel";
 
+      /* the wizard's progress step listens: its current row says the build
+         is waiting while this dialog is up */
+      function announce(open) {
+        doc.dispatchEvent(new CustomEvent("ced:handoff", { detail: { path: path, open: open } }));
+      }
       function done() {
+        unpoint();
         if (scrim2.parentNode) scrim2.parentNode.removeChild(scrim2);
         if (box.parentNode) box.parentNode.removeChild(box);
+        announce(false);
       }
       function fail(code, extra) {
         note.textContent = errText(code, extra);
@@ -2102,12 +2433,9 @@
         }, function () { fail("BLG-E04"); });
       }
 
-      /* Every path this publish still needs from a folder. */
-      function stillWanted() {
-        return (expected.length ? expected : [path]).filter(function (pp) {
-          return !handed[pp] && !skipped[pp];
-        });
-      }
+      /* Every path this publish still needs from a folder: the whole list
+         when the caller gave one, else this file. */
+      var wanted = expected.length ? expected : [path];
       /* After a folder was read: close if the file this step is for came
          out of it, else say the folder was the wrong one. */
       function folderDone(took) {
@@ -2121,57 +2449,16 @@
         done();
         resolve(handed[path]);
       }
-      function keep(pp, text) {
-        verifyWarn(pp, pp.replace(/^.*\//, ""), text);
-        handed[pp] = text;
-      }
-
-      /* The fallback folder input. The browser hands over every file in the
-         tree, so the match is on the full path under the picked folder, and
-         never on the bare name: the tree holds a test fixture with the same
-         name as a month file, and a name match let the last one seen win. */
-      function takeFolder(files) {
-        var byPath = {};
-        Array.prototype.forEach.call(files || [], function (f) {
-          var rel = f.webkitRelativePath
-            ? f.webkitRelativePath.replace(/^[^\/]+\//, "")
-            : f.name;
-          byPath[rel] = f;
-        });
-        var jobs = stillWanted().filter(function (pp) { return !!byPath[pp]; });
-        if (!jobs.length) { fail("BLG-E08", "Wanted: " + want + "."); return; }
-        Promise.all(jobs.map(function (pp) {
-          return readFile(byPath[pp]).then(function (text) { keep(pp, text); },
-            function () {});
-        })).then(function () { folderDone(jobs.length); });
-      }
-
-      /* The File System Access path. Only the named files are opened. The
-         handle is kept, so no later ask in this page load opens a dialog. */
-      function takeDirectory(handle) {
-        repoDir = handle;
-        var took = 0;
-        Promise.all(stillWanted().map(function (pp) {
-          return readFromRepo(pp).then(function (text) {
-            if (text === null) {
-              if (isOptional(pp)) { skipped[pp] = true; errText("BLG-E09", "Wanted: " + pp + "."); }
-              return;
-            }
-            keep(pp, text);
-            took++;
-          }, function (err) { errText("BLG-E04", err && err.message); });
-        })).then(function () { folderDone(took); });
-      }
-      /* Pick the folder with the API when the browser has one, so the
-         browser opens only the files that are asked for and never counts
-         the tree. Otherwise the folder input, which reads everything. */
+      /* The API when the browser has one, else the folder input, which
+         reads everything under the folder. */
       function pickFolder() {
-        if (typeof window.showDirectoryPicker !== "function") { folder.click(); return; }
-        window.showDirectoryPicker({ id: "amh-repo", mode: "read" }).then(takeDirectory,
-          function (err) {
-            if (err && err.name === "AbortError") return;   /* closed the picker */
-            fail("BLG-E04", err && err.message ? err.message : "");
-          });
+        if (!hasPicker()) { folder.click(); return; }
+        pickRepo(wanted).then(function (took) {
+          if (took !== null) folderDone(took);   /* null: closed the picker */
+        }, function (err) {
+          note.textContent = err.message;
+          zone.classList.add("is-wrong");
+        });
       }
 
       zone.addEventListener("click", function () { input.click(); });
@@ -2183,7 +2470,9 @@
       pick.addEventListener("click", function () { input.click(); });
       all.addEventListener("click", pickFolder);
       input.addEventListener("change", function () { take(input.files && input.files[0]); });
-      folder.addEventListener("change", function () { takeFolder(folder.files); });
+      folder.addEventListener("change", function () {
+        takeFolder(folder.files, wanted).then(folderDone);
+      });
 
       zone.addEventListener("dragover", function (e) {
         e.preventDefault(); e.stopPropagation();
@@ -2224,6 +2513,11 @@
       doc.body.appendChild(scrim2);
       doc.body.appendChild(box);
       zone.focus();
+      announce(true);
+      /* The first ask of a page load points at the folder button. One pick
+         answers every ask, and that is the thing a person cannot know from
+         the dialog alone. */
+      if (!Object.keys(handed).length && !repoDir) pointRepo(all);
     });
   }
 
@@ -2269,6 +2563,26 @@
   /* Which of those files may legitimately not exist. */
   AMH.tool.expectOptional = expectOptional;
   AMH.tool.errorCodes = ERR;
+  /* The wizard's Files step takes files the way the dialog does, before
+     the build, so a page opened from disk meets one step and not a chain
+     of dialogs. These are what it needs to do that. */
+  AMH.tool.fromDisk = function () { return location.protocol === "file:"; };
+  AMH.tool.hasRepo = function () { return !!repoDir; };
+  AMH.tool.hasPicker = hasPicker;
+  AMH.tool.pickRepo = pickRepo;
+  AMH.tool.takeFiles = takeFiles;
+  AMH.tool.takeFolder = takeFolder;
+  AMH.tool.fileState = function (path) {
+    return handed[path] ? "done" : skipped[path] ? "none" : "wait";
+  };
+  AMH.tool.pointRepo = pointRepo;
+  /* The staging layer. publish.js writes it and reads it back; the page
+     reads through it at load. */
+  AMH.tool.layer = layerRead;
+  AMH.tool.layerSave = layerWrite;
+  AMH.tool.layerKeep = layerKeep;
+  AMH.tool.layerFile = layerFile;
+  AMH.tool.layerApply = layerApply;
   function fetchPristine() { return pristine(currentPage()); }
 
   /* Edits waiting to be written to a page whose DOM is not on screen, keyed by
@@ -2278,9 +2592,9 @@
      model, which also carries galleries and nested regions, and which the
      export splices through spliceAllEdits().
 
-     Phase 2 Part 4 fills this from sessionStorage, so an edit made on one page
-     travels with you to another. Phase 3 stages the generated highlights block
-     the same way. */
+     It is filled from sessionStorage, so an edit made on one page travels
+     with you to another, and the publish stages the generated highlights
+     block the same way. */
   var staged = {};
 
   /* Stage one region edit for a managed page. Returns false, and stages
@@ -2664,6 +2978,9 @@
       /* the blog page renders its stream at load, before this point, so the
          posts already on screen have to be decorated now */
       if (AMH.blog && AMH.blog.editButtons) AMH.blog.editButtons();
+      /* and the work that is built and not yet uploaded goes on screen
+         with them: the layer is the author's, so it waits for the editor */
+      if (AMH.publish && AMH.publish.staged) AMH.publish.staged();
       console.info("[copy editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
     } else {
       AMH.tool.editPost = null;
@@ -2922,6 +3239,201 @@
 
   window.edit = api;
 
+  /* ---------------- the tutorial arrow ----------------
+
+     One pointer, one target. A curved stroke with a head and a handwritten
+     label, drawn over the page to say "this one". It is a note left on top
+     of the interface, not a part of it, which is why it is hand-drawn.
+
+     pointAt(target, label, opts) shows it; unpoint() takes it away. One
+     exists at a time, and a second pointAt moves it. It stands below the
+     target when there is room, so it never covers the control beside the
+     target, and takes a side or the top only when there is none. It follows
+     the target on scroll and resize, and it leaves when the target is
+     clicked or gone.
+
+     opts.size    scale of the drawing, 1 by default, .8 on a narrow screen
+     opts.stay    true keeps it after the target is clicked */
+  var PT_W = 170, PT_H = 90;   /* the drawing box, in CSS px at scale 1 */
+  var PT_GAP = 6;              /* tip to target edge */
+  var PT_LBL_GAP = 10;         /* tail end to the label's near edge */
+  var PT_IN_MS = 1150;         /* head .15s, stroke .45s, label .55s, end to end */
+  var PT_OUT_MS = 620;         /* the same three, the other way round */
+  /* Each shape is one cubic, tail first, tip last, in box units, with where
+     the box sits against the target and where the label hangs off the tail.
+     The two "L" and "R" shapes are the mirror images, for a target near a
+     screen edge, so the tail always swings toward the open side. */
+  var PT_SHAPES = {
+    below:  { d: [[160, 82], [120, 84], [70, 70], [34, 18]],   at: "bottom" },
+    belowL: { d: [[10, 82], [50, 84], [100, 70], [136, 18]],   at: "bottom", end: true },
+    right:  { d: [[166, 76], [130, 80], [84, 66], [36, 44]],   at: "right" },
+    left:   { d: [[4, 76], [40, 80], [86, 66], [134, 44]],     at: "left",   end: true },
+    above:  { d: [[20, 6], [60, 2], [120, 18], [150, 66]],     at: "top",    end: true },
+    aboveR: { d: [[150, 6], [110, 2], [50, 18], [20, 66]],     at: "top" }
+  };
+  var ptEl = null, ptTarget = null, ptOpts = null, ptShape = "", ptFontAsked = false;
+  var ptLeaving = null;        /* an arrow on its way out, until it is dropped */
+
+  function ptReduced() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+  /* The handwriting face, asked for once on first use. The fallback is a
+     system script face, and nothing waits for the request. */
+  function ptFont() {
+    if (ptFontAsked) return;
+    ptFontAsked = true;
+    var l = doc.createElement("link");
+    l.rel = "stylesheet";
+    l.href = "https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap";
+    doc.head.appendChild(l);
+  }
+  /* Which shape fits: below by preference, then a side, then above. The
+     mirror of a shape is chosen when the tail would leave the screen. */
+  function ptPick(r, s) {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var cx = r.left + r.width / 2;
+    var needH = PT_H * s + PT_GAP + 8, needW = PT_W * s + PT_GAP + 8;
+    if (vh - r.bottom > needH) return (cx + 140 * s + 8 < vw) ? "below" : "belowL";
+    if (vw - r.right > needW) return "right";
+    if (r.left > needW) return "left";
+    return (cx - 150 * s > 8) ? "above" : "aboveR";
+  }
+  function ptBox(name, r, s) {
+    var sh = PT_SHAPES[name], tip = sh.d[3];
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (sh.at === "bottom") return [cx - tip[0] * s, r.bottom + PT_GAP - tip[1] * s];
+    if (sh.at === "top") return [cx - tip[0] * s, r.top - PT_GAP - tip[1] * s];
+    if (sh.at === "right") return [r.right + PT_GAP - tip[0] * s, cy - tip[1] * s];
+    return [r.left - PT_GAP - tip[0] * s, cy - tip[1] * s];
+  }
+  /* Draw the shape: the curve, and a head turned to the curve's own
+     direction at the tip, which for a cubic is the line from the last
+     control point to the end. */
+  function ptDraw(name) {
+    var sh = PT_SHAPES[name], d = sh.d;
+    var curve = ptEl.querySelector(".ced-point__curve");
+    var head = ptEl.querySelector(".ced-point__head");
+    curve.setAttribute("d", "M" + d[0][0] + " " + d[0][1] + " C" + d[1][0] + " " + d[1][1] + ", " +
+      d[2][0] + " " + d[2][1] + ", " + d[3][0] + " " + d[3][1]);
+    var deg = Math.atan2(d[3][1] - d[2][1], d[3][0] - d[2][0]) * 180 / Math.PI;
+    head.setAttribute("transform", "translate(" + d[3][0] + " " + d[3][1] + ") rotate(" + deg.toFixed(1) + ")");
+  }
+  /* The label hangs off the tail, on the side away from the target, centred
+     on the tail's height. The curve leaves the tail toward the target, so
+     that side is always clear of the stroke. When the side has no room the
+     label goes over or under the tail instead, and a last clamp keeps it on
+     screen. Everything is measured, so no offset is a guess. */
+  function ptLabel(name, box, s) {
+    var sh = PT_SHAPES[name];
+    var lbl = ptEl.querySelector(".ced-point__label");
+    var lr = lbl.getBoundingClientRect();
+    var lw = lr.width, lh = lr.height;
+    var tx = box[0] + sh.d[0][0] * s, ty = box[1] + sh.d[0][1] * s;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var x = sh.end ? tx - PT_LBL_GAP - lw : tx + PT_LBL_GAP;
+    var y = ty - lh / 2;
+    if (x < 8 || x + lw > vw - 8) {
+      x = tx - lw / 2;
+      y = sh.at === "top" ? ty + PT_LBL_GAP : ty - PT_LBL_GAP - lh;
+    }
+    x = Math.max(8, Math.min(vw - 8 - lw, x));
+    y = Math.max(8, Math.min(vh - 8 - lh, y));
+    lbl.style.left = (x - box[0]) + "px";
+    lbl.style.top = (y - box[1]) + "px";
+  }
+  /* Place the box against the target, and keep the label on screen: the
+     label is the one part that can reach past an edge, so it is measured
+     and pulled back after everything else is set. */
+  function ptPlace() {
+    if (!ptEl || !ptTarget) return;
+    if (!doc.body.contains(ptTarget)) { unpoint(); return; }
+    var r = ptTarget.getBoundingClientRect();
+    if (!r.width && !r.height) { unpoint(); return; }
+    var s = ptOpts.size;
+    var name = ptPick(r, s);
+    if (name !== ptShape) {
+      /* a new shape mid-flight would restart the draw; show it settled */
+      if (ptShape) ptEl.classList.add("is-still");
+      ptShape = name;
+      ptDraw(name);
+    }
+    var box = ptBox(name, r, s);
+    ptEl.style.left = box[0] + "px";
+    ptEl.style.top = box[1] + "px";
+    ptLabel(name, box, s);
+  }
+  function ptTick() { ptPlace(); }
+  function ptClicked() { if (ptOpts && !ptOpts.stay) unpoint(); }
+
+  function pointAt(target, label, opts) {
+    if (!target) return;
+    injectStyles();
+    ptFont();
+    if (ptEl) unpoint(true);
+    /* one element at a time: an arrow still on its way out goes now */
+    if (ptLeaving && ptLeaving.parentNode) ptLeaving.parentNode.removeChild(ptLeaving);
+    ptLeaving = null;
+    ptTarget = target;
+    ptOpts = opts || {};
+    if (!ptOpts.size) ptOpts.size = window.innerWidth < 600 ? 0.8 : 1;
+    ptShape = "";
+    ptEl = doc.createElement("div");
+    /* born still: the hidden state below has to land without a transition,
+       or the move from the initial zero to the hidden offset is itself the
+       transition, and the entrance then has nothing left to do */
+    ptEl.className = "ced-point is-still";
+    ptEl.setAttribute("aria-hidden", "true");
+    ptEl.innerHTML = '<svg viewBox="0 0 ' + PT_W + " " + PT_H + '" width="' + (PT_W * ptOpts.size) +
+      '" height="' + (PT_H * ptOpts.size) + '">' +
+      '<path class="ced-point__curve" d="M0 0" />' +
+      '<path class="ced-point__head" d="M-15 -9 L0 0 L-15 9" />' +
+      '</svg><span class="ced-point__label"></span>';
+    ptEl.querySelector(".ced-point__label").textContent = label || "";
+    doc.body.appendChild(ptEl);
+    ptPlace();
+    /* The entrance is three transitions on one class, timed end to end by
+       their delays: the head, the stroke from the tip back to the tail, the
+       label written out. The dash length and the hidden offset are two
+       variables, so the stylesheet owns both the hidden and the shown state
+       and the class is the only thing this code changes. */
+    var curve = ptEl.querySelector(".ced-point__curve");
+    var len = curve.getTotalLength();
+    ptEl.style.setProperty("--pt-len", len + "px");
+    ptEl.style.setProperty("--pt-off", (-len) + "px");
+    if (ptReduced()) {
+      ptEl.classList.add("is-on");
+    } else {
+      void ptEl.getBoundingClientRect();   /* commit the hidden state, still */
+      ptEl.classList.remove("is-still");
+      window.requestAnimationFrame(function () { if (ptEl) ptEl.classList.add("is-on"); });
+    }
+    window.addEventListener("scroll", ptTick, true);
+    window.addEventListener("resize", ptTick);
+    target.addEventListener("click", ptClicked);
+  }
+  function unpoint(now) {
+    if (!ptEl) return;
+    var el = ptEl, target = ptTarget;
+    window.removeEventListener("scroll", ptTick, true);
+    window.removeEventListener("resize", ptTick);
+    if (target) target.removeEventListener("click", ptClicked);
+    ptEl = null; ptTarget = null; ptOpts = null; ptShape = "";
+    var drop = function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      if (ptLeaving === el) ptLeaving = null;
+    };
+    if (now || ptReduced()) { drop(); return; }
+    /* the other way round: the label first, then the stroke, then the head */
+    ptLeaving = el;
+    el.classList.add("is-off");
+    el.classList.remove("is-on");
+    window.setTimeout(drop, PT_OUT_MS + 20);
+  }
+  /* AMH.tool.point(target, label, opts) / AMH.tool.unpoint()
+     The tutorial arrow. One at a time; see pointAt for the rules. */
+  AMH.tool.point = pointAt;
+  AMH.tool.unpoint = unpoint;
+
   /* ---------------- the editor kit ----------------
      What a trunk that extends the editor is allowed to use. publish.js is
      the one consumer today; the Phase 4 gallery tile grid is the next.
@@ -2949,6 +3461,8 @@
   AMH.tool.zip = zipStore;                 /* STORE zip writer */
   AMH.tool.download = downloadFile;        /* hand a file to the browser */
   AMH.tool.escAttr = escAttr;          /* a consumer's serializer needs it */
+  AMH.tool.stamp = stamp;                  /* six characters that name a publish */
+  AMH.tool.error = errObj;                 /* an Error that carries a BLG code */
   AMH.tool.tagCheck = tagCheck;            /* tag-balance check before a publish */
   AMH.tool.age = age;                      /* "12 min ago" */
   AMH.tool.toolbar = TOOLS;                /* the formatting buttons */

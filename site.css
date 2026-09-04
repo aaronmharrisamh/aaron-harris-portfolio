@@ -1872,30 +1872,244 @@ ul.dd-points li::before {
 .reveal.d3 { transition-delay: .24s; }
 
 /* ------------------------------------------------------------
-   BLOG — shared chrome. Used by the in-site stream and by the
-   generated month pages, which link this file directly.
+   BLOG - the stream, and the month pages that share its design.
+   blog.html carries the newest month in full; a month page is the
+   same column, the same posts, and the whole of each post.
    ------------------------------------------------------------ */
-.blog-wrap { width: 100%; max-width: 760px; margin-inline: auto; padding-inline: var(--gutter); }
 
-/* blog.html's own section. The stream that Phase 3 Part 2 puts inside it
-   brings its own styles; these two rules are the page around it. */
+/* THE COLUMN. One measure, centred, with hairline sides on a wide
+   screen so the stream reads as a column and not as a page of text.
+   A month page uses the same wrapper, so the two are one design. */
+.blog-wrap,
+.bs-stream {
+  width: 100%; max-width: 600px; margin-inline: auto;
+}
+.blog-wrap { padding-inline: var(--gutter); }
+.bs-stream {
+  margin-top: 1.2rem;
+  border-inline: 1px solid var(--line-soft);
+  padding-inline: clamp(0px, 3vw, 1.5rem);
+}
+/* The whole blog page is that column: the eyebrow and the heading above
+   the bar line up with the posts under it, rather than running the width
+   of the page while the stream sits narrow in the middle of them. */
 .blog-page { padding-block: var(--section-pad); min-height: 46vh; }
+.blog-page .wrap > * { max-width: 600px; margin-inline: auto; }
 .blog-note {
   margin-top: 1.4rem; padding: 1rem 1.2rem;
   border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: var(--panel); color: var(--muted); font-size: .9rem;
 }
 
-/* month-page top bar + footer (generated standalone pages) */
-.bm-head {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem 1rem;
-  padding: 1.3rem 0 1.1rem;
-  border-bottom: 1px solid var(--line);
+/* THE BAR at the top of the column: the name, the slot the search pill
+   takes, and the month picker. The site header is fixed, so on blog.html
+   this sticks under it at the height site.js publishes; a month page has
+   no header and sticks at the top. */
+.bs-bar {
+  position: sticky; top: var(--header-h, 64px); z-index: 5;
+  display: flex; align-items: center; gap: .5rem .8rem; flex-wrap: wrap;
+  margin-top: 1.4rem; padding: .6rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(18,20,25,.82);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
 }
-.bm-head__brand { font-weight: 800; letter-spacing: .04em; font-size: .95rem; color: var(--text); }
-.bm-head__brand:hover { color: var(--accent-bright); }
-.bm-head__label { margin: 0; color: var(--muted); font-weight: 600; font-size: .85rem; letter-spacing: .06em; }
-.bm-head__stream { margin-left: auto; font-size: .85rem; }
+.blog-month .bs-bar { top: 0; margin-top: 0; }
+.bs-bar__name { font-weight: 800; letter-spacing: .04em; font-size: .9rem; color: var(--text); }
+a.bs-bar__name:hover { color: var(--accent-bright); }
+.bs-bar__label {
+  margin: 0; font-size: .82rem; font-weight: 600; letter-spacing: .06em; color: var(--muted);
+}
+.bs-bar__stream { font-size: .8rem; }
+.bs-bar__month {
+  flex: none; background: var(--bg-deep); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: .3rem .7rem; font: 600 .74rem var(--font); cursor: pointer;
+}
+.bs-bar__month:hover { color: var(--text); border-color: var(--accent); }
+.bs-bar__month:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* THE SEARCH PILL, in the bar's find slot, and the hits under it. */
+.bs-find { position: relative; flex: 1; min-width: 0; display: flex; justify-content: flex-end; }
+.bs-find__pill {
+  display: flex; align-items: center; gap: .4rem;
+  width: min(240px, 100%); padding: .28rem .7rem;
+  background: var(--bg-deep); border: 1px solid var(--line); border-radius: 999px;
+  color: var(--dim); cursor: text;
+}
+.bs-find__pill:focus-within { border-color: var(--accent); color: var(--accent-bright); }
+.bs-find__pill svg { width: 13px; height: 13px; flex: none; }
+.bs-find__pill input {
+  flex: 1; min-width: 0; background: none; border: 0; outline: none;
+  color: var(--text); font: 500 .78rem var(--font);
+}
+.bs-find__pill input::placeholder { color: var(--dim); }
+.bs-find__pill input:disabled { cursor: not-allowed; }
+.bs-find__list {
+  position: absolute; top: calc(100% + .4rem); right: 0; z-index: 20;
+  width: min(360px, 100%); max-height: 22rem; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: 0 24px 60px -24px rgba(0,0,0,.9);
+}
+.bs-find__count {
+  padding: .45rem .7rem; border-bottom: 1px solid var(--line-soft);
+  color: var(--dim); font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
+}
+.bs-find__hit {
+  display: grid; grid-template-columns: 48px 1fr auto; column-gap: .6rem;
+  padding: .55rem .7rem; border-bottom: 1px solid var(--line-soft);
+  color: var(--text-soft);
+}
+.bs-find__hit:last-child { border-bottom: 0; }
+.bs-find__hit:hover, .bs-find__hit.is-at { background: var(--accent-faint); }
+.bs-find__thumb {
+  grid-row: span 2; width: 48px; height: 48px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--bg-deep);
+}
+.bs-find__thumb--text {
+  display: flex; align-items: center; justify-content: center;
+  font: 700 .6rem Consolas, monospace; color: var(--dim); letter-spacing: .08em;
+}
+.bs-find__hit b { grid-column: 2; font-size: .82rem; color: var(--text); }
+.bs-find__hit small { grid-column: 3; color: var(--dim); font-size: .7rem; white-space: nowrap; }
+.bs-find__hit p {
+  grid-column: 2 / -1; margin: .15rem 0 0; font-size: .74rem; line-height: 1.5; color: var(--muted);
+}
+.bs-find__hit mark { background: rgba(74,165,232,.28); color: var(--text); border-radius: 3px; }
+
+/* THE FILTER LINE, under the bar while one tag is showing. */
+.bs-showing {
+  margin: .6rem 0 0; font-size: .78rem; color: var(--muted);
+  display: flex; align-items: center; gap: .3rem; flex-wrap: wrap;
+}
+.bs-showing b { color: var(--accent-bright); font-weight: 700; }
+.bs-showing__clear {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--dim); font: inherit; text-decoration: underline;
+}
+.bs-showing__clear:hover { color: var(--text); }
+/* the posts with that tag that this page does not hold, under the stream */
+.bs-tagrest { position: static; width: 100%; max-height: none; margin-top: 1rem; }
+
+/* ONE POST. A hairline between posts, the byline, then the words. */
+.bs-post { padding: clamp(1.4rem, 3.5vw, 2.2rem) 0; border-top: 1px solid var(--line-soft); }
+.bs-post:first-child { border-top: 0; }
+.bs-post.is-target { background: var(--accent-faint); border-radius: var(--radius-sm); }
+.bs-post__by {
+  display: grid; grid-template-columns: 40px 1fr auto; align-items: center;
+  column-gap: .7rem; row-gap: .1rem;
+}
+.bs-post__avatar {
+  grid-row: span 2; width: 40px; height: 40px; border-radius: 50%;
+  object-fit: cover; object-position: top center;
+  background: var(--bg-deep); border: 1px solid var(--line);
+}
+.bs-post__by b {
+  grid-column: 2; font-size: .88rem; font-weight: 700; letter-spacing: .02em; color: var(--text);
+}
+.bs-post__when {
+  grid-column: 2; display: inline-flex; align-items: center; gap: .45rem;
+  color: var(--dim); font-size: .76rem; font-variant-numeric: tabular-nums;
+}
+a.bs-post__when:hover { color: var(--accent-bright); }
+.bs-post__zone {
+  border: 1px solid var(--line); border-radius: 999px; padding: 0 6px;
+  font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+}
+.bs-post .bs-retry { grid-column: 3; grid-row: span 2; }
+
+/* A post that is built and not yet uploaded says so, and the chip is the
+   way back to the list of what is left to do with it. */
+.bs-post--staged { border-left: 2px solid var(--c-yellow, #f0b429); padding-left: .8rem; }
+.bs-post__staged {
+  grid-column: 3; justify-self: end;
+  padding: .1rem .55rem; border-radius: 999px; cursor: pointer;
+  background: none; border: 1px solid rgba(240,180,41,.5); color: var(--c-yellow, #f0b429);
+  font: 600 .64rem var(--font); letter-spacing: .04em;
+}
+.bs-post__staged:hover { border-color: var(--c-yellow, #f0b429); }
+
+/* THE WORDS. The Markdown set the renderer emits, and nothing else. */
+.bs-post__title {
+  margin: .9rem 0 0; font-size: clamp(1.1rem, 2vw, 1.35rem);
+  font-weight: 800; letter-spacing: -.01em; line-height: 1.25; color: var(--text);
+}
+.bs-post__body { margin-top: .7rem; color: var(--text-soft); line-height: 1.7; }
+.bs-post__body > * + * { margin-top: .9rem; }
+.bs-post__body h2, .bs-post__body h3, .bs-post__body h4 {
+  margin-top: 1.6rem; font-weight: 800; letter-spacing: .01em; color: var(--text);
+}
+.bs-post__body h2 { font-size: 1.15rem; }
+.bs-post__body h3 { font-size: 1.05rem; }
+.bs-post__body h4 { font-size: .96rem; }
+.bs-post__body a:not(.textlink) { color: var(--accent); }
+.bs-post__body ul, .bs-post__body ol { padding-left: 1.3rem; }
+.bs-post__body li + li { margin-top: .3rem; }
+.bs-post__body ul { list-style: disc; }
+.bs-post__body ol { list-style: decimal; }
+.bs-post__body blockquote {
+  padding-left: .9rem; border-left: 2px solid var(--accent);
+  color: var(--muted); font-style: italic;
+}
+.bs-post__body blockquote p { margin: 0; }
+.bs-post__body pre {
+  padding: .8rem .9rem; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-deep); overflow-x: auto;
+}
+.bs-post__body code {
+  font: .86em Consolas, "Courier New", monospace; color: var(--accent-bright);
+}
+.bs-post__body pre code { color: var(--text-soft); }
+.bs-post__body hr { border: 0; border-top: 1px solid var(--line-soft); }
+.bs-post__body table {
+  width: 100%; border-collapse: collapse; font-size: .88rem; display: block; overflow-x: auto;
+}
+.bs-post__body th, .bs-post__body td {
+  padding: .4rem .6rem; border: 1px solid var(--line-soft); text-align: left;
+}
+.bs-post__body th { color: var(--text); font-weight: 700; background: var(--bg-deep); }
+.bs-post__body s { color: var(--dim); }
+
+/* THE TAGS. */
+.bs-post__tags { margin-top: .9rem; display: flex; flex-wrap: wrap; gap: .45rem; }
+.bs-post__tags a {
+  padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--dim); font-size: .73rem; letter-spacing: .02em;
+}
+.bs-post__tags a:hover { border-color: var(--accent); color: var(--accent-bright); }
+
+/* THE CUT CONTROLS. A long post shows to here and opens in place. */
+.bs-more {
+  display: inline-flex; align-items: center; gap: .4rem;
+  margin-top: .9rem; padding: .35rem .9rem;
+  background: transparent; color: var(--accent-bright);
+  border: 1px solid var(--line); border-radius: 999px;
+  font: 600 .78rem var(--font); cursor: pointer;
+  transition: border-color .25s var(--ease), color .25s var(--ease);
+}
+.bs-more:hover { border-color: var(--accent); }
+.bs-more::after { content: "\2193"; }
+.bs-more[data-more="hard"]::after { content: "\2192"; }
+.bs-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* THE CHAIN: the way back to the month before, and the divider an
+   appended month gets. The divider carries the top border the first post
+   of a month would otherwise lack, because an appended month's first post
+   is no longer the first child. */
+.bm-older { display: block; margin: 1.6rem 0 0; font-size: .88rem; }
+.bm-older[aria-busy="true"] { color: var(--dim); pointer-events: none; }
+.bm-older--end { color: var(--dim); }
+.bm-divider {
+  margin: clamp(1.6rem, 4vw, 2.4rem) 0 0; padding-top: 1.2rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: .8rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent);
+}
+.bm-divider:focus { outline: none; }
+.bm-divider + .bs-post,
+.bm-divider + .blog-post { border-top: 0; }
+
+/* THE MONTH PAGE'S FOOTER. */
 .bm-foot {
   margin-top: clamp(2.5rem, 6vw, 4rem);
   padding: 1.4rem 0 1.8rem;
@@ -1904,68 +2118,20 @@ ul.dd-points li::before {
   font-size: .78rem; letter-spacing: .05em; color: var(--dim);
 }
 
-/* one post, on either surface */
-.blog-post { padding: clamp(1.8rem, 4vw, 2.6rem) 0; border-top: 1px solid var(--line-soft); }
-.blog-post:first-of-type { border-top: 0; }
-.blog-post > header h2 {
-  font-size: clamp(1.35rem, 2.6vw, 1.8rem);
-  font-weight: 800; letter-spacing: -.02em; line-height: 1.15;
-}
-.blog-post > header time {
-  display: block; margin-top: .35rem;
-  font-size: .78rem; font-weight: 700; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--accent);
-}
-.blog-post__body { margin-top: 1.1rem; color: var(--text-soft); }
-.blog-post__body > * + * { margin-top: 1rem; }
-.blog-post__body h3 {
-  margin-top: 1.7rem; font-size: 1.05rem; font-weight: 800;
-  letter-spacing: .01em; color: var(--text);
-}
-.blog-post__body a:not(.textlink) { color: var(--accent); }
-
-/* static image render: month pages show plain stacked figures (no JS);
-   the in-site stream upgrades tag RUNS to interactive carousels instead */
-figure.bp-fig { margin: 1.4rem 0 0; }
+/* THE FIGURES. Full column width, and a click opens the viewer. A cut
+   flag's marker is read by the fold and seen by nobody. */
+.bp-cut { display: none; }
+figure.bp-fig { margin: 1.1rem 0 0; }
 figure.bp-fig img {
   width: 100%; display: block; border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line); cursor: zoom-in;
 }
 figure.bp-fig figcaption {
-  margin-top: .5rem; color: var(--muted); font-size: .78rem; letter-spacing: .02em;
+  margin-top: .45rem; color: var(--dim); font-size: .76rem; line-height: 1.5;
 }
-figure.bp-fig figcaption:empty { display: none; }
 
-/* ---- the blog index, written into blog.html by the publisher ----
-   Every post appears once: a date, a title, its first paragraph and a link
-   into the month file that holds it. The cards are static markup, so this
-   page needs no script and works when it is opened from disk. A link to a
-   month file is a navigation, which file:// allows; a fetch is not. */
-.bs-index { margin-top: 1.6rem; border-top: 1px solid var(--line); }
-.bs-card { padding: 1.4rem .2rem 1.5rem; border-bottom: 1px solid var(--line); }
-.bs-card[hidden] { display: none; }
-.bs-card time { display: block; color: var(--dim); font-size: .74rem;
-  letter-spacing: .06em; font-variant-numeric: tabular-nums; }
-.bs-card h3 { margin: .35rem 0 .5rem; font-size: clamp(1.1rem, 2vw, 1.45rem);
-  letter-spacing: -.01em; }
-.bs-card__excerpt { margin: 0 0 .8rem; color: var(--muted); line-height: 1.7;
-  max-width: 68ch; }
-.bs-card__more { display: inline-flex; align-items: center; gap: .35rem;
-  font-size: .78rem; font-weight: 600; letter-spacing: .04em; }
-.bs-card__more::after { content: "→"; transition: transform .3s var(--ease); }
-.bs-card__more:hover::after { transform: translateX(3px); }
-.bs-card.is-target { background: var(--accent-faint); border-radius: var(--radius-sm); }
-
-/* ---- the blog stream, rendered into blog.html by blog.js ---- */
-.bs-months { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.1rem; }
-.bs-months button.on { border-color: var(--accent); color: var(--accent-bright); }
-.bs-month {
-  margin-top: clamp(2rem, 5vw, 3rem);
-  font-size: .8rem; font-weight: 800; letter-spacing: .2em;
-  text-transform: uppercase; color: var(--accent);
-  display: flex; align-items: center; gap: .8rem;
-}
-.bs-month::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+/* Shared small parts: the note when a target is not found, and the
+   editor's own button on a post. */
 .bs-note {
   margin-top: 2rem; padding: 1rem 1.2rem;
   border: 1px solid var(--line); border-radius: var(--radius-sm);
@@ -1973,13 +2139,30 @@ figure.bp-fig figcaption:empty { display: none; }
   display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
 }
 .bs-retry {
-  padding: .4rem .9rem; border-radius: 999px; border: 1px solid var(--line);
+  padding: .3rem .8rem; border-radius: 999px; border: 1px solid var(--line);
   background: var(--bg-deep); color: var(--text-soft);
-  font: 600 .8rem var(--font); cursor: pointer;
+  font: 600 .74rem var(--font); cursor: pointer;
   transition: border-color .2s, color .2s;
 }
 .bs-retry:hover { border-color: var(--accent); color: var(--text); }
-.bs-end { margin-top: 2.5rem; text-align: center; color: var(--dim); font-size: .8rem; letter-spacing: .06em; }
+
+/* MONTH FILES WRITTEN BEFORE V051 keep their own post markup until one
+   rebuild gives them the design above. These rules go with that rebuild. */
+.blog-post { padding: clamp(1.4rem, 3.5vw, 2.2rem) 0; border-top: 1px solid var(--line-soft); }
+.blog-post:first-of-type { border-top: 0; }
+.blog-post > header h2 {
+  font-size: clamp(1.2rem, 2.4vw, 1.5rem);
+  font-weight: 800; letter-spacing: -.02em; line-height: 1.2;
+}
+.blog-post > header time {
+  display: block; margin-top: .35rem;
+  font-size: .76rem; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--accent);
+}
+.blog-post__body { margin-top: 1rem; color: var(--text-soft); line-height: 1.7; }
+.blog-post__body > * + * { margin-top: .9rem; }
+.blog-post__body h3 { margin-top: 1.6rem; font-size: 1.05rem; font-weight: 800; color: var(--text); }
+.blog-post__body a:not(.textlink) { color: var(--accent); }
 
 /* ============================================================
    8. RESPONSIVE

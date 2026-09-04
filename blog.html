@@ -36,6 +36,7 @@
   <meta name="author" content="Aaron M. Harris" />
   <meta name="theme-color" content="#16181d" />
   <link rel="canonical" href="https://aaronmichaelharris.com/blog.html" />
+  <link rel="alternate" type="application/atom+xml" title="Aaron M. Harris - Blog" href="feed.xml" />
 
   <!-- Favicons -->
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -78,6 +79,7 @@
   <script defer src="site.js"></script>
   <script defer src="work.js"></script>
   <script defer src="blog.js"></script>
+  <script defer src="markdown.js"></script>
   <script defer src="tool.js"></script>
   <script defer src="publish.js"></script>
 
@@ -177,10 +179,11 @@
          exactly one place, the month file, and this page carries a
          summary of it.
 
-         The months row above is drawn by blog.js from the manifest
-         and filters the cards below. It fetches nothing.
+         The stream below is written by the publish: the newest
+         month's posts in full, so this page reads the same from disk
+         as it does over HTTP. It fetches nothing on load.
 
-         blog.js does nothing at all on a page without #blogIndex, so
+         blog.js does nothing at all on a page without #blogStream, so
          it is the presence of this container that makes a page the
          blog page.
          ============================================================ -->
@@ -194,12 +197,20 @@
         <!--[edit:blog-h2]-->
         <h2>Notes from the work.</h2>
         <!--[/edit:blog-h2]-->
-        <div class="bs-months" id="blogMonths"></div>
-        <!--[edit:blog-index]-->
-        <div class="bs-index" id="blogIndex" data-ced="generated">
+        <!-- The bar sticks to the top of the column once the heading
+             above it scrolls away. It is authored chrome and carries no
+             markers: blog.js fills the month picker from the manifest,
+             and the find slot stays empty until the search pill. -->
+        <div class="bs-bar" id="blogBar">
+          <span class="bs-bar__name">Blog</span>
+          <div class="bs-bar__find" id="blogFind"></div>
+          <select class="bs-bar__month" id="blogMonth" aria-label="Jump to a month"></select>
+        </div>
+        <!--[edit:blog-stream]-->
+        <div class="bs-stream" id="blogStream" data-ced="generated">
           <p class="bs-note">No posts yet - check back soon.</p>
         </div>
-        <!--[/edit:blog-index]-->
+        <!--[/edit:blog-stream]-->
       </div>
     </section>
 
@@ -289,9 +300,9 @@
        from treating it as a text region. -->
   <!--[edit:blog-manifest]-->
   <script id="blogManifest" type="text/plain" data-ced="blog">
-next-post:0002
-next-img:0001
-2609020001Test
+next-post:0004
+next-img:0002
+2609020001Test|2609030002Test Z|2609030003This is a blog post test.
 </script>
   <!--[/edit:blog-manifest]-->
 </body>

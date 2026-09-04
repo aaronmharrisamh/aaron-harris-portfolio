@@ -151,11 +151,14 @@ here before they exist on disk.
 | --- | --- |
 | `index.html` | Home page. Hero, work, about, and contact. |
 | `gallery.html` | Gallery page. The six-column tile grid. |
-| `blog.html` | Blog page. The reading engine and the post manifest. |
+| `blog.html` | Blog page. The stream, the post manifest, and the composer. |
 | `site.css` | All page style. Replaces the inline style block. |
 | `site.js` | Shared page behavior for every page. |
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
-| `blog.js` | The blog reading engine. `blog.html` only. |
+| `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
+| `markdown.js` | The Markdown renderer for a post body. `blog.html` only. |
+| `search.js` | GENERATED. The packed index of every post, read by find. Do not edit by hand. |
+| `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, and the export. |
 | `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
@@ -164,10 +167,12 @@ here before they exist on disk.
 | `tools/e2e/` | The test harness. |
 
 Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
-sections only when a distinct job cannot merge into another section. Two files
-are at eight and say why in their own headers: `gallery.js`, which both decides
-a layout and is an editing surface, and `site.css`, whose gallery grid is a
-whole page's layout system with an invariant of its own.
+sections only when a distinct job cannot merge into another section. Three
+files are at eight and say why in their own headers: `gallery.js`, which both
+decides a layout and is an editing surface; `site.css`, whose gallery grid is a
+whole page's layout system with an invariant of its own; and `blog.js`, whose
+FIND section reads a packed file about every post the blog has, while every
+other section reads the page it is on.
 
 ### The Self-Editing Laws
 
@@ -199,3 +204,25 @@ whole page's layout system with an invariant of its own.
 - `docs/` is in `.gitignore`. It holds the plans, the manual, and the mockups.
 - `CLAUDE.md` is committed. It is not in `.gitignore`, because the rules ship
   with the code they describe.
+
+## Long test runs are watched, not waited on
+
+**Any test run that will take more than about two minutes gets a four-minute
+check-in, without being asked for.**
+
+Start the run in the background, then arm a Monitor that fires every **240
+seconds** until the run ends. Each check-in says:
+
+- how much output the log has produced, and what it was at the last check -
+  a number moving is the evidence it is alive;
+- whether the summary line has appeared yet;
+- **GATE FINISHED** with the test count and OK/FAILED when it lands.
+
+### Silence is not success
+
+A run that has died and a run that is working look identical from outside, so
+the watch must be able to tell them apart. If the log has not grown since the
+previous check, **say so** rather than reporting "still running".
+
+Three quiet checks in a row (~12 minutes of no output) means declare it
+probably dead, stop the watch, and say what to do next.

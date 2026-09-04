@@ -1,0 +1,247 @@
+The Markdown fixture. Each case is: a name line, the source, a line of
+four dashes, the expected HTML from AMH.markdown.render(source). Cases are
+separated by a line of four equals signs. The renderer is done when every
+case renders byte for byte. A feature outside this file is text.
+====
+headings: one to three levels, a fourth is text, inline marks apply
+# One
+## Two **bold**
+### Three
+#### Four
+----
+<h2>One</h2>
+<h3>Two <strong>bold</strong></h3>
+<h4>Three</h4>
+<p>#### Four</p>
+====
+paragraphs and a rule: a blank line ends a paragraph, lines inside it keep their breaks
+Before the rule.
+Second line of it.
+
+---
+
+After.
+----
+<p>Before the rule.
+Second line of it.</p>
+<hr>
+<p>After.</p>
+====
+block quote: lines run together into one paragraph
+> A quote
+> runs *together*.
+----
+<blockquote><p>A quote
+runs <em>together</em>.</p></blockquote>
+====
+code block: escaped, no Markdown inside, a tag or a flag inside is code
+```js
+var a = "<b>" & 1; [img0001]
+**not bold** {pagebreak}
+```
+----
+<pre><code>var a = "&lt;b&gt;" &amp; 1; &#91;img0001]
+**not bold** {pagebreak}</code></pre>
+====
+bullet list: one level of nesting by two spaces, either marker
+- one
+- two *em*
+  - two a
+  * two b
+- three
+----
+<ul>
+<li>one</li>
+<li>two <em>em</em>
+<ul>
+<li>two a</li>
+<li>two b</li>
+</ul>
+</li>
+<li>three</li>
+</ul>
+====
+numbered list: with a nested bullet list
+1. first
+2. second
+  - inner
+3. third
+----
+<ol>
+<li>first</li>
+<li>second
+<ul>
+<li>inner</li>
+</ul>
+</li>
+<li>third</li>
+</ol>
+====
+table: a pipe row, a dash row with colons, pipe rows; a short row is padded
+| Name | Count | Note |
+| :--- | :---: | --- |
+| a | **1** | left |
+| b | 2 |
+----
+<table>
+<thead>
+<tr><th style="text-align:left">Name</th><th style="text-align:center">Count</th><th>Note</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align:left">a</td><td style="text-align:center"><strong>1</strong></td><td>left</td></tr>
+<tr><td style="text-align:left">b</td><td style="text-align:center">2</td><td></td></tr>
+</tbody>
+</table>
+====
+image tag run: lines of tags are one block, passed on as they are for the tag renderer
+Text before.
+
+[img0001,Cap one|Alt one]
+[png0002,Cap two]
+
+Text after.
+----
+<p>Text before.</p>
+[img0001,Cap one|Alt one]
+[png0002,Cap two]
+<p>Text after.</p>
+====
+flags: alone on a line they become cut markers; beside text they are text
+Intro.
+
+{expandformore}
+
+More.
+
+{pagebreak}
+
+Rest. {pagebreak}
+----
+<p>Intro.</p>
+<span class="bp-cut" data-cut="soft"></span>
+<p>More.</p>
+<span class="bp-cut" data-cut="hard"></span>
+<p>Rest. {pagebreak}</p>
+====
+inline marks: bold, both italics, strikethrough, code; an underscore inside a word is text
+**bold** and *it* and _it too_ and ~~gone~~ and `co<de> **raw**` and snake_case_word stays.
+----
+<p><strong>bold</strong> and <em>it</em> and <em>it too</em> and <s>gone</s> and <code>co&lt;de&gt; **raw**</code> and snake_case_word stays.</p>
+====
+links: a scheme gets rel=noopener, a local link does not, a javascript scheme is dropped to its text, an image tag is not a link
+[Site](https://example.com/a?b=1&c="x") and [local](blog.html#p0001) and [bad](javascript:alert(1)) and [img0003,Inline cap] here.
+----
+<p><a href="https://example.com/a?b=1&amp;c=&quot;x&quot;" rel="noopener">Site</a> and <a href="blog.html#p0001">local</a> and bad and [img0003,Inline cap] here.</p>
+====
+raw HTML: a block that starts with a tag passes through untouched; a tag inside a paragraph passes through and the marks around it still apply
+<div class="note">
+  <b>kept</b> *not marked*
+</div>
+
+A <kbd>key</kbd> in **text**.
+----
+<div class="note">
+  <b>kept</b> *not marked*
+</div>
+<p>A <kbd>key</kbd> in <strong>text</strong>.</p>
+====
+unclosed fence: runs to the end
+Start.
+
+```
+no end
+here
+----
+<p>Start.</p>
+<pre><code>no end
+here</code></pre>
+====
+pipe rows with no dash row are a paragraph
+| a | b |
+| c | d |
+----
+<p>| a | b |
+| c | d |</p>
+====
+out of the set: a setext heading, a reference link and a footnote are text; a dash line is a rule
+Setext
+======
+
+[ref][1]
+
+[1]: https://example.com
+
+Footnote[^1]
+
+[^1]: Note.
+
+Under
+---
+----
+<p>Setext
+======</p>
+<p>[ref][1]</p>
+<p>[1]: https://example.com</p>
+<p>Footnote[^1]</p>
+<p>[^1]: Note.</p>
+<p>Under</p>
+<hr>
+====
+mixed: a whole post
+# A day at the dome
+
+We ran the **planetarium** test with the *new* headset. See the [notes](https://example.com/notes).
+
+[img0001,Dome and headset|The dome at dusk]
+
+{expandformore}
+
+## What worked
+
+- Tracking held for ~~ten~~ twenty minutes
+- The `sync()` call, at last
+  - even on the old rig
+
+> Ship it.
+
+| Rig | Frames |
+| --- | ---: |
+| old | 58 |
+| new | 90 |
+
+```
+$ run --dome
+ok
+```
+
+{pagebreak}
+
+The rest is for another day.
+----
+<h2>A day at the dome</h2>
+<p>We ran the <strong>planetarium</strong> test with the <em>new</em> headset. See the <a href="https://example.com/notes" rel="noopener">notes</a>.</p>
+[img0001,Dome and headset|The dome at dusk]
+<span class="bp-cut" data-cut="soft"></span>
+<h3>What worked</h3>
+<ul>
+<li>Tracking held for <s>ten</s> twenty minutes</li>
+<li>The <code>sync()</code> call, at last
+<ul>
+<li>even on the old rig</li>
+</ul>
+</li>
+</ul>
+<blockquote><p>Ship it.</p></blockquote>
+<table>
+<thead>
+<tr><th>Rig</th><th style="text-align:right">Frames</th></tr>
+</thead>
+<tbody>
+<tr><td>old</td><td style="text-align:right">58</td></tr>
+<tr><td>new</td><td style="text-align:right">90</td></tr>
+</tbody>
+</table>
+<pre><code>$ run --dome
+ok</code></pre>
+<span class="bp-cut" data-cut="hard"></span>
+<p>The rest is for another day.</p>
