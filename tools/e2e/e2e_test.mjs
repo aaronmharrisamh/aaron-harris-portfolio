@@ -1227,6 +1227,37 @@ async function main() {
   check("9 IMG chips + 9 plus chips built", ui.imgChips === 9 && ui.plusChips === 9,
     "img=" + ui.imgChips + " plus=" + ui.plusChips);
   check("badges shown for visible regions", ui.chips >= 70, "chips=" + ui.chips);
+  // The site header is fixed, so a chip that scrolls to the top of the window
+  // must pass BEHIND it rather than over the navigation. The fixed band runs
+  // from 900 to 1000: header 900, drawer 940, progress bar 1000.
+  const chipLayer = await evaluate(`(function () {
+    var chip = getComputedStyle(document.querySelector('.ced-chip')).zIndex;
+    var head = getComputedStyle(document.querySelector('.site-header')).zIndex;
+    var panel = getComputedStyle(document.querySelector('.ced-panel')).zIndex;
+    return { chip: +chip, head: +head, panel: +panel };
+  })()`);
+  check("badges pass behind the fixed header, and the panel still passes over it",
+    chipLayer.chip < chipLayer.head && chipLayer.panel > chipLayer.head,
+    JSON.stringify(chipLayer));
+  // and a chip whose region is tall enough stops under the header rather than
+  // sliding out of reach with it
+  const chipFloor = await evaluate(`(function () {
+    window.scrollTo(0, 1200);
+    return new Promise(function (res) { setTimeout(function () {
+      var hb = document.querySelector('.site-header').getBoundingClientRect().bottom;
+      var seen = [...document.querySelectorAll('.ced-chip')]
+        .filter(function (c) { return c.style.display !== 'none'; })
+        .map(function (c) { return c.getBoundingClientRect(); })
+        .filter(function (r) { return r.top >= 0 && r.top < innerHeight; });
+      window.scrollTo(0, 0);
+      res({ onScreen: seen.length, headerBottom: Math.round(hb),
+            highest: seen.length ? Math.round(Math.min.apply(null, seen.map(function (r) { return r.top; }))) : -1 });
+    }, 500); });
+  })()`, { awaitPromise: true });
+  check("a badge stops under the header instead of scrolling past it",
+    chipFloor.onScreen > 0 && chipFloor.highest >= chipFloor.headerBottom - 2,
+    JSON.stringify(chipFloor));
+  await sleep(300);
 
   // 3. open hero-h1 modal via its badge chip
   await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'hero-h1').click()`);
@@ -2961,6 +2992,21 @@ async function main() {
     /p0001 is in a bundle that is not live yet\. 1 of 4 steps ticked\./.test(ticked.line),
     JSON.stringify(ticked).slice(0, 200));
   await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
+  // PW4b. Finishing does not close the wizard: it says what to do next, and
+  // that is not the same for the two routes. This publish went to a zip, so
+  // a refresh now would show the reader the same page they are already on.
+  const lastWord = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    return { step: box && box.getAttribute('data-step'),
+             text: box ? box.querySelector('.bc-wiz__body').textContent : '',
+             btns: box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [] };
+  })()`);
+  check("wizard: the last step tells you what to do next, and it fits the route taken",
+    lastWord.step === "refresh" && /Downloads folder/.test(lastWord.text) &&
+    /Extract it at the repo root/.test(lastWord.text) &&
+    /Ctrl\+F5/.test(lastWord.text) && JSON.stringify(lastWord.btns) === '["Got it"]',
+    JSON.stringify(lastWord).slice(0, 220));
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,
@@ -3918,6 +3964,7 @@ async function main() {
       done2.step === "done" && done2.btns.indexOf("Show the reminder again") !== -1 &&
       remindAgain.cleared && remindAgain.gone, JSON.stringify(done2) + " " + JSON.stringify(remindAgain));
     await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
     check("P2: second post published into an earlier month", !!zip2 && !!zip2["blog/2606.html"],
       zip2 ? Object.keys(zip2).sort().join(", ") : "no zip");
     if (zip2) {
@@ -4143,6 +4190,7 @@ async function main() {
       rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
     await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!')?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
 
     // P2-2. the stream shows the newest month and loads nothing until it
     // is asked to. Two months are deployed now, so the stream is July and
@@ -5021,6 +5069,7 @@ async function main() {
       !Object.keys(again).some((n) => /\.(jpg|png)$/.test(n)),
       again ? Object.keys(again).sort().join(", ") : "no zip");
     await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
 
     // LY2. an authored region is never replaced from the layer
     const authored = await evaluate(`(function () {
@@ -5122,6 +5171,23 @@ async function main() {
       (folderDone.wrote || []).indexOf("ORPHANS.txt") === -1,
       JSON.stringify(folderDone.wrote));
     // and the reader's list loses the step that only a zip has
+    // and the last word after a folder write is the other one: the files ARE
+    // in the repo, so a hard refresh is the next thing and there is nothing
+    // to extract.
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'All done, close the post!'; })?.click()`);
+    const folderLastWord = await evaluate(`(function () {
+      var box = document.querySelector('.bc-wizard');
+      return { step: box && box.getAttribute('data-step'),
+               text: box ? box.querySelector('.bc-wiz__body').textContent : '' };
+    })()`);
+    check("folder route: the last step says the files are in the repo, and to hard refresh",
+      folderLastWord.step === "refresh" &&
+      /files are in your repo/.test(folderLastWord.text) &&
+      /Ctrl\+F5/.test(folderLastWord.text) &&
+      !/Downloads folder/.test(folderLastWord.text),
+      JSON.stringify(folderLastWord).slice(0, 200));
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'Got it'; })?.click()`);
+
     check("folder route: the done step drops the extract step and says the files are in place",
       /written straight into your repo folder/.test(folderDone.body) &&
       folderDone.checks.indexOf("extract") === -1 &&

@@ -1757,9 +1757,42 @@
       });
     }
     bcWizBtn("All done, close the post!", "ced-btn--accent", function () {
-      bcWizClose();
       bcClose();
+      bcWizRefresh(rec);
     }).focus();
+    w.onEscape = close;
+  }
+
+  /* The last word. What the reader does next is not the same for the two
+     routes, and saying the wrong one wastes their time.
+
+     A folder write has already changed the files on disk, so the page in
+     front of them is the old one and a refresh shows the new. A zip has
+     only reached the Downloads folder, so a refresh at that moment shows
+     nothing new and the work still lives in the staging layer alone.
+
+     It asks for a HARD refresh, not a reload button. A page cannot make a
+     browser bypass its cache: location.reload(true) is ignored by every
+     current browser. A normal reload usually brings the HTML back, but it
+     can serve search.js from cache, and then find would answer from an
+     index that is one publish behind. */
+  function bcWizRefresh(rec) {
+    var wrote = rec && rec.route === BC_ROUTE_FOLDER && !rec.fellBack;
+    var w = bcWizShow("refresh", wrote ? "All done" : "One step left");
+    w.body.innerHTML = wrote
+      ? "<p><strong>The files are in your repo.</strong> This page is still the one " +
+        "your browser loaded before the write, so it shows the old post.</p>" +
+        "<p><strong>Press Ctrl+F5 to do a hard refresh.</strong> A plain reload can " +
+        "serve <code>search.js</code> from the cache, and find would then answer from " +
+        "an index one publish behind.</p>" +
+        "<p>Review the diff, commit and push when you are ready.</p>"
+      : "<p><strong>The zip is in your Downloads folder.</strong> Nothing has changed " +
+        "in your repo yet, so a refresh now would show you the same page.</p>" +
+        "<p>Extract it at the repo root, then press <strong>Ctrl+F5</strong> to do a " +
+        "hard refresh. Review the diff, commit and push.</p>";
+    var close = function () { bcWizClose(); };
+    bcWizSpacer();
+    bcWizBtn("Got it", "ced-btn--accent", close).focus();
     w.onEscape = close;
   }
 

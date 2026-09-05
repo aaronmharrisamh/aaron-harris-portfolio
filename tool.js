@@ -912,7 +912,7 @@
      ========================================================== */
   /* ---------------- styles (injected only on first activation) ---------------- */
   var CSS = "" +
-    ".ced-chip{position:absolute;z-index:3000;width:26px;height:26px;padding:0;border-radius:50%;" +
+    ".ced-chip{position:absolute;z-index:850;width:26px;height:26px;padding:0;border-radius:50%;" +
     "border:1px solid var(--accent);background:var(--panel);color:var(--accent-bright);" +
     "font:700 9px/1 Consolas,monospace;letter-spacing:.02em;cursor:pointer;" +
     "display:grid;place-items:center;box-shadow:0 4px 14px -6px var(--accent-glow);" +
@@ -1052,6 +1052,42 @@
   }
 
   /* ---------------- badges + panel ---------------- */
+  /* THE CHIP FLOOR.
+
+     The site header is fixed, so a chip whose region scrolls to the top of
+     the window would sit behind it and be neither readable nor clickable.
+     Each chip stops just under the header instead, and stays there while
+     its region is still on screen. When the region leaves, the chip goes
+     with it rather than hanging under a bar pointing at nothing.
+
+     positionChips writes document coordinates, which do not change as the
+     page scrolls. This does, so it runs on scroll as well. */
+  var CHIP_H = 26;          /* the chip's own height, from its rule above */
+  var CHIP_GAP = 8;         /* clear of the header, not touching it */
+
+  function chipFloor() {
+    var head = doc.querySelector(".site-header");
+    var below = head ? head.getBoundingClientRect().bottom : 0;
+    return (window.scrollY || window.pageYOffset) + Math.max(below, 0) + CHIP_GAP;
+  }
+  function floorChips() {
+    if (!overlay) return;
+    var floor = chipFloor();
+    regions.forEach(function (r) {
+      if (!r.chip || r.chipTop === undefined || r.chip.style.display === "none") return;
+      /* never below the region's own foot: a chip that outran its region
+         would point at the wrong thing */
+      var lowest = r.chipBottom - CHIP_H;
+      r.chip.style.top = Math.max(r.chipTop, Math.min(floor, lowest)) + "px";
+    });
+  }
+  var floorPending = false;
+  function requestFloor() {
+    if (floorPending) return;
+    floorPending = true;
+    window.requestAnimationFrame(function () { floorPending = false; floorChips(); });
+  }
+
   function positionChips() {
     if (!overlay) return;
     var sx = window.scrollX || window.pageXOffset;
@@ -1067,8 +1103,13 @@
       if (!rects[i]) { r.chip.style.display = "none"; return; }
       r.chip.style.display = "";
       r.chip.style.left = (rects[i].left + sx) + "px";
-      r.chip.style.top = (rects[i].top + sy) + "px";
+      /* the region's own top and bottom, in document space, kept for the
+         floor: it clamps between them and needs both */
+      r.chipTop = rects[i].top + sy;
+      r.chipBottom = rects[i].bottom + sy;
+      r.chip.style.top = r.chipTop + "px";
     });
+    floorChips();
     /* gallery chips: IMG## + (+) pinned to each built carousel's top-left */
     var gRects = gals.map(function (g) {
       if (viewing === "before") return null;   /* image chips only make sense on the after view */
@@ -1289,6 +1330,7 @@
     positionChips();
     refreshDirtyUI();
     window.addEventListener("resize", requestReposition);
+    window.addEventListener("scroll", requestFloor, { passive: true });
     /* AMH.tool.viewChanged()
        blog.js calls this when its takeover view opens or closes. The badge
        chips are positioned over the portfolio, which that view hides and
@@ -1402,6 +1444,7 @@
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
     window.removeEventListener("resize", requestReposition);
+    window.removeEventListener("scroll", requestFloor);
     regions.forEach(function (r) { r.chip = null; r.row = null; });
     gals.forEach(function (g) {
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
