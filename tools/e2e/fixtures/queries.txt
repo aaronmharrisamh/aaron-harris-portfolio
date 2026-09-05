@@ -4,7 +4,10 @@ parsed form as JSON. The parser is done when every line matches.
 A query is split on commas into groups. A result matches when ANY group
 matches, and a group matches when EVERY term in it matches. A term is a tag
 when it starts with #, a phrase when it is quoted, and a word otherwise.
-Everything is compared in lower case.
+
+Case: a word and a tag are lowered, so omg finds OMG. A quoted phrase is
+kept exactly as typed, so "OMG" finds OMG and not omg. Quotes are the way
+to ask for exactly what you typed.
 
 dome	[[{"kind":"word","value":"dome"}]]
 Dome HEADSET	[[{"kind":"word","value":"dome"},{"kind":"word","value":"headset"}]]
@@ -12,6 +15,8 @@ dome, headset	[[{"kind":"word","value":"dome"}],[{"kind":"word","value":"headset
 #xr	[[{"kind":"tag","value":"xr"}]]
 #XR #Planetarium	[[{"kind":"tag","value":"xr"},{"kind":"tag","value":"planetarium"}]]
 "dome projection"	[[{"kind":"phrase","value":"dome projection"}]]
+"Dome Projection"	[[{"kind":"phrase","value":"Dome Projection"}]]
+"OMG" omg	[[{"kind":"phrase","value":"OMG"},{"kind":"word","value":"omg"}]]
 "dome projection" #xr, headset	[[{"kind":"phrase","value":"dome projection"},{"kind":"tag","value":"xr"}],[{"kind":"word","value":"headset"}]]
 "unclosed run	[[{"kind":"phrase","value":"unclosed run"}]]
 	[]

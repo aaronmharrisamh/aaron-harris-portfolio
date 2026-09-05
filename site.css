@@ -1895,13 +1895,16 @@ ul.dd-points li::before {
   width: 100%; margin-inline: auto;
   max-width: calc(600px + var(--gutter) * 2);
   padding-inline: var(--gutter);
-  padding-block: var(--gutter) 0;
+  /* The site header is fixed, so the column starts below it. This uses the
+     UNSCROLLED height: the header shrinks as you scroll, and a clearance
+     that followed it would pull the page up by that much mid-scroll. */
+  padding-block: calc(var(--header-top, 84px) + var(--gutter)) 0;
 }
-/* the inner box, which holds the posts */
+/* the inner box, which holds the posts. It draws no sides of its own:
+   each post is a card, and the cards are the edges the eye follows. */
 .bs-stream,
 .blog-month main {
   margin-top: 1.2rem;
-  border-inline: 1px solid var(--line-soft);
   padding-inline: clamp(0px, 3vw, 1.5rem);
 }
 /* The whole blog page is that column: the eyebrow and the heading above
@@ -1915,35 +1918,35 @@ ul.dd-points li::before {
   background: var(--panel); color: var(--muted); font-size: .9rem;
 }
 
-/* THE BAR at the top of the column: the name, the slot the search pill
-   takes, and the month picker. The site header is fixed, so on blog.html
-   this sticks under it at the height site.js publishes; a month page has
-   no header and sticks at the top. */
+/* THE BAR at the top of the column: the search box and the month picker,
+   and nothing else. It carries no label of its own, because the site
+   header names the site and the heading above names the month.
+
+   Both controls sit at the right end, together, so the eye finds the two
+   things it can act on in one place.
+
+   It scrolls with the page. Only the site header is fixed, so the page has
+   one thing pinned to the top and not two. It keeps a stacking context all
+   the same: each post below is a card with a backdrop filter, which makes
+   a stacking context of its own, and the search results would otherwise be
+   painted over by the first card they reach. */
 .bs-bar {
-  position: sticky; top: var(--header-h, 64px); z-index: 5;
-  display: flex; align-items: center; gap: .5rem .8rem; flex-wrap: wrap;
-  margin-top: 1.4rem; padding: .6rem 0;
-  border-bottom: 1px solid var(--line-soft);
-  background: rgba(18,20,25,.82);
-  backdrop-filter: saturate(140%) blur(12px);
-  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  position: relative; z-index: 5;
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: .5rem .6rem; flex-wrap: wrap;
+  margin-top: 1.4rem; padding: .6rem clamp(.5rem, 2vw, .9rem);
+  border: 1px solid var(--line-soft); border-radius: 4px;
+  /* the same ground the cards below it stand on, so the column reads as
+     one surface rather than a strip of page above a list of cards */
+  background-color: rgba(30, 34, 42, .55);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.012));
+  backdrop-filter: saturate(130%) blur(10px);
+  -webkit-backdrop-filter: saturate(130%) blur(10px);
 }
-.blog-month .bs-bar { top: 0; margin-top: 0; }
-.bs-bar__name {
-  flex: none; font-weight: 800; letter-spacing: .04em; font-size: .9rem; color: var(--text);
-}
-a.bs-bar__name:hover { color: var(--accent-bright); }
-/* The wordmark is the widest fixed item in the bar. Below the width at
-   which the search box would be squeezed under its floor, the monogram
-   replaces it and the bar stays on one row. */
-.bs-bar__short { display: none; }
-/* The two widest items give way together on a phone, so both bars stay on
-   one row. Alone, neither saves enough: the search box has a floor, and
-   what is left over must still hold the picker's longest month. */
+/* The picker holds the longest month name, so it is the item that gives
+   way on a phone. */
 @media (max-width: 32rem) {
-  .bs-bar__full { display: none; }
-  .bs-bar__short { display: inline; }
-  .bs-bar__month { max-width: 8rem; font-size: .7rem; padding-inline: .5rem; }
+  .bs-bar__month { max-width: 9rem; font-size: .72rem; }
 }
 
 /* CARRY-OVER. A month file written before the bar became three items
@@ -1956,10 +1959,19 @@ a.bs-bar__name:hover { color: var(--accent-bright); }
 }
 .bs-bar__stream { font-size: .8rem; }
 
+/* THE MONTH PICKER. The browser's own control, in the page's own colours.
+   Nothing about it is redrawn: a hand-drawn arrow and a capsule around a
+   native select were two shapes fighting, and neither looked like the
+   control it was. color-scheme is what makes the browser draw the popup
+   list dark as well, which is the part CSS cannot reach. */
 .bs-bar__month {
-  flex: none; background: var(--bg-deep); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: .3rem .7rem; font: 600 .74rem var(--font); cursor: pointer;
+  flex: none;
+  color-scheme: dark;
+  background: var(--bg-deep); color: var(--muted);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: .3rem .45rem;
+  font: 600 .76rem var(--font); cursor: pointer;
+  transition: color .18s var(--ease-soft), border-color .18s var(--ease-soft);
 }
 .bs-bar__month:hover { color: var(--text); border-color: var(--accent); }
 .bs-bar__month:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -2044,9 +2056,31 @@ a.bs-bar__name:hover { color: var(--accent-bright); }
 .bs-tagrest { position: static; width: 100%; max-height: none; margin-top: 1rem; }
 
 /* ONE POST. A hairline between posts, the byline, then the words. */
-.bs-post { padding: clamp(1.4rem, 3.5vw, 2.2rem) 0; border-top: 1px solid var(--line-soft); }
-.bs-post:first-child { border-top: 0; }
-.bs-post.is-target { background: var(--accent-faint); border-radius: var(--radius-sm); }
+/* A POST IS A CARD. Each one sits on its own ground, so the eye reads a
+   list of things rather than one wall of text divided by rules.
+
+   The ground is translucent and blurred, so the page's own background
+   shows through softened rather than being covered. The gradient is
+   almost nothing on purpose: enough to give the card a top and a bottom,
+   not enough to read as a colour. */
+.bs-post {
+  margin-block: clamp(.7rem, 2vw, 1rem);
+  padding: clamp(1.1rem, 3vw, 1.6rem);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background-color: rgba(30, 34, 42, .55);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.012));
+  backdrop-filter: saturate(130%) blur(10px);
+  -webkit-backdrop-filter: saturate(130%) blur(10px);
+  transition: border-color .2s var(--ease-soft);
+}
+.bs-post:hover { border-color: var(--line); }
+/* the post a deep link named: the accent is on the edge, so the card's
+   own ground is not repainted under the words */
+.bs-post.is-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 24px -6px var(--accent);
+}
 .bs-post__by {
   display: grid; grid-template-columns: 40px 1fr auto; align-items: center;
   column-gap: .7rem; row-gap: .1rem;
@@ -2158,17 +2192,8 @@ a.bs-post__when:hover { color: var(--accent-bright); }
   text-transform: uppercase; color: var(--accent);
 }
 .bm-divider:focus { outline: none; }
-.bm-divider + .bs-post,
 .bm-divider + .blog-post { border-top: 0; }
 
-/* THE MONTH PAGE'S FOOTER. */
-.bm-foot {
-  margin-top: clamp(2.5rem, 6vw, 4rem);
-  padding: 1.4rem 0 1.8rem;
-  border-top: 1px solid var(--line-soft);
-  text-align: center;
-  font-size: .78rem; letter-spacing: .05em; color: var(--dim);
-}
 
 /* THE FIGURES. Full column width, and a click opens the viewer. A cut
    flag's marker is read by the fold and seen by nobody. */

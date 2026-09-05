@@ -82,6 +82,7 @@
   var bcEditing = null;         /* null = new post; else {id, date0, title0, source0, format0, time, zone, tags} */
   var bcMode = "md";            /* "md" for a new post; "html" for a post written in HTML */
   var bcOrphans = [];           /* server files this session's edits made unreferenced */
+  var bcIndexShort = 0;         /* posts the blog has that the index will not */
   var bcDeleteBtn = null;
   /* sticky until reload: after ANY bundle is built, the deployed site no
      longer matches what a further operation would splice against */
@@ -97,6 +98,30 @@
   var STEP_MS = 350;
   /* How long the "proceeding" notice stays when the reminder is switched
      off. Long enough to read, and long enough to press Cancel. */
+  /* ---------------- the trace ----------------
+
+     One line for each thing the publish does, so a report can say where it
+     stopped rather than that it stopped. Two levels, because the two
+     audiences are different: a STEP is the wizard moving, and there are
+     about six of them in a publish, so they are always printed. A NOTE is
+     a read, a splice or a write, and there are dozens, so they are printed
+     only when asked for.
+
+     edit.blog.trace(true) turns the notes on for the page load. It is not
+     remembered: a switch that outlives the hunt becomes noise later. */
+  var bcNotes = false;
+  function bcStep(what, info) {
+    console.info("[blog] step: " + what + (info === undefined ? "" : " " + bcSay(info)));
+  }
+  function bcNote(what, info) {
+    if (bcNotes) console.debug("[blog]   " + what + (info === undefined ? "" : " " + bcSay(info)));
+  }
+  function bcSay(info) {
+    if (info === null || info === undefined) return "";
+    if (typeof info === "string" || typeof info === "number") return String(info);
+    try { return JSON.stringify(info); } catch (err) { return String(info); }
+  }
+
   var NOTICE_MS = 1600;
   var bcWiz = null;             /* the wizard while it is on screen */
   var bcProg = null;            /* the progress step, while a bundle is built */
@@ -1205,6 +1230,7 @@
       doc.addEventListener("keydown", bcWizKeys, true);
       bcWiz = { scrim: scrim, box: box, head: head, body: body, btns: btns, onEscape: null };
     }
+    bcStep(step, title);
     bcWiz.box.setAttribute("data-step", step);
     bcWiz.head.innerHTML = '<span class="ced-b">PUBLISH</span><span class="ced-slug">' +
       TOOL.escAttr(title) + "</span>";
@@ -1651,6 +1677,13 @@
         ? '<p class="bc-wiz__fell"><strong>The folder write did not happen.</strong> ' +
           esc(rec.fellBack) + "</p>"
         : "") +
+      (rec.indexShort
+        ? '<p class="bc-wiz__fell"><strong>Find will not see every post.</strong> The ' +
+          "search index in this bundle is missing " + rec.indexShort +
+          " post" + (rec.indexShort === 1 ? "" : "s") + " the blog has. Run " +
+          "<code>edit.blog.rebuild()</code> once and publish that bundle: a rebuild " +
+          "writes the index from the month files rather than from the old index.</p>"
+        : "") +
       (wrote
         ? "<p>The files were written straight into your repo folder. There is no zip " +
           "to extract, and nothing was downloaded.</p>"
@@ -1743,6 +1776,19 @@
         : code === "BLG-E11"
         ? "Save the draft, reload the page, and compose again."
         : "Fix the cause and publish again. The composer keeps your post.") + "</p>";
+    var close = function () { bcWizClose(); };
+    bcWizSpacer();
+    bcWizBtn("Close", "ced-btn--accent", close).focus();
+    w.onEscape = close;
+  }
+
+  /* An edit that could not start. It gets its own step because the
+     composer is not open yet, so there is no status line to write into,
+     and because bcWizFail speaks for a publish: nothing here was going to
+     be written in the first place. */
+  function bcEditFail(msg, hint) {
+    var w = bcWizShow("failed", "Could not open the post");
+    w.body.innerHTML = "<p>" + TOOL.escAttr(msg) + "</p><p>" + hint + "</p>";
     var close = function () { bcWizClose(); };
     bcWizSpacer();
     bcWizBtn("Close", "ced-btn--accent", close).focus();
@@ -1857,13 +1903,45 @@
       "; stamp:" + stamp + "; hand edits are overwritten";
   }
 
-  /* The first letter of each word of the wordmark, so "AARON M. HARRIS"
-     gives "AMH". The month bar shows this instead of the full name on a
-     narrow screen. It is derived and not fixed, so a change to the
-     wordmark carries into the month files at the next publish. */
-  function bcMonogram(brand) {
-    return String(brand).split(/\s+/).filter(Boolean)
-      .map(function (w) { return w.charAt(0); }).join("").toUpperCase();
+  /* ---------------- the shared chrome, lifted for a month file ----------------
+
+     A month file is generated, so it cannot carry marked regions. It can
+     carry the bytes of them. These four blocks are taken whole out of the
+     page being published, which is a managed page whose shared spans the
+     editor holds byte-identical across every managed page. So a month
+     file shows the site's own header and the site's own contact block,
+     and a rename in the editor reaches it at the next rebuild, exactly
+     as the wordmark already does.
+
+     Do not edit these blocks in a month file. The next rebuild writes
+     them again from the managed page. */
+  function bcCut(src, open, close) {
+    var a = src.indexOf(open);
+    if (a === -1) return "";
+    var b = src.indexOf(close, a);
+    if (b === -1) return "";
+    return src.slice(a, b + close.length);
+  }
+  /* A path written for a page at the root, read from a page in blog/.
+     A scheme, a root path and a bare fragment are all left alone: only a
+     path relative to the root needs the one step up. */
+  function bcLiftPaths(html) {
+    return html.replace(/\b(src|href)="([^"]*)"/g, function (all, at, v) {
+      if (!v || v.charAt(0) === "#" || v.charAt(0) === "/") return all;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return all;
+      if (v.slice(0, 3) === "../") return all;
+      return at + '="../' + v + '"';
+    });
+  }
+  function bcLiftChrome(src) {
+    return {
+      progress: bcCut(src, '<div class="progress"', "</div>"),
+      header: bcLiftPaths(bcCut(src, '<header class="site-header"', "</header>")),
+      scrim: bcCut(src, '<div class="nav-overlay"', "</div>"),
+      /* the contact block carries the endbar, which is the copyright line,
+         so a month file needs no footer of its own */
+      contact: bcLiftPaths(bcCut(src, '<section class="contact"', "</section>"))
+    };
   }
 
   /* meta is the site meta from bcSiteMeta; prev is the month before this
@@ -1913,6 +1991,12 @@
       '  <link rel="stylesheet" href="../site.css" />\n' +
       "</head>\n" +
       '<body class="blog-month">\n' +
+      /* The site's own chrome, lifted whole from the managed page. A month
+         file is a page of this site, not a leaf of it: a reader who lands
+         here from a search engine gets the same way to everything else. */
+      "  " + meta.chrome.progress + "\n" +
+      "  " + meta.chrome.header + "\n" +
+      "  " + meta.chrome.scrim + "\n\n" +
       '  <div class="blog-wrap">\n' +
       /* The heading, which scrolls away, and then the bar, which sticks.
          blog.html has the same two above its stream, so a reader who
@@ -1928,15 +2012,10 @@
       '      <a class="textlink bm-top__stream" href="../blog.html?b=' + yymm +
       '">Read in the full stream</a>\n' +
       "    </div>\n" +
-      /* Three items, three jobs, the same three blog.html carries: the
-         wordmark goes home, the find slot takes the search pill, and the
-         picker jumps to another month. The monogram replaces the
-         wordmark on a narrow screen, where the full name would squeeze
-         the search box under its floor. */
+      /* The same two items blog.html's bar carries. It has no label of its
+         own: the header above names the site and the heading above names
+         the month, so a third name would say nothing new. */
       '    <div class="bs-bar" id="blogBar">\n' +
-      '      <a class="bs-bar__name" href="../index.html">' +
-      '<span class="bs-bar__full">' + brand + "</span>" +
-      '<span class="bs-bar__short">' + bcMonogram(brand) + "</span></a>\n" +
       '      <div class="bs-bar__find" id="blogFind"></div>\n' +
       '      <select class="bs-bar__month" id="blogMonth" aria-label="Jump to a month"></select>\n' +
       "    </div>\n" +
@@ -1944,8 +2023,10 @@
       blocksJoined + "\n" +
       "    </main>\n" +
       older +
-      '    <footer class="bm-foot">© ' + ("20" + yymm.slice(0, 2)) + " Aaron M. Harris · Traverse City, MI</footer>\n" +
-      "  </div>\n" +
+      "  </div>\n\n" +
+      /* the contact block carries the endbar, which is the copyright line,
+         so a month file needs no footer of its own */
+      "  " + meta.chrome.contact + "\n" +
       /* The months, for the picker. A month page has no manifest of its
          own and needs no entries: the one thing the picker reads is the
          month list, and blog.js takes this line as it takes the list it
@@ -1956,6 +2037,13 @@
       '  <script defer src="../site.js"></script>\n' +
       '  <script defer src="../work.js"></script>\n' +
       '  <script defer src="../blog.js"></script>\n' +
+      /* The editor comes here too, so the corner mark is on every page of
+         the site rather than on three of them. It cannot publish from here:
+         a month page holds its month list and not the counters, so the
+         composer refuses and the per-post Edit button hands the work to the
+         blog page, which has what a publish needs. */
+      '  <script defer src="../tool.js"></script>\n' +
+      '  <script defer src="../publish.js"></script>\n' +
       "</body>\n</html>\n";
   }
 
@@ -2021,6 +2109,9 @@
     TOOL.injectStyles();
     TOOL.armGuard();
     if (bcPanel && bcPanel.parentNode) {
+      /* the open composer may hold unpublished work, so it is never closed
+         from under the reader; it is also where the answer already is */
+      bcSetStatus("Close this composer before you open another post.");
       console.warn("[blog] close the open composer first.");
       return "composer already open";
     }
@@ -2028,16 +2119,22 @@
     var entry = null;
     man.entries.forEach(function (e) { if (e.id === id) entry = e; });
     if (!entry) {
+      bcEditFail("No post with the id p" + id + " is in this page's manifest.",
+        "The manifest is the record of what is published. Reload the page and try again.");
       console.warn("[blog] no post with id " + id + " in the manifest.");
       return "unknown post id";
     }
     var yymm = entry.date.slice(0, 4);
-    fetch("blog/" + yymm + ".html", { cache: "no-store" })
-      .then(function (res) {
-        if (!res.ok) throw new Error("blog/" + yymm + ".html HTTP " + res.status);
-        return res.text();
-      })
+    /* The same reader the rest of the engine uses: the staging layer first,
+       then the network, then the hand-off dialog. A raw fetch here could do
+       none of those. It could not read a month file this tab had published
+       and not yet uploaded, and from disk it could not read anything at
+       all, because a page opened from disk cannot fetch. */
+    bcFetchMonth(yymm)
       .then(function (text) {
+        if (text === null) {
+          throw new Error("blog/" + yymm + ".html could not be read.");
+        }
         var block = null;
         bcParseMonthBlocks(text).forEach(function (b) { if (b.id === id) block = b; });
         if (!block) throw new Error("post p" + id + " not found in blog/" + yymm + ".html");
@@ -2066,6 +2163,10 @@
       })
       .catch(function (err) {
         console.error("[blog] load failed:", err.message);
+        bcEditFail(err && err.message ? err.message : String(err),
+          "A post's source lives in its month file, so that file has to be at " +
+          "hand before the post can be opened. Point the editor at your repo " +
+          "folder, or hand over the file when it asks.");
       });
     return "loading p" + id;
   }
@@ -2363,6 +2464,7 @@
      over http: from disk there is nothing to fetch, and the entry keeps
      the thumbnail it had. */
   function bcThumbFromURL(url) {
+    if (TOOL.onDisk()) return Promise.resolve("");
     return fetch(url, { cache: "no-store" })
       .then(function (res) { return res.ok ? res.blob() : null; })
       .then(function (b) { return b ? createImageBitmap(b) : null; })
@@ -2379,7 +2481,12 @@
      hand-off when the page was opened from disk. */
   function bcFetchText(path) {
     var staged = TOOL.layerFile(path);
-    if (staged !== null) return Promise.resolve(staged);
+    if (staged !== null) { bcNote("read " + path, "from the staging layer"); return Promise.resolve(staged); }
+    bcNote("read " + path, TOOL.onDisk() ? "asking, this page is on disk" : "over http");
+    if (TOOL.onDisk()) {
+      return TOOL.handOff(path, new Error("opened from disk"))
+        .then(null, function () { return null; });
+    }
     return fetch(path, { cache: "no-store" }).then(
       function (res) { return res.ok ? res.text() : null; },
       function (netErr) {
@@ -2393,7 +2500,7 @@
 
      Entries are sorted by date then id, newest last, as the manifest is,
      so the file's diff moves only where the blog moved. */
-  function bcSearchWrite(files, deployed, change, stamp) {
+  function bcSearchWrite(files, deployed, change, stamp, expected) {
     var unpack = (AMH.search && AMH.search.unpack)
       ? AMH.search.unpack(deployed || "")
       : Promise.resolve({ v: 1, stamp: "", posts: [] });
@@ -2408,15 +2515,23 @@
         posts.sort(function (a, b) {
           return a.date === b.date ? (a.id < b.id ? -1 : 1) : (a.date < b.date ? -1 : 1);
         });
-        /* The deployed index is from a publish before V057, so its posts
-           could not be read and this one would ship a shorter index than
-           the site already has. A rebuild does not read the old file at
-           all: it passes the whole table, built from the month files. */
-        if (old.stale && !(change && change.table)) {
-          console.warn("[blog] the deployed search.js is from an older publish and " +
-            "cannot be read. Run edit.blog.rebuild() once to write the index again " +
-            "from the month files, or find will know only the newest posts.");
+        /* The index should hold one entry for every post the manifest
+           knows. It holds fewer when the deployed file could not be read,
+           and it stays short at every publish after that, because each one
+           builds on the last. Counting catches both, where testing for the
+           unreadable file alone caught only the first.
+
+           This is not a warning to leave in the console: a short index is
+           silent data loss, so the Done step says it. A rebuild is the
+           repair, because it reads the month files rather than the index. */
+        bcIndexShort = expected && posts.length < expected ? expected - posts.length : 0;
+        if (bcIndexShort) {
+          console.warn("[blog] the search index is missing " + bcIndexShort +
+            " of the blog's " + expected + " posts. Run edit.blog.rebuild() once to " +
+            "write it again from the month files.");
         }
+        bcNote("index", { posts: posts.length, expected: expected || "unknown",
+                          short: bcIndexShort });
         files[SEARCH_FILE] = new TextEncoder().encode(
           bcSearchPack({ v: 1, stamp: stamp, posts: posts }, stamp));
         return posts;
@@ -2558,7 +2673,8 @@
        page opens with it, and it is editable copy on blog.html. */
     var eyebrow = (/\[edit:blog-eyebrow\]-->\s*<span class="eyebrow">([^<]*)</.exec(src) ||
       [null, "Blog"])[1];
-    return { base: base, fontHref: fontHref, brand: brand, eyebrow: eyebrow };
+    return { base: base, fontHref: fontHref, brand: brand, eyebrow: eyebrow,
+             chrome: bcLiftChrome(src) };
   }
   function bcUniqueMonths(entries) {
     var months = [];
@@ -2629,7 +2745,12 @@
        has written and not yet uploaded is the one the next bundle has to
        build on, or the post in it is lost */
     var staged = TOOL.layerFile(path);
-    if (staged !== null) return Promise.resolve(staged);
+    if (staged !== null) { bcNote("read " + path, "from the staging layer"); return Promise.resolve(staged); }
+    bcNote("read " + path, TOOL.onDisk() ? "asking, this page is on disk" : "over http");
+    if (TOOL.onDisk()) {
+      return TOOL.handOff(path, new Error("opened from disk"))
+        .then(null, function () { return null; });
+    }
     return fetch(path, { cache: "no-store" }).then(
       function (res) { return res.ok ? res.text() : null; },
       function (netErr) {
@@ -2651,6 +2772,7 @@
     var route = rec.route === BC_ROUTE_FOLDER ? BC_ROUTE_FOLDER : BC_ROUTE_ZIP;
     var enc = new TextEncoder();
     var orphans = bcOrphans.filter(function (o, i) { return bcOrphans.indexOf(o) === i; });
+    if (rec.kind === "rebuild") bcIndexShort = 0;   /* a rebuild is the repair */
     if (orphans.length) {
       files["ORPHANS.txt"] = enc.encode(
         "# Files no longer referenced after this publish.\n" +
@@ -2670,6 +2792,7 @@
     var record = {
       kind: rec.kind, edit: !!rec.edit, id: rec.id || "", zip: zipName, url: rec.url || "",
       stamp: rec.stamp || "", route: route, wrote: [], fellBack: "",
+      indexShort: bcIndexShort,
       spliced: names.filter(function (n) { return managed.indexOf(n) !== -1; }),
       regenerated: names.filter(function (n) {
         return managed.indexOf(n) === -1 && (/\.(html|xml|txt)$/.test(n) || n === SEARCH_FILE);
@@ -2717,6 +2840,7 @@
      so. The bundle is built by then, and losing it because a browser
      refused a permission would be the worst of both routes. */
   function bcDeliver(files, names, zipName, record) {
+    bcNote("deliver", { route: record.route, files: names.length });
     var asZip = function () {
       TOOL.download(zipName, TOOL.zip(names.map(function (n) {
         return { name: n, bytes: files[n] };
@@ -3059,7 +3183,7 @@
                        tags: meta0.tags, format: meta0.format, source: source, staticBody: "" };
           return bcPublishThumb(usedNew, post, deployed).then(function (thumb) {
             return bcSearchWrite(files, deployed, { entry: bcSearchEntry(post, thumb) },
-                                 stamps.publish);
+                                 stamps.publish, entries.length);
           }).then(function (table) {
             files[FEED_FILE] = new TextEncoder().encode(
               bcFeed(meta.base, table, bcTitles(entries), meta.brand, stamps.publish));
@@ -3188,7 +3312,7 @@
           src = text2;
           bcCommonFiles(files, src, entries, meta, stamps.publish);
           return bcFetchText("search.js").then(function (deployed) {
-            return bcSearchWrite(files, deployed, { remove: id }, stamps.publish)
+            return bcSearchWrite(files, deployed, { remove: id }, stamps.publish, entries.length)
               .then(function (table) {
                 files[FEED_FILE] = new TextEncoder().encode(
                   bcFeed(meta.base, table, bcTitles(entries), meta.brand, stamps.publish));
@@ -3460,6 +3584,15 @@
        minute; and the two time forms, HHMM and "3:07 pm" */
     /* the index generators, so the suite can round-trip a known table
        without publishing one */
+    /* edit.blog.trace(true) prints a line for every read, splice and write
+       of the next publish. Off by default, and not remembered. */
+    /* the editor reports its own reads into this trace, when it is here */
+    note: bcNote,
+    trace: function (on) {
+      bcNotes = on !== false;
+      return bcNotes ? "trace on: every read, splice and write is printed"
+                     : "trace off: only the wizard's steps are printed";
+    },
     searchEntry: bcSearchEntry,
     searchPack: bcSearchPack,
     tick: bcTickTime,
@@ -3471,6 +3604,10 @@
      step offered. tool.js has run by now, which script order guarantees,
      and the manifest is on the page, which DOMContentLoaded guarantees. */
   function bcArrive() {
+    /* A month page carries only its month list, so there is no stamp to
+       compare and no stream to stage onto. It loads this trunk for the
+       launcher and the per-post buttons, and for nothing else. */
+    if (doc.body && doc.body.classList.contains("blog-month")) return;
     /* what the server sent, read before anything is staged onto it: the
        live check asks whether the SERVER has the bundle, and the layer
        would otherwise answer yes to its own reflection */
@@ -3494,6 +3631,17 @@
     bcStagedChips();
     return 1;
   };
-  if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", bcArrive, { once: true });
-  else bcArrive();
+  /* A month page cannot publish, so its Edit button sends the reader here
+     with the post named in the address. Answer it once, then take it out of
+     the address, so a reload is a plain blog page and Back is not a loop. */
+  function bcArriveEdit() {
+    bcArrive();
+    var m = /[?&]edit=p(\d{4})/.exec(location.search);
+    if (!m) return;
+    history.replaceState(null, "", location.pathname + location.hash);
+    if (!TOOL.editorOn()) window.edit();
+    bcLoadPost(m[1]);
+  }
+  if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", bcArriveEdit, { once: true });
+  else bcArriveEdit();
 })();

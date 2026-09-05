@@ -804,8 +804,12 @@
 
        dome, headset      either one. A comma is "or".
        dome headset       both, in one post. A space is "and".
-       "dome projection"  those words in that order.
+       "dome projection"  those words in that order, and in that case.
        #xr                the tag, not the word.
+
+     Case: a plain word ignores it, so omg finds OMG. A quoted phrase
+     keeps it, so "OMG" finds OMG and not omg. Quotes are the way to ask
+     for exactly what you typed.
 
      A query is split on commas into groups; a post matches when any
      group matches, and a group matches when every term in it matches.
@@ -823,7 +827,8 @@
       while ((m = re.exec(part))) {
         if (re.lastIndex === m.index) re.lastIndex++;   /* never spin on an empty match */
         if (m[1] !== undefined) {
-          var phrase = m[1].trim().toLowerCase();
+          /* kept as typed: a quoted phrase is the exact-match form */
+          var phrase = m[1].trim();
           if (phrase) terms.push({ kind: "phrase", value: phrase });
         } else if (m[2]) {
           var w = m[2].toLowerCase();
@@ -837,13 +842,17 @@
   }
   /* What each kind of term is compared against. A tag is compared with
      the tags alone, so #xr finds the tag and not the word; a phrase with
-     the prose, where a phrase can occur; a word with everything. */
+     the prose, where a phrase can occur; a word with everything.
+
+     The prose is held twice, once lowered and once as written, because a
+     quoted phrase is compared as typed and every other term is not. */
   function searchFields(post) {
+    var prose = [post.title || "", post.text || "", (post.caps || []).join(" ")].join(" ");
     return {
       tags: String(post.tags || "").toLowerCase().split(/\s+/).filter(Boolean),
-      prose: [post.title || "", post.text || "", (post.caps || []).join(" ")].join(" ").toLowerCase(),
-      all: [post.title || "", post.text || "", (post.caps || []).join(" "),
-            post.tags || ""].join(" ").toLowerCase()
+      prose: prose.toLowerCase(),
+      proseAsWritten: prose,
+      all: [prose, post.tags || ""].join(" ").toLowerCase()
     };
   }
   function searchMatch(post, groups) {
@@ -851,7 +860,7 @@
     return groups.some(function (terms) {
       return terms.every(function (t) {
         if (t.kind === "tag") return f.tags.indexOf(t.value) !== -1;
-        if (t.kind === "phrase") return f.prose.indexOf(t.value) !== -1;
+        if (t.kind === "phrase") return f.proseAsWritten.indexOf(t.value) !== -1;
         return f.all.indexOf(t.value) !== -1;
       });
     });
@@ -868,14 +877,20 @@
   function searchPassage(post, groups) {
     var want = [];
     groups.forEach(function (terms) {
-      terms.forEach(function (t) { if (t.kind !== "tag") want.push(t.value); });
+      terms.forEach(function (t) {
+        /* a phrase was matched as typed, so it is found the same way here:
+           looking for it in lowered text would highlight what did not match */
+        if (t.kind !== "tag") want.push({ value: t.value, exact: t.kind === "phrase" });
+      });
     });
     var sources = [post.text || ""].concat(post.caps || []);
     for (var i = 0; i < sources.length; i++) {
-      var hay = sources[i].toLowerCase();
+      var lowered = sources[i].toLowerCase();
       for (var j = 0; j < want.length; j++) {
-        var at = hay.indexOf(want[j]);
-        if (at !== -1) return searchCut(sources[i], at, want[j].length);
+        var at = want[j].exact
+          ? sources[i].indexOf(want[j].value)
+          : lowered.indexOf(want[j].value);
+        if (at !== -1) return searchCut(sources[i], at, want[j].value.length);
       }
     }
     var opening = (post.text || "").slice(0, PASSAGE_SIDE);

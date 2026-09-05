@@ -95,10 +95,11 @@
   var heroPortrait = doc.querySelector(".hero__portrait");
   var ticking = false;
 
-  /* The header is shorter once it takes its scrolled look, and the blog
-     page's bar sticks under it at --header-h. Republish the height when
-     the state flips, and again when the padding transition ends, or a
-     seam of page content shows between the two bars. */
+  /* The header is shorter once it takes its scrolled look, and the mobile
+     drawer docks under it at --header-h. Republish the height when the
+     state flips, and again when the padding transition ends, or the drawer
+     opens against the height the header no longer has. --header-top does
+     not follow this: see setHeaderH. */
   var scrolledNow = null;
   function setScrolled(on) {
     if (!header) return;
@@ -158,6 +159,18 @@
      in-page anchor and here it is treated as one; on any other page the
      browser follows it. A bare "#contact" is in-page on every page that has
      a contact section, and stays written that way. */
+  /* One step up from a page in blog/, nothing from a page at the root.
+     blog.js decides the same thing the same way. */
+  function upToRoot() {
+    return doc.body && doc.body.classList.contains("blog-month") ? "../" : "";
+  }
+
+  /* Where a shared nav link goes when THIS page has no section for it.
+     Every page carries the contact block today, so this is the safety
+     net; it is also the one place to change when contact becomes a page
+     of its own. The path is written from the site root. */
+  var AWAY = { "#contact": "index.html#contact" };
+
   function ownFragment(href) {
     if (!href) return "";
     if (href.charAt(0) === "#") return href;
@@ -173,10 +186,21 @@
 
   /* The drawer docks under the header, whose height varies with the
      breakpoint and with the scrolled state. Publish it as a custom
-     property so the CSS does not have to guess. */
+     property so the CSS does not have to guess.
+
+     --header-top is the same height BEFORE the header takes its scrolled
+     look, and it is the one a page uses to clear a fixed header. It must
+     not follow the scrolled state: the header loses .6rem when it shrinks,
+     and a clearance that followed it would pull the whole page up by that
+     much in the middle of a scroll. It is read while the header is at its
+     full size, which is every time the reader is at the top. */
   function setHeaderH() {
     if (!header) return;
-    doc.documentElement.style.setProperty("--header-h", header.offsetHeight + "px");
+    var h = header.offsetHeight;
+    doc.documentElement.style.setProperty("--header-h", h + "px");
+    if (!header.classList.contains("scrolled")) {
+      doc.documentElement.style.setProperty("--header-top", h + "px");
+    }
   }
   setHeaderH();
   window.addEventListener("resize", setHeaderH);
@@ -225,7 +249,11 @@
         /* the bare fragment, not the page-qualified href: the URL bar should
            read "#work", the way it did before the chrome was shared */
         history.replaceState(null, "", frag);
+        return;
       }
+      /* This page has no section by that name. Silently doing nothing is
+         the worst answer, so the link follows the site's own copy of it. */
+      if (AWAY[frag]) location.href = upToRoot() + AWAY[frag];
       return;
     }
 
@@ -240,7 +268,12 @@
      the chrome is the same bytes everywhere; a link with a fragment names a
      section rather than a page, so only a bare file name counts. */
   Array.prototype.forEach.call(hasNav ? nav.querySelectorAll("a") : [], function (a) {
-    if (a.getAttribute("href") === HERE) a.setAttribute("aria-current", "page");
+    var href = a.getAttribute("href");
+    if (href === HERE) a.setAttribute("aria-current", "page");
+    /* A month file is a page of the blog, and its nav link reads
+       "../blog.html", which names no file in this folder. The reader is
+       still in the blog, so the item says so. */
+    else if (upToRoot() && href === "../blog.html") a.setAttribute("aria-current", "page");
   });
 
   /* ==========================================================

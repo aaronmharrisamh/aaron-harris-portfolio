@@ -2176,7 +2176,15 @@ async function main() {
       };
     }
     window.__opened = [];
+    /* index.html and blog.html are the marks that say a folder is the root
+       of this site. The pick is refused without them, so the stand-in tree
+       carries them, as a real repo root does. */
     var tree = dirH({
+      "index.html": fileH("<html>root mark</html>", "index.html"),
+      "blog.html": fileH('<script id="blogManifest">stamp:' +
+        ((/stamp:([0-9a-z]{6})/.exec(document.getElementById('blogManifest')
+          ? document.getElementById('blogManifest').textContent : '') || [])[1] || 'aaaaaa') +
+        '</scr' + 'ipt>', "blog.html"),
       // nothing the suite has handed over already: those answer from memory
       "gallery.html": fileH("<!--[edit:a]--><p>GALLERY FROM FOLDER</p><!--[/edit:a]-->", "gallery.html"),
       "blog": dirH({ "2608.html": fileH("<!--[edit:a]--><p>AUGUST</p><!--[/edit:a]-->", "2608.html") })
@@ -3197,11 +3205,12 @@ async function main() {
       decoded.includes("Escape probe: &lt;/scr" + "ipt&gt; as text"),
       decoded.slice(0, 90));
     // the only month is the first month: no prev, the end note, and the
-    // two scripts for the chain, in the site's order
-    check("chain: the first month says so, carries no prev, and loads site.js then blog.js",
+    // the trunks, in the site's order. The editor comes last, as it does on
+    // every managed page, because a consumer that claims its own regions has
+    // to have claimed before the editor scans.
+    check("chain: the first month says so, carries no prev, and loads the trunks in order",
       !/rel="prev"/.test(month) && month.includes('<p class="bm-older bm-older--end">This is the first month.</p>') &&
-      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>/.test(month) &&
-      !/tool\.js|publish\.js/.test(month),
+      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>\n\s*<script defer src="\.\.\/tool\.js"><\/script>\n\s*<script defer src="\.\.\/publish\.js"><\/script>/.test(month),
       (month.match(/bm-older[^\n]*/) || [""])[0]);
 
     check("bundle ships no stylesheet (site.css is a repo file)",
@@ -3223,23 +3232,73 @@ async function main() {
       month.includes('<link rel="canonical" href="' + ROOT + 'blog/2607.html" />') &&
       month.includes('property="og:url" content="' + ROOT + 'blog/2607.html"'),
       (/canonical" href="([^"]+)"/.exec(month) || [])[1]);
-    // The month page has its own smaller header: a standalone page with no
-    // site nav. The one thing it shares with the site chrome is the wordmark,
-    // which is editable copy, so it is read from the page rather than written
-    // out here. A rename in the editor reaches every month file at rebuild.
-    const brand = /class="brand__title full">([^<]*)</.exec(
-      readFileSync(join(REPO, "index.html"), "utf-8"))[1];
-    check("month page carries the site wordmark, not a copy of the words",
-      month.includes('<span class="bs-bar__full">' + brand + "</span>"),
-      (/bs-bar__full">([^<]*)</.exec(month) || [])[1] + " vs " + brand);
-    // The monogram is derived from that wordmark, so a rename reaches it too.
-    check("month page carries the wordmark's monogram for a narrow screen",
-      month.includes('<span class="bs-bar__short">' +
-        brand.split(/\s+/).filter(Boolean).map((w) => w[0]).join("").toUpperCase() + "</span>"),
-      (/bs-bar__short">([^<]*)</.exec(month) || [])[1]);
-    check("month page links back to the blog page, brand still home",
-      month.includes('href="../blog.html?b=2607"') && month.includes('href="../index.html"'),
+    // MC1. A month file is a page of this site, not a leaf of it. It cannot
+    // hold marked regions, because it is generated, so it holds the BYTES of
+    // the shared spans, lifted whole from the managed page that published it.
+    // The editor keeps those spans byte-identical across managed pages, so
+    // one comparison against the blog page proves the month file agrees with
+    // all of them. Paths get one step up, because the file sits in blog/.
+    const blogSrc = zipFiles["blog.html"].toString("utf8");
+    const liftPaths = (html) => html.replace(/\b(src|href)="([^"]*)"/g, (all, at, v) => {
+      if (!v || v.charAt(0) === "#" || v.charAt(0) === "/") return all;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return all;
+      if (v.slice(0, 3) === "../") return all;
+      return at + '="../' + v + '"';
+    });
+    const cut = (src, open, close) => {
+      const a = src.indexOf(open);
+      if (a === -1) return "";
+      const b = src.indexOf(close, a);
+      return b === -1 ? "" : src.slice(a, b + close.length);
+    };
+    const wantHeader = liftPaths(cut(blogSrc, '<header class="site-header"', "</header>"));
+    const wantContact = liftPaths(cut(blogSrc, '<section class="contact"', "</section>"));
+    // the comparison is against the blog.html of THIS bundle, so it proves
+    // the two files the publish just wrote agree with each other
+    check("month page carries the site header, byte-identical to the page that published it",
+      wantHeader.length > 200 && month.includes(wantHeader),
+      wantHeader ? (month.includes(wantHeader) ? "header " + wantHeader.length + " bytes"
+        : firstDiff(wantHeader, month.slice(month.indexOf('<header class="site-header"'))))
+        : "no header found in the bundle's blog.html");
+    check("month page carries the contact block, byte-identical to the page that published it",
+      wantContact.length > 200 && month.includes(wantContact) &&
+      /class="endbar"/.test(month),
+      wantContact ? (month.includes(wantContact) ? "contact " + wantContact.length + " bytes"
+        : firstDiff(wantContact, month.slice(month.indexOf('<section class="contact"'))))
+        : "no contact found in the bundle's blog.html");
+    // the drawer needs its scrim, or the nav is unusable on a phone
+    check("month page carries the nav scrim and the progress bar",
+      month.includes('id="navOverlay"') && month.includes('id="progress"'),
+      JSON.stringify({ scrim: month.includes('id="navOverlay"'),
+                       progress: month.includes('id="progress"') }));
+    // MC2. every relative path in the lifted chrome steps up one folder, and
+    // a scheme, a root path and a bare fragment are left alone
+    check("month page: the lifted chrome's paths are written for a page in blog/",
+      month.includes('href="../index.html#work"') && month.includes('href="../gallery.html"') &&
+      month.includes('href="../blog.html"') && month.includes('href="#contact"') &&
+      month.includes('src="../aaron-portfolio-portrait-transparent.png"') &&
+      month.includes('href="mailto:contact@aaronmichaelharris.com"'),
+      (month.match(/href="\.\.\/[^"]*"/g) || []).slice(0, 6).join(" "));
+    check("month page links back to the blog page in its heading",
+      month.includes('href="../blog.html?b=2607"'),
       (/bm-top__stream" href="([^"]+)"/.exec(month) || [])[1]);
+    // MC3b. The editor comes to a month page too, so the corner mark is on
+    // every page of the site rather than on three of them. It cannot publish
+    // from here, which the composer says for itself; see the runtime checks.
+    check("month page: it loads the editor as well as the reading engine",
+      month.includes('src="../tool.js"') && month.includes('src="../publish.js"') &&
+      month.includes('src="../site.js"') && month.includes('src="../blog.js"'),
+      (month.match(/<script defer src="[^"]*"><\/script>/g) || []).join(" "));
+
+    // MC3. the bar carries the two controls and no label. The header above
+    // names the site and the heading names the month, so a third name in the
+    // bar would say nothing new.
+    const barBlock = (month.match(/<div class="bs-bar"[\s\S]*?\n    <\/div>/) || [""])[0];
+    check("month page: the bar is the two controls, with no label of its own",
+      /id="blogFind"/.test(barBlock) && /id="blogMonth"/.test(barBlock) &&
+      !/bs-bar__name|bs-bar__full|bs-bar__short/.test(month) &&
+      !/class="bm-foot"/.test(month),
+      barBlock.replace(/\s+/g, " ").slice(0, 150));
     // MP1. the month page is the stream's own design: the same bar, the
     // same post markup with "p" ids, and its own month list for the picker
     check("month page: the same bar as the stream, with the find slot and the picker",
@@ -3410,7 +3469,14 @@ async function main() {
         phrase: ids('"dome projection"'), phraseApart: ids('"projection dome"'),
         andBoth: ids("dome headset"), andMiss: ids("dome nothing"),
         or: ids("dome, nothing"), none: ids("absent"),
-        passWord: pass("projection"), passCap: pass("frame"), passTag: pass("#xr")
+        passWord: pass("projection"), passCap: pass("frame"), passTag: pass("#xr"),
+        /* case: a word ignores it, a quoted phrase keeps it */
+        wordUpper: ids("DOME"), wordMixed: ids("Dome"), tagUpper: ids("#XR"),
+        titleMixed: ids("planetarium"),
+        phraseSameCase: ids('"dome projection"'),
+        phraseWrongCase: ids('"Dome Projection"'),
+        phraseCapCase: ids('"Dome and headset"'),
+        passPhraseCase: pass('"Dome and headset"')
       };
     })()`);
     check("find: a word, a caption and a tag each find the right posts, and or and and hold",
@@ -3422,6 +3488,21 @@ async function main() {
     check("find: a phrase matches in order and not apart",
       matched.phrase === "0001" && matched.phraseApart === "",
       matched.phrase + " | " + matched.phraseApart);
+    // FN2b. Case. A plain word and a tag ignore it, so a reader who types
+    // omg finds OMG. A quoted phrase keeps it, which is how a reader asks
+    // for exactly what they typed.
+    check("find: a plain word and a tag ignore case",
+      matched.wordUpper === "0001" && matched.wordMixed === "0001" &&
+      matched.tagUpper === "0001" && matched.titleMixed === "0001",
+      JSON.stringify({ upper: matched.wordUpper, mixed: matched.wordMixed,
+                       tag: matched.tagUpper, title: matched.titleMixed }));
+    check("find: a quoted phrase keeps case, and the passage marks the same text",
+      matched.phraseSameCase === "0001" && matched.phraseWrongCase === "" &&
+      matched.phraseCapCase === "0001" &&
+      matched.passPhraseCase.hit === "Dome and headset",
+      JSON.stringify({ same: matched.phraseSameCase, wrong: matched.phraseWrongCase,
+                       cap: matched.phraseCapCase,
+                       hit: matched.passPhraseCase.hit }));
     check("find: the passage marks the hit, reaches into a caption, and stands in for a tag query",
       matched.passWord.hit === "projection" && /dome $/.test(matched.passWord.before) &&
       matched.passCap.hit === "frame" && /Dome and headset/.test(matched.passCap.before) &&
@@ -3566,7 +3647,7 @@ async function main() {
     const monthPage = await evaluate(`({
       cls: document.body.className,
       figs: document.querySelectorAll('figure.bp-fig').length,
-      brand: !!document.querySelector('.bs-bar__name'),
+      brand: !!document.querySelector('.site-header .brand__title'),
     })`);
     // the figures and the brand are in the file; the classes on the body
     // are the two trunks saying they ran, and nothing else
@@ -3574,6 +3655,135 @@ async function main() {
       /^blog-month(?: ga-[dm]-\w+| loaded)*$/.test(monthPage.cls) &&
       monthPage.figs === 2 && monthPage.brand,
       JSON.stringify(monthPage));
+
+    // MC4. the chrome is not only present, it works: site.js wires the nav on
+    // a month page the same way it does everywhere else.
+    const chrome = await evaluate(`(function () {
+      var nav = document.getElementById('nav');
+      var links = nav ? [...nav.querySelectorAll('a')].map(function (a) { return a.getAttribute('href'); }) : [];
+      var current = nav ? [...nav.querySelectorAll('a[aria-current="page"]')].map(function (a) { return a.getAttribute('href'); }) : [];
+      var bar = document.getElementById('blogBar');
+      var head = document.querySelector('.site-header');
+      return {
+        links: links, current: current,
+        toggle: !!document.getElementById('navToggle'),
+        scrim: !!document.getElementById('navOverlay'),
+        contact: !!document.getElementById('contact'),
+        endbar: !!document.querySelector('.endbar'),
+        headerH: getComputedStyle(document.documentElement).getPropertyValue('--header-h').trim(),
+        headerTop: getComputedStyle(document.documentElement).getPropertyValue('--header-top').trim(),
+        /* the column must START below the fixed header, and the bar must be
+           in the flow rather than pinned to anything */
+        barPosition: bar ? getComputedStyle(bar).position : 'none',
+        barTop: bar ? Math.round(bar.getBoundingClientRect().top) : -1,
+        headBottom: head ? Math.round(head.getBoundingClientRect().bottom) : -1,
+        clears: head && bar ? bar.getBoundingClientRect().top >= head.getBoundingClientRect().bottom - 2 : false
+      };
+    })()`);
+    check("month page: the full site nav is there and Blog is the current item",
+      chrome.links.length === 5 && chrome.links.indexOf("../gallery.html") !== -1 &&
+      chrome.links.indexOf("../index.html#work") !== -1 &&
+      JSON.stringify(chrome.current) === '["../blog.html"]' &&
+      chrome.toggle && chrome.scrim,
+      JSON.stringify({ links: chrome.links, current: chrome.current }));
+    check("month page: the contact block and its endbar are on the page",
+      chrome.contact && chrome.endbar, JSON.stringify(chrome).slice(0, 160));
+    // MC4c. The corner mark, on a month page as on every other page. It
+    // cannot publish from here: a month page carries its month list and not
+    // the counters, so the composer refuses and says where its home is.
+    const corner = await evaluate(`(function () {
+      var el = document.querySelector('.amh-edit');
+      if (!el) return { present: false };
+      var r = el.getBoundingClientRect();
+      var cs = getComputedStyle(el);
+      var top = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                          Math.round(r.top + r.height / 2));
+      if (!AMH.tool.editorOn()) window.edit();
+      return { present: true, visible: cs.visibility === 'visible' && cs.display !== 'none',
+               clickable: !!top && (top === el || el.contains(top)),
+               composerSays: String(window.edit.blog()),
+               composerOpened: !!document.querySelector('.bc-write'),
+               postButtons: [...document.querySelectorAll('.bs-post button')]
+                 .filter(function (b) { return /^Edit p/.test(b.textContent); }).length };
+    })()`);
+    check("month page: the corner mark is there, seen and clickable, as on every page",
+      corner.present && corner.visible && corner.clickable,
+      JSON.stringify(corner));
+    check("month page: the composer refuses here and names the page that can publish",
+      /blog\.html/.test(corner.composerSays) && corner.composerOpened === false &&
+      corner.postButtons > 0,
+      JSON.stringify({ says: corner.composerSays, opened: corner.composerOpened,
+                       buttons: corner.postButtons }));
+
+    // MC4d. Editing a post from a month page moves the work to the page that
+    // has the manifest, rather than refusing. The address is tidied on
+    // arrival, so a reload is a plain blog page.
+    const handed = await evaluate(`String(window.edit.blog.edit('0001'))`);
+    await sleep(2600);
+    const handedTo = await evaluate(`({
+      path: location.pathname, search: location.search,
+      composer: !!document.querySelector('.bc-write'),
+      date: (document.querySelector('.bc-date') || {}).value || ''
+    })`);
+    check("month page: Edit hands the post to the blog page and the address is tidied",
+      /opening blog\.html/.test(handed) && /blog\.html$/.test(handedTo.path) &&
+      handedTo.search === "" && handedTo.composer === true && /^\d{6}$/.test(handedTo.date),
+      JSON.stringify({ handed, ...handedTo }));
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Close'; })?.click()`);
+    await sleep(400);
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog/2607.html" });
+    await sleep(1600);
+
+    // MC4b. Only the site header is pinned. The bar scrolls away with the
+    // page, which is the whole point of it not being sticky, so scrolling
+    // past it must actually move it off the top of the window.
+    const scrolled = await evaluate(`(function () {
+      var bar = document.getElementById('blogBar');
+      var head = document.querySelector('.site-header');
+      var before = Math.round(bar.getBoundingClientRect().top);
+      window.scrollTo(0, 600);
+      return new Promise(function (res) { setTimeout(function () {
+        res({ before: before,
+              after: Math.round(bar.getBoundingClientRect().top),
+              headerStill: Math.round(head.getBoundingClientRect().top),
+              /* the search results must still paint over the cards below */
+              barZ: getComputedStyle(bar).zIndex });
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("month page: the bar scrolls away while the site header stays put",
+      scrolled.after < scrolled.before - 400 && scrolled.headerStill === 0 &&
+      scrolled.barZ === "5",
+      JSON.stringify(scrolled));
+    await evaluate(`window.scrollTo(0, 0)`);
+    await sleep(400);
+    // the header is fixed, so the column must start below it. The clearance
+    // reads --header-top, the height BEFORE the header shrinks, or the page
+    // would be pulled up by the difference in the middle of a scroll.
+    check("month page: the column clears the fixed header, by its unscrolled height",
+      /^\d+px$/.test(chrome.headerH) && /^\d+px$/.test(chrome.headerTop) && chrome.clears,
+      JSON.stringify({ headerH: chrome.headerH, headerTop: chrome.headerTop,
+                       barTop: chrome.barTop, headBottom: chrome.headBottom }));
+
+    // MC5. Contact resolves. Every page carries the block today, so the link
+    // is an in-page jump; with the block gone it must follow the site's own
+    // copy rather than silently doing nothing, which is the hinge for making
+    // contact a page of its own later.
+    const contactJump = await evaluate(`(function () {
+      var before = window.scrollY;
+      [...document.querySelectorAll('#nav a')].find(function (a) { return a.getAttribute('href') === '#contact'; }).click();
+      return { moved: window.scrollY > before, still: location.pathname };
+    })()`);
+    check("month page: Contact jumps to the block on this page",
+      contactJump.moved === true && /2607\.html$/.test(contactJump.still),
+      JSON.stringify(contactJump));
+    await evaluate(`document.getElementById('contact').remove()`);
+    await evaluate(`[...document.querySelectorAll('#nav a')].find(function (a) { return a.getAttribute('href') === '#contact'; }).click()`);
+    await sleep(1500);
+    const contactAway = await evaluate(`location.pathname + location.hash`);
+    check("month page: with no block on the page, Contact follows the site's own copy",
+      /\/index\.html#contact$/.test(contactAway), contactAway);
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog/2607.html" });
+    await sleep(1500);
 
     // MB1. The two surfaces are one column. A post used to be 504px wide on
     // its own page against the stream's 550px, because the month wrapper
@@ -3770,10 +3980,11 @@ async function main() {
       link: (document.querySelector('.bm-older') || {}).textContent || '',
       scripts: [...document.querySelectorAll('script[src]')].map(s => s.getAttribute('src')).join(' '),
     })`);
-    check("chain: a month page boots with site.js and blog.js and no console error",
+    check("chain: a month page boots with every trunk and no console error",
       exceptions.length === 0 && monthBoot.site && monthBoot.blog && monthBoot.work &&
       !monthBoot.index && monthBoot.month &&
-      monthBoot.scripts === "../site.js ../work.js ../blog.js" && monthBoot.link === "Older posts: June 2026",
+      monthBoot.scripts === "../site.js ../work.js ../blog.js ../tool.js ../publish.js" &&
+      monthBoot.link === "Older posts: June 2026",
       JSON.stringify(monthBoot).slice(0, 200) + " " + exceptions.join(" | ").slice(0, 120));
     // MP2. a month page has the bar with its own picker, folds nothing,
     // and zooms
@@ -3782,7 +3993,7 @@ async function main() {
       var img = document.querySelector('.bp-fig img');
       var out = {
         bar: !!document.getElementById('blogBar'),
-        barTop: getComputedStyle(document.querySelector('.bs-bar')).top,
+        barPosition: getComputedStyle(document.querySelector('.bs-bar')).position,
         options: [].map.call(sel.options, function (o) { return o.value; }),
         posts: document.querySelectorAll('.bs-post').length,
         old: document.querySelectorAll('.blog-post').length,
@@ -3798,8 +4009,8 @@ async function main() {
         setTimeout(function () { out.closed = !AMH.work.lightbox.isOpen(); res(out); }, 600);
       }, 700); });
     })()`, { awaitPromise: true });
-    check("month page: the bar sticks at the top, the picker lists its months, and nothing is folded",
-      monthPage.bar && monthPage.barTop === "0px" &&
+    check("month page: the bar is in the flow, the picker lists its months, nothing is folded",
+      monthPage.bar && monthPage.barPosition === "relative" &&
       JSON.stringify(monthPage.options) === '["","2607","2606"]' &&
       monthPage.posts === 1 && monthPage.old === 0 && monthPage.buttons === 0,
       JSON.stringify(monthPage).slice(0, 220));
@@ -3826,7 +4037,13 @@ async function main() {
     // CH2. the click appends the older month under a divider, moves the
     // link on, replaces the URL and the title, and puts focus on the divider
     await evaluate(`document.querySelector('.bm-older').click()`);
-    await sleep(900);
+    /* Wait for the month to arrive rather than guessing at a delay. A month
+       page loads five trunks now, and the suite's server answers one request
+       at a time, so the chain's own fetch can queue behind them. */
+    for (let i = 0; i < 30; i++) {
+      await sleep(250);
+      if (await evaluate(`!!document.querySelector('.bm-divider')`)) break;
+    }
     const walked = await evaluate(`({
       divider: (document.querySelector('.bm-divider') || {}).textContent || '',
       posts: [...document.querySelectorAll('main .bs-post')].map(a => a.id).join(' '),
@@ -3836,7 +4053,10 @@ async function main() {
       path: location.pathname, title: document.title,
       focused: document.activeElement && document.activeElement.className,
       dividerBorder: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider')),
+      /* a post is a card now: it carries its own border on all four sides,
+         so the divider has none to cancel */
       firstAppended: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider + .bs-post')),
+      cardRadius: (function (el) { return el ? getComputedStyle(el).borderRadius : "none"; })(document.querySelector('.bs-post')),
     })`);
     check("chain: Older posts appends June under a divider and the link becomes the end note",
       walked.divider === "June 2026" && walked.posts === "p0001 p0002" && walked.sources === 1 &&
@@ -3844,7 +4064,7 @@ async function main() {
       JSON.stringify(walked).slice(0, 240));
     check("chain: the URL and the title follow the month reached, and focus lands on the divider",
       /\/blog\/2606\.html$/.test(walked.path) && /June 2026/.test(walked.title) && walked.focused === "bm-divider" &&
-      walked.dividerBorder === "1px" && walked.firstAppended === "0px",
+      walked.dividerBorder === "1px" && walked.firstAppended === "1px",
       JSON.stringify(walked).slice(0, 240));
     // CH3. a month that cannot be loaded says so in the link's place and
     // stays a link; a second click while busy does nothing
@@ -4151,8 +4371,9 @@ async function main() {
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
 
-    // CUT3. the bar: it sticks under the fixed header, and the picker lists
-    // the months newest first with All months at the top
+    // CUT3. the bar: it scrolls away with the page, leaving the site header
+    // as the only thing pinned, and the picker lists the months newest first
+    // with All months at the top
     const bar = await evaluate(`(function () {
       var el = document.getElementById('blogBar');
       var sel = document.getElementById('blogMonth');
@@ -4169,12 +4390,46 @@ async function main() {
               pill: !!document.querySelector('#blogFind .bs-find__pill input') });
       }, 800); });
     })()`, { awaitPromise: true });
-    check("bar: it sticks under the site header once the heading scrolls away",
-      bar.position === "sticky" && bar.before > bar.after && Math.abs(bar.after - bar.head) <= 2,
+    check("bar: it scrolls away with the page, and only the site header stays",
+      bar.position === "relative" && bar.after < bar.before - 400 && bar.head > 0,
       JSON.stringify(bar).slice(0, 200));
     check("bar: the picker lists All months and then each month, newest first",
       JSON.stringify(bar.options) === '[":All months","2607:July 2026 (1)","2606:June 2026 (1)"]' &&
       bar.find && bar.pill, JSON.stringify(bar.options) + " pill=" + bar.pill);
+    // CUT3b. The bar is a panel whether or not it moves. Its ground came off
+    // with the sticky positioning once, which was not the point of that
+    // change, and the bar read as a strip of bare page above a list of cards.
+    const barLook = await evaluate(`(function () {
+      var bar = document.getElementById('blogBar');
+      var sel = document.getElementById('blogMonth');
+      var cs = getComputedStyle(bar), ss = getComputedStyle(sel);
+      return { ground: cs.backgroundColor, image: cs.backgroundImage !== 'none',
+               radius: cs.borderTopLeftRadius,
+               /* the picker is the browser's own control: nothing is redrawn,
+                  and color-scheme is what makes its popup list dark too */
+               pickerAppearance: ss.appearance || ss.webkitAppearance,
+               pickerDrawn: ss.backgroundImage !== 'none',
+               pickerScheme: ss.colorScheme };
+    })()`);
+    check("bar: it has a ground of its own, like the cards under it",
+      /rgba?\(/.test(barLook.ground) &&
+      barLook.ground !== "rgba(0, 0, 0, 0)" && barLook.image === true,
+      JSON.stringify(barLook));
+    check("bar: the month picker is the browser's own control, drawn dark, not redrawn",
+      barLook.pickerAppearance !== "none" && barLook.pickerDrawn === false &&
+      /dark/.test(barLook.pickerScheme),
+      JSON.stringify(barLook));
+
+    // CUT3c. The trace: the wizard's steps are always printed, and the notes
+    // are printed only when they are asked for.
+    const traceSwitch = await evaluate(`({
+      on: String(window.edit.blog.trace(true)),
+      off: String(window.edit.blog.trace(false))
+    })`);
+    check("trace: it can be turned up for a hunt and down again",
+      /trace on/.test(traceSwitch.on) && /trace off/.test(traceSwitch.off),
+      JSON.stringify(traceSwitch));
+
 
     // the injected posts go before the loader tests read the stream
     await evaluate(`[...document.querySelectorAll('.bs-post')].forEach(function (p) {
@@ -4913,6 +5168,154 @@ async function main() {
       JSON.stringify({ route: refused.route, zipped: refused.zipped,
                        fell: refused.fell }).slice(0, 200));
 
+    // ============ THE REMEMBERED REPO FOLDER ============
+    // Picking the folder for every page load is one pick too many, so the
+    // handle is kept in IndexedDB. It cannot be a path: no browser opens a
+    // folder by name, and no browser tells a page where a folder is. That
+    // last point is also why nothing here can carry a path into the repo.
+    //
+    // A fresh page load is needed, because the remembered folder is offered
+    // once per load.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    const remembered = await evaluate(`(function () {
+      /* a stand-in that answers the three calls the check makes, and that
+         survives the structured clone IndexedDB puts it through */
+      var pageStamp = (/stamp:([0-9a-z]{6})/
+        .exec(document.getElementById('blogManifest').textContent) || [])[1] || '';
+      var stand = { name: 'aaron-harris-portfolio', __stamp: pageStamp };
+      window.__pickerCalls = 0;
+      window.showDirectoryPicker = function () { window.__pickerCalls++; return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' })); };
+      return AMH.tool.repoForget().then(function () {
+        return new Promise(function (res) {
+          var q = indexedDB.open('amh-editor', 1);
+          q.onupgradeneeded = function () { q.result.createObjectStore('repo'); };
+          q.onsuccess = function () {
+            var tx = q.result.transaction('repo', 'readwrite');
+            tx.objectStore('repo').put({ handle: stand, name: stand.name }, 'folder');
+            tx.oncomplete = function () {
+              AMH.tool.repoRecall().then(function (h) {
+                res({ recalled: h ? h.name : null, stamp: h ? h.__stamp : null,
+                      pageStamp: pageStamp });
+              });
+            };
+          };
+        });
+      });
+    })()`, { awaitPromise: true });
+    check("repo memory: the folder handle survives in IndexedDB and comes back by name",
+      remembered.recalled === "aaron-harris-portfolio" &&
+      /^[0-9a-z]{6}$/.test(remembered.pageStamp),
+      JSON.stringify(remembered));
+
+    // the check that replaces the path you cannot see: the folder's own
+    // blog.html stamp, against the page asking for it
+    const verdicts = await evaluate(`(function () {
+      var mine = (/stamp:([0-9a-z]{6})/
+        .exec(document.getElementById('blogManifest').textContent) || [])[1];
+      function fileH(text, name) {
+        return { kind: 'file', getFile: function () {
+          return Promise.resolve(new File([text], name, { type: 'text/html' })); } };
+      }
+      function folder(name, blogText) {
+        var files = { 'index.html': fileH('<html></html>', 'index.html') };
+        if (blogText !== null) files['blog.html'] = fileH(blogText, 'blog.html');
+        return { name: name,
+          queryPermission: function () { return Promise.resolve('granted'); },
+          getFileHandle: function (n) {
+            return files[n] ? Promise.resolve(files[n])
+                            : Promise.reject(new Error('NotFoundError'));
+          } };
+      }
+      var man = '<scr' + 'ipt id="blogManifest">stamp:';
+      return Promise.all([
+        AMH.tool.repoVerify(folder('same', man + mine + '</scr' + 'ipt>')),
+        AMH.tool.repoVerify(folder('stale', man + 'zzzzzz</scr' + 'ipt>')),
+        AMH.tool.repoVerify(folder('noblog', null))
+      ]).then(function (v) {
+        return { same: v[0], stale: v[1], notRoot: v[2], mine: mine };
+      });
+    })()`, { awaitPromise: true });
+    check("repo memory: a folder whose blog page matches this page is accepted and says so",
+      verdicts.same.ok === true && !verdicts.same.warn &&
+      verdicts.same.why.indexOf(verdicts.mine) !== -1,
+      JSON.stringify(verdicts.same));
+    // two clones share one origin on disk and one folder name, so the stamp
+    // is the only thing that can tell them apart
+    check("repo memory: a clone from a different publish is flagged, not silently used",
+      verdicts.stale.ok === true && verdicts.stale.warn === true &&
+      /DIFFERENT publish/.test(verdicts.stale.why) && /zzzzzz/.test(verdicts.stale.why),
+      JSON.stringify(verdicts.stale));
+    check("repo memory: a folder without the root marks is refused",
+      verdicts.notRoot.ok === false && /not the root/.test(verdicts.notRoot.why),
+      JSON.stringify(verdicts.notRoot));
+    // and forgetting it really forgets it
+    const forgotten = await evaluate(
+      `AMH.tool.repoForget().then(function () { return AMH.tool.repoRecall(); })
+        .then(function (h) { return h === null; })`, { awaitPromise: true });
+    check("repo memory: forgetting the folder leaves nothing to recall",
+      forgotten === true, String(forgotten));
+
+    // RF1. One folder, two permissions. Read and write are two permissions on
+    // one handle, not two folders, so a folder picked for reading must not
+    // send the reader back to the picker when the publish comes to write it.
+    const reuse = await evaluate(`(function () {
+      function fileH(text, name) {
+        return { kind: 'file', getFile: function () {
+          return Promise.resolve(new File([text], name, { type: 'text/html' })); } };
+      }
+      var stamp = (/stamp:([0-9a-z]{6})/
+        .exec(document.getElementById('blogManifest').textContent) || [])[1] || '';
+      var files = { 'index.html': fileH('<html></html>', 'index.html'),
+                    'blog.html': fileH('<scr' + 'ipt id="blogManifest">stamp:' + stamp + '</scr' + 'ipt>', 'blog.html') };
+      window.__picks = [];
+      window.__asked = [];
+      window.__perm = 'granted';
+      var dir = { kind: 'directory', name: 'aaron-harris-portfolio',
+        queryPermission: function (o) { return Promise.resolve(window.__perm); },
+        requestPermission: function (o) { window.__asked.push(o.mode); return Promise.resolve(window.__grant || 'granted'); },
+        getFileHandle: function (n) {
+          return files[n] ? Promise.resolve(files[n]) : Promise.reject(new Error('NotFound'));
+        },
+        getDirectoryHandle: function () { return Promise.reject(new Error('NotFound')); } };
+      window.showDirectoryPicker = function (o) { window.__picks.push(o && o.mode); return Promise.resolve(dir); };
+      return AMH.tool.repoForget().then(function () {
+        return AMH.tool.pickRepo(['blog.html']);
+      }).then(function () {
+        /* the browser holds the handle but not write permission, which is
+           what it does in life: the raise is asked for, not a new pick */
+        window.__perm = 'prompt';
+        return AMH.tool.pickRepoWrite();
+      }).then(function (h) {
+        return { got: h ? h.name : null, picks: window.__picks.slice(),
+                 asked: window.__asked.slice(), ready: AMH.tool.repoWriteReady() };
+      });
+    })()`, { awaitPromise: true });
+    check("repo folder: a folder picked for reading is raised to write, not picked again",
+      reuse.got === "aaron-harris-portfolio" && reuse.ready === true &&
+      JSON.stringify(reuse.picks) === '["read"]' &&
+      JSON.stringify(reuse.asked) === '["readwrite"]',
+      JSON.stringify(reuse));
+
+    // RF2. A refused raise is a real answer, and the picker is how the reader
+    // gives a different folder or the same one with more permission.
+    const raiseRefused = await evaluate(`(function () {
+      window.__perm = 'prompt';
+      window.__grant = 'denied';
+      window.__picks.length = 0;
+      /* the picker returns the same folder, which still cannot be written,
+         so the refusal carries its code up to the caller. bcDeliver catches
+         it and falls back to the zip rather than losing a built bundle. */
+      return AMH.tool.pickRepoWrite().then(
+        function (h) { return { picks: window.__picks.slice(), got: h ? h.name : null, code: "" }; },
+        function (err) { return { picks: window.__picks.slice(), got: null, code: err.code || "" }; });
+    })()`, { awaitPromise: true });
+    check("repo folder: a refused raise goes back to the picker, and a refusal is reported",
+      JSON.stringify(raiseRefused.picks) === '["readwrite"]' &&
+      raiseRefused.code === "BLG-E12",
+      JSON.stringify(raiseRefused));
+    await evaluate(`AMH.tool.repoForget()`);
+
     /* the layer is the tab's, so it is cleared before anything else runs */
     await evaluate(`AMH.tool.layerSave(null)`);
   }
@@ -5096,6 +5499,77 @@ async function main() {
     JSON.stringify(throughD2) + " " + JSON.stringify(doneD2).slice(0, 160));
   check("files step: no page exception on the file page",
     exceptions.length === 0, exceptions.slice(0, 2).join(" | "));
+
+  // ============ EDITING A PUBLISHED POST FROM DISK ============
+  // A post's source lives in its month file, so opening one to edit means
+  // reading that file. bcLoadPost used a raw fetch, which a page opened from
+  // disk cannot do, and swallowed the failure into console.error: clicking
+  // Edit did nothing at all, on screen or anywhere else.
+  // the bundle directory, opened as a file: it holds a real published post
+  // and the month file that carries its source, which the served copy of the
+  // blog page does not
+  await send("Page.navigate", { url: pathToFileURL(join(bdir, "blog.html")).href });
+  await sleep(2400);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(700);
+  const editBtn = await evaluate(`(function () {
+    var b = [...document.querySelectorAll('button,a')]
+      .find(function (x) { return /Edit p0001/.test(x.textContent || ''); });
+    if (!b) return 'no edit button';
+    b.click();
+    return 'clicked';
+  })()`);
+  await sleep(2200);
+  const askedForIt = await evaluate(`({
+    handOff: !!document.querySelector('.ced-handoff__zone'),
+    head: (document.querySelector('.ced-handoff .ced-modal__head') || {}).textContent || '',
+    composer: !!document.querySelector('.bc-write'),
+    silent: !document.querySelector('.ced-handoff__zone') && !document.querySelector('.bc-wizard')
+  })`);
+  // The dialog must be asking for a MONTH file, because that is where the
+  // post's source lives. Which month is not fixed: earlier lifecycle tests
+  // backdate and move posts, so the file is read from the ask rather than
+  // assumed.
+  const wantMonth = (/(\d{4})\.html/.exec(askedForIt.head) || [])[1] || "";
+  check("edit from disk: the post asks for its month file instead of failing in silence",
+    editBtn === "clicked" && askedForIt.handOff === true && askedForIt.silent === false &&
+    /^\d{4}$/.test(wantMonth),
+    JSON.stringify({ editBtn, wantMonth, ...askedForIt }));
+  // and the file, once handed over, opens the post in the composer
+  if (askedForIt.handOff) {
+    await dropInto(".ced-handoff__zone", wantMonth + ".html",
+      readFileSync(join(bdir, "blog", wantMonth + ".html"), "utf8"));
+    /* the file is read and the post extracted before the composer appears,
+       so this waits for the composer rather than guessing at a delay */
+    let opened = null;
+    for (let i = 0; i < 25 && !(opened && opened.composer); i++) {
+      await sleep(250);
+      opened = await evaluate(`({
+        composer: !!document.querySelector('.bc-write'),
+        title: (document.querySelector('.bc-title') || {}).value || '',
+        date: (document.querySelector('.bc-date') || {}).value || '',
+        body: ((document.querySelector('.bc-write textarea') || {}).value || '').slice(0, 40),
+        refused: (document.querySelector('.ced-handoff__note') || {}).textContent || ''
+      })`);
+    }
+    check("edit from disk: the handed file opens the post with its own source",
+      opened.composer && opened.date.slice(0, 4) === wantMonth && opened.body.length > 0,
+      JSON.stringify({ wantMonth, ...opened }).slice(0, 220));
+    await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Close'; })?.click()`);
+    await sleep(400);
+  }
+  // an id the manifest does not know says so on screen, rather than in the console
+  await evaluate(`AMH.publish.edit('9999')`);
+  await sleep(600);
+  const unknownId = await evaluate(`({
+    step: (document.querySelector('.bc-wizard') || {getAttribute(){return null}}).getAttribute('data-step'),
+    text: ((document.querySelector('.bc-wizard .bc-wiz__body') || {}).textContent || '').slice(0, 80)
+  })`);
+  check("edit: an id the manifest does not know is reported on screen",
+    unknownId.step === "failed" && /p9999/.test(unknownId.text),
+    JSON.stringify(unknownId));
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; })?.click()`);
+  await sleep(300);
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

@@ -385,7 +385,10 @@
         en[k] = (carry && carry[k] !== undefined) ? carry[k] : defaults[k];
       });
       en.orig = { caption: en.caption, alt: en.alt };
-      /* served over HTTP, so a HEAD request can confirm the file exists */
+      /* Served over HTTP, so a HEAD request can confirm the file exists.
+         From disk there is nothing to ask, and marking every image missing
+         would be a worse answer than leaving the question open. */
+      if (onDisk()) return en;
       fetch(en.src, { method: "HEAD", cache: "no-store" }).then(function (res) {
         en.missing = !res.ok;
         if (en.missing) {
@@ -1869,6 +1872,20 @@
      no-store because a stale copy would silently revert an earlier change.
 
      The hand-off below is the offline fallback, here and only here. */
+  /* A page opened from disk cannot fetch anything: the browser refuses it
+     and prints a CORS error of its own that no reader can act on. Asking
+     anyway produced a dozen red lines at every publish and taught the
+     author to stop reading the console. Every reader below asks this
+     first and goes straight to the answer that works. */
+  function onDisk() { return location.protocol === "file:"; }
+
+  /* The publish engine owns the trace, because a trace is about a publish.
+     This trunk reports into it when that trunk is on the page, and says
+     nothing when it is not. */
+  function note(what, info) {
+    if (AMH.publish && AMH.publish.note) AMH.publish.note(what, info);
+  }
+
   function pristine(path) {
     path = path || currentPage();
     if (!isManaged(path)) {
@@ -1880,7 +1897,10 @@
        server still serves. This one branch is what lets several posts be
        made in one sitting and uploaded once. */
     var staged = layerFile(path);
-    if (staged !== null) return Promise.resolve(staged);
+    if (staged !== null) { note("read " + path, "from the staging layer"); return Promise.resolve(staged); }
+    note("read " + path, onDisk() ? "asking, this page is on disk" : "over http");
+    /* BLG-E01 is still reported, because that message is the useful one */
+    if (onDisk()) return handOff(path, new Error("opened from disk"));
     return fetch(path, { cache: "no-store" }).then(
       function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status + " fetching " + path);
@@ -2107,6 +2127,14 @@
     return expected.filter(function (pp) { return !optional[pp]; });
   }
 
+  /* The files the publish engine writes whole. None of them carries an
+     editable region, so none of them can fail a marker check in a way a
+     person could act on. Month files are not listed: they are matched by
+     their shape and checked by their stamp. */
+  var GENERATED_FILES = {
+    "search.js": 1, "feed.xml": 1, "sitemap.xml": 1, "robots.txt": 1, "ORPHANS.txt": 1
+  };
+
   /* Does this look like a page the editor writes? Better verification, as
      chosen: the name has to match, and the markers the splice needs have to
      be present. It warns and lets the user continue, because the editor
@@ -2129,13 +2157,22 @@
       }
       return { ok: true, count: 0 };
     }
+    /* A file the engine writes whole carries no markers and never will, so
+       saying so at every publish is a warning that can never be acted on.
+       A month file is checked above by its stamp instead. */
+    if (GENERATED_FILES[want]) return { ok: true, count: 0 };
     var marks = text.match(/<!--\[edit:[\w-]+\]-->/g) || [];
     if (!marks.length) {
       return { ok: true, warn: true, code: "BLG-E05",
                detail: 'The file is named "' + want + '" and has no markers. The publish continues.' };
     }
+    /* "<!--[edit:" is ten characters, so the slug starts at ten. It read
+       from eleven until V063, which dropped the first letter of every slug
+       and made every region compare as missing. The check reported every
+       region of every page on every publish, so a region that really was
+       missing said nothing that the noise had not already said. */
     var slugs = {};
-    marks.forEach(function (m) { slugs[m.slice(11, -4)] = true; });
+    marks.forEach(function (m) { slugs[m.slice(10, -4)] = true; });
     /* the regions this page load knows about, when it is this page */
     var missing = [];
     if (path === currentPage()) {
@@ -2302,6 +2339,121 @@
   }
   function hasPicker() { return typeof window.showDirectoryPicker === "function"; }
 
+  /* ---------------- the remembered repo folder ----------------
+
+     Picking the folder once for every page load is one pick too many. The
+     handle is kept in IndexedDB, which is the only store that can hold
+     one: a handle is an object the browser clones, not a string. A stored
+     path would be no use even if we had one, because nothing opens a
+     folder by name.
+
+     What the reader is shown is the folder's own name. The browser never
+     tells a page where a folder is, which is also why nothing here can
+     carry a path into the repo.
+
+     THE CONFIRM STEP IS NOT POLITENESS. The browser keeps the handle but
+     usually not the permission, and requestPermission() works only inside
+     a user gesture. The click that says "use this folder" is what makes
+     the permission askable at all.
+
+     A NAME IS NOT PROOF. Every page opened from disk shares one origin,
+     "file://", so two clones of this repo share one memory and report the
+     same folder name. The stamp in the folder's own blog.html is what
+     tells them apart, so it is read and compared before the folder is
+     used. It can only be read after permission is granted, so the verdict
+     is shown before the click when the browser still has permission, and
+     right after it when it does not. */
+  var IDB_NAME = "amh-editor", IDB_STORE = "repo", IDB_KEY = "folder";
+  var repoOffered = {};      /* a remembered folder is offered once per mode, per load */
+
+  function idbOpen() {
+    return new Promise(function (resolve, reject) {
+      if (typeof indexedDB === "undefined" || !indexedDB) {
+        reject(new Error("this browser keeps no IndexedDB"));
+        return;
+      }
+      var q = indexedDB.open(IDB_NAME, 1);
+      q.onupgradeneeded = function () { q.result.createObjectStore(IDB_STORE); };
+      q.onsuccess = function () { resolve(q.result); };
+      q.onerror = function () { reject(q.error || new Error("IndexedDB refused")); };
+      q.onblocked = function () { reject(new Error("IndexedDB blocked")); };
+    });
+  }
+  function idbDo(mode, run) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(IDB_STORE, mode);
+        var req = run(tx.objectStore(IDB_STORE));
+        tx.oncomplete = function () { resolve(req ? req.result : undefined); };
+        tx.onerror = function () { reject(tx.error); };
+        tx.onabort = function () { reject(tx.error || new Error("aborted")); };
+      });
+    });
+  }
+  /* Every one of these answers rather than throws: a browser that refuses
+     storage must cost the reader a pick, not an error. */
+  function repoRecall() {
+    return idbDo("readonly", function (st) { return st.get(IDB_KEY); })
+      .then(function (v) { return v && v.handle ? v.handle : null; },
+            function () { return null; });
+  }
+  function repoRemember(handle) {
+    return idbDo("readwrite", function (st) {
+      return st.put({ handle: handle, name: handle.name, at: new Date().toISOString() }, IDB_KEY);
+    }).then(function () { return true; }, function () { return false; });
+  }
+  function repoForget() {
+    return idbDo("readwrite", function (st) { return st.delete(IDB_KEY); })
+      .then(function () { return true; }, function () { return false; });
+  }
+
+  /* The publish stamp inside a page's manifest block. Anchored to the
+     block, because a generated file names a stamp in its top comment too. */
+  function stampIn(text) {
+    var at = String(text).indexOf('id="blogManifest"');
+    if (at === -1) return "";
+    var end = String(text).indexOf("</scr" + "ipt>", at);
+    var m = /stamp:([0-9a-z]{6})/.exec(String(text).slice(at, end === -1 ? undefined : end));
+    return m ? m[1] : "";
+  }
+  /* This page's own stamp needs no anchor: the manifest tag holds manifest
+     lines and nothing else, and no other line of it carries "stamp:". */
+  function pageStamp() {
+    var el = doc.getElementById("blogManifest");
+    var m = el ? /stamp:([0-9a-z]{6})/.exec(el.textContent) : null;
+    return m ? m[1] : "";
+  }
+  /* Read the folder and say what it is. Needs permission, so it runs after
+     the grant. Resolves a verdict the step can show as one sentence. */
+  function repoVerify(handle) {
+    return repoHasRootMarks(handle).then(function (root) {
+      if (!root) return { ok: false, why: "That folder is not the root of this site. " +
+        "The root holds index.html and blog.html." };
+      return handle.getFileHandle("blog.html")
+        .then(function (fh) { return fh.getFile(); })
+        .then(readFile)
+        .then(function (text) {
+          var mine = pageStamp(), theirs = stampIn(text);
+          if (!mine || !theirs) {
+            return { ok: true, why: "It holds index.html and blog.html. The publish " +
+              "stamp could not be compared." };
+          }
+          if (mine === theirs) {
+            return { ok: true, why: "Its blog page is the version this page knows (stamp " +
+              theirs + ")." };
+          }
+          return { ok: true, warn: true, why: "Its blog page is from a DIFFERENT publish " +
+            "than this page: the folder says " + theirs + " and this page says " + mine +
+            ". Check it is the clone you mean before you publish." };
+        }, function () {
+          return { ok: true, why: "It holds index.html and blog.html. Its blog page " +
+            "could not be read." };
+        });
+    }, function () {
+      return { ok: false, why: "That folder could not be read." };
+    });
+  }
+
   /* ---------------- writing back into the repo folder ----------------
 
      The other direction. A publish can hand its files to the browser as a
@@ -2331,41 +2483,19 @@
     });
   }
 
-  /* Ask for write permission on a handle the user already picked. The
-     browser may grant it with the pick and then need no prompt at all. */
-  function repoWritable(handle) {
-    if (!handle.queryPermission) return Promise.resolve(true);
-    return handle.queryPermission({ mode: "readwrite" }).then(function (state) {
-      if (state === "granted") return true;
-      return handle.requestPermission({ mode: "readwrite" })
-        .then(function (asked) { return asked === "granted"; });
-    });
-  }
-
   /* Pick the repo folder for writing. Resolves with the handle, or null
      when the picker was closed. Rejects when the folder is not this repo
      or permission was refused, so a caller can say which happened. */
   function pickRepoWrite() {
     if (!hasPicker()) return Promise.reject(errObj("BLG-E04", "no folder picker in this browser"));
-    return window.showDirectoryPicker({ id: "amh-repo", mode: "readwrite" }).then(
-      function (handle) {
-        return repoHasRootMarks(handle).then(function (isRoot) {
-          if (!isRoot) throw errObj("BLG-E13", "");
-          return repoWritable(handle).then(function (may) {
-            if (!may) throw errObj("BLG-E12", "");
-            repoWriteDir = handle;
-            /* one pick answers both directions: a later read needs no
-               second dialog, which is what picking the folder once means */
-            if (!repoDir) repoDir = handle;
-            return handle;
-          });
-        });
-      },
-      function (err) {
-        if (err && err.name === "AbortError") return null;
-        if (err && err.code) throw err;
-        throw errObj("BLG-E04", err && err.message ? err.message : "");
-      });
+    return repoChoose("readwrite").then(function (handle) {
+      if (!handle) return null;
+      repoWriteDir = handle;
+      /* one pick answers both directions: a later read needs no second
+         dialog, which is what picking the folder once has to mean */
+      if (!repoDir) repoDir = handle;
+      return handle;
+    });
   }
 
   /* Walk to the folder a path lives in, making each step that is missing.
@@ -2413,17 +2543,156 @@
       function (err) { err.written = written; throw err; });
   }
   function repoWriteReady() { return !!repoWriteDir; }
+  /* The step that offers the folder this browser remembers. Resolves the
+     handle to use, or null to open the picker instead. It never resolves a
+     folder that failed its checks: a stale or wrong folder sends the
+     reader to the picker with the reason on screen. */
+  function repoConfirmStep(handle, mode) {
+    return new Promise(function (resolve) {
+      injectStyles();
+      var scrim = doc.createElement("div");
+      scrim.className = "ced-scrim";
+      var box = doc.createElement("div");
+      box.className = "ced-modal ced-handoff";
+      var head = doc.createElement("div");
+      head.className = "ced-modal__head";
+      head.innerHTML = '<span class="ced-b">FOLDER</span><span class="ced-slug">' +
+        escAttr(handle.name || "(unnamed)") + "</span>";
+      var note = doc.createElement("div");
+      note.className = "ced-modal__status";
+      note.textContent = "This browser remembers this folder from a previous visit. " +
+        "It is checked before it is used.";
+      var btns = doc.createElement("div");
+      btns.className = "ced-modal__btns";
+      var other = doc.createElement("button");
+      other.type = "button";
+      other.className = "ced-btn";
+      other.textContent = "Choose a different folder";
+      var spacer = doc.createElement("span");
+      spacer.className = "ced-spacer";
+      var use = doc.createElement("button");
+      use.type = "button";
+      use.className = "ced-btn ced-btn--accent";
+      use.textContent = "Use this folder";
+
+      function done(answer) {
+        if (scrim.parentNode) scrim.parentNode.removeChild(scrim);
+        if (box.parentNode) box.parentNode.removeChild(box);
+        resolve(answer);
+      }
+      /* the browser may still hold permission, and then the folder can be
+         read before the click and the verdict shown with the question */
+      repoWritableNow(handle, mode).then(function (granted) {
+        if (!granted) return;
+        return repoVerify(handle).then(function (v) {
+          note.textContent = v.why;
+          if (!v.ok) { use.disabled = true; other.className = "ced-btn ced-btn--accent"; }
+        });
+      });
+
+      other.addEventListener("click", function () { done(null); });
+      use.addEventListener("click", function () {
+        use.disabled = true;
+        note.textContent = "Checking the folder...";
+        repoWritable(handle, mode).then(function (granted) {
+          if (!granted) {
+            note.textContent = errText("BLG-E12", "");
+            other.className = "ced-btn ced-btn--accent";
+            return;
+          }
+          return repoVerify(handle).then(function (v) {
+            if (v.ok) { done(handle); return; }
+            note.textContent = v.why;
+            other.className = "ced-btn ced-btn--accent";
+          });
+        }, function () {
+          note.textContent = errText("BLG-E12", "");
+          other.className = "ced-btn ced-btn--accent";
+        });
+      });
+
+      btns.appendChild(other); btns.appendChild(spacer); btns.appendChild(use);
+      box.appendChild(head); box.appendChild(note); box.appendChild(btns);
+      doc.body.appendChild(scrim); doc.body.appendChild(box);
+      use.focus();
+    });
+  }
+
+  /* Permission as it stands, asking nothing. Used before the click, where
+     a request would be refused for want of a gesture. */
+  function repoWritableNow(handle, mode) {
+    if (!handle.queryPermission) return Promise.resolve(true);
+    return handle.queryPermission({ mode: mode }).then(
+      function (s) { return s === "granted"; }, function () { return false; });
+  }
+  /* Permission, asking for it when it is not held. Only from a click. */
+  function repoWritable(handle, mode) {
+    if (!handle.queryPermission) return Promise.resolve(true);
+    return handle.queryPermission({ mode: mode }).then(function (s) {
+      if (s === "granted") return true;
+      return handle.requestPermission({ mode: mode })
+        .then(function (a) { return a === "granted"; });
+    });
+  }
+
+  /* The folder, from memory when one is remembered and the reader says
+     yes, and from the picker otherwise. One place, so the read path and
+     the write path remember and check the same way. */
+  function repoChoose(mode) {
+    var fresh = function () {
+      return window.showDirectoryPicker({ id: "amh-repo", mode: mode }).then(
+        function (handle) {
+          return repoWritable(handle, mode).then(function (granted) {
+            if (!granted) throw errObj("BLG-E12", "");
+            return repoVerify(handle).then(function (v) {
+              if (!v.ok) throw errObj("BLG-E13", "");
+              repoRemember(handle);
+              return handle;
+            });
+          });
+        },
+        function (err) {
+          if (err && err.name === "AbortError") return null;
+          if (err && err.code) throw err;
+          throw errObj("BLG-E04", err && err.message ? err.message : "");
+        });
+    };
+    /* A folder already in hand IS the folder. Read and write are two
+       permissions on one handle, not two folders, so the second ask raises
+       the permission on the handle the reader already chose rather than
+       opening the picker on it again. The handle was checked when it was
+       picked, and it is the same folder, so it is not checked twice. */
+    var inHand = repoWriteDir || repoDir;
+    if (inHand) {
+      return repoWritable(inHand, mode).then(function (granted) {
+        /* a refused raise is a real answer: the picker is how the reader
+           gives a different folder, or the same one with more permission */
+        return granted ? inHand : fresh();
+      }, fresh);
+    }
+    /* Once for each mode, not once for the page. One flag for both meant a
+       read pick used up the offer and the write ask went straight to the
+       picker, on a folder that was already chosen. */
+    if (repoOffered[mode]) return fresh();
+    repoOffered[mode] = true;
+    return repoRecall().then(function (handle) {
+      if (!handle) return fresh();
+      return repoConfirmStep(handle, mode).then(function (ok) {
+        if (!ok) return fresh();
+        repoRemember(handle);
+        return handle;
+      });
+    }, fresh);
+  }
+
   /* Pick the folder with the API, so the browser opens only the files that
      are asked for and never counts the tree. Resolves with the count taken,
      or null when the picker was closed. A browser with no API needs a
      folder input, which each caller owns. */
   function pickRepo(paths) {
-    return window.showDirectoryPicker({ id: "amh-repo", mode: "read" }).then(
-      function (handle) { return takeDirectory(handle, paths); },
-      function (err) {
-        if (err && err.name === "AbortError") return null;
-        throw errObj("BLG-E04", err && err.message ? err.message : "");
-      });
+    return repoChoose("read").then(function (handle) {
+      return handle ? takeDirectory(handle, paths) : null;
+    });
   }
   /* The one label the arrow gives the folder button, wherever the button
      is. One pick answers every ask, and the root of the repo is the folder
@@ -2688,6 +2957,11 @@
   AMH.tool.pickRepoWrite = pickRepoWrite;
   AMH.tool.writeRepo = writeRepo;
   AMH.tool.repoWriteReady = repoWriteReady;
+  /* the remembered folder, for the suite and for a reader who wants it gone */
+  AMH.tool.onDisk = onDisk;
+  AMH.tool.repoRecall = repoRecall;
+  AMH.tool.repoForget = repoForget;
+  AMH.tool.repoVerify = repoVerify;
   AMH.tool.takeFiles = takeFiles;
   AMH.tool.takeFolder = takeFolder;
   AMH.tool.fileState = function (path) {
@@ -3294,7 +3568,19 @@
      The console names stay here whatever file answers them. edit.blog() is
      what people have learned to type. */
   var BLOG_PAGE = "blog.html";
+  function onMonthPage() {
+    return !!(doc.body && doc.body.classList.contains("blog-month"));
+  }
   function blogHere() {
+    /* A month page has a blogManifest of its own, holding its month list and
+       nothing else. The composer needs the counters and the entries, which
+       live on the blog page alone, so a month page is not its home however
+       much its manifest tag looks like one. */
+    if (onMonthPage()) {
+      console.warn("[blog] this is a month page. The composer lives on " + BLOG_PAGE +
+        ", which holds the counters and the entries.");
+      return false;
+    }
     if (AMH.publish && AMH.blog && doc.getElementById("blogManifest")) return true;
     console.warn("[blog] the composer lives on " + BLOG_PAGE +
       ", which holds the manifest, the reading engine and publish.js. Open " +
@@ -3313,6 +3599,13 @@
   };
   /* edit.blog.edit("0007") - or click a post in the panel/stream */
   api.blog.edit = function (id) {
+    /* A month page shows the post but cannot publish it. Rather than refuse,
+       the work moves to the page that can: the blog page opens the composer
+       on this post as it loads. */
+    if (onMonthPage()) {
+      location.href = "../" + BLOG_PAGE + "?edit=p" + id;
+      return "opening " + BLOG_PAGE + " on p" + id;
+    }
     if (!blogHere()) return BLOG_ELSEWHERE;
     return AMH.publish.edit(id);
   };
@@ -3320,6 +3613,12 @@
   api.blog.rebuild = function () {
     if (!blogHere()) return BLOG_ELSEWHERE;
     return AMH.publish.rebuild();
+  };
+  /* edit.blog.trace(true) prints a line for every read, splice and write of
+     the next publish. The wizard's own steps are printed either way. */
+  api.blog.trace = function (on) {
+    if (!AMH.publish || !AMH.publish.trace) return "the publish engine is not on this page";
+    return AMH.publish.trace(on);
   };
 
   api.help = function () {
@@ -3330,6 +3629,7 @@
       "edit.blog()       open the blog composer (publishes a zip bundle)\n" +
       "edit.blog.edit(id) edit a published post (also: panel/stream buttons)\n" +
       "edit.blog.rebuild() re-render all month files with current chrome\n" +
+      "edit.blog.trace(true) print every read, splice and write of the next publish\n" +
       "edit.before()     view page as published\n" +
       "edit.after()      view page with your edits\n" +
       "edit.revertAll()  discard every applied edit\n" +
