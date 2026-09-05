@@ -2215,13 +2215,26 @@ figure.bp-fig figcaption {
   background: var(--panel); color: var(--muted); font-size: .9rem;
   display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
 }
+/* THE POST EDIT CHIP. Solid yellow, black text, with a pencil at its left.
+
+   The editor puts two kinds of chip on a page and they do different jobs.
+   A copy chip is a small hollow BLUE circle and it edits one piece of text.
+   This one is a solid YELLOW pill and it opens the whole post. Filled
+   against hollow, and yellow against blue, so the two can be told apart at
+   a glance rather than by reading them. Yellow is the editor's own colour
+   for blog work, which the panel already uses. */
 .bs-retry {
-  padding: .3rem .8rem; border-radius: 999px; border: 1px solid var(--line);
-  background: var(--bg-deep); color: var(--text-soft);
-  font: 600 .74rem var(--font); cursor: pointer;
-  transition: border-color .2s, color .2s;
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .3rem .7rem; border-radius: 999px;
+  border: 1px solid var(--c-yellow); background: var(--c-yellow);
+  color: var(--bg-deep);
+  font: 700 .74rem var(--font); cursor: pointer;
+  transition: filter .2s var(--ease-soft), box-shadow .2s var(--ease-soft);
 }
-.bs-retry:hover { border-color: var(--accent); color: var(--text); }
+.bs-retry:hover { filter: brightness(1.08); box-shadow: 0 0 0 3px rgba(242,193,78,.28); }
+.bs-retry:focus-visible { outline: 2px solid var(--c-yellow); outline-offset: 2px; }
+/* the pencil takes its colour from the text, so it stays black on yellow */
+.bs-retry__i { width: 13px; height: 13px; flex: none; }
 
 /* MONTH FILES WRITTEN BEFORE V051 keep their own post markup until one
    rebuild gives them the design above. These rules go with that rebuild. */

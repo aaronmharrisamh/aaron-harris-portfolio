@@ -203,6 +203,14 @@
 
   /* Give one post its Edit button, if the editor is on and it has none. The
      editor exposes AMH.tool.editPost only while it is active. */
+  /* The mark on the post edit chip. Drawn once, here, and inlined into each
+     chip: an <img> would be a request per post, and the stroke has to be
+     currentColor so it stays black on the yellow ground. */
+  var BLOG_PENCIL =
+    '<svg class="bs-retry__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>';
+
   function blogEditButton(post) {
     if (!(AMH.tool && AMH.tool.editPost)) return;
     if (post.querySelector(".bs-retry")) return;
@@ -211,7 +219,11 @@
     var eb = doc.createElement("button");
     eb.type = "button";
     eb.className = "bs-retry";
-    eb.textContent = "Edit p" + id;
+    /* The pencil is decoration, so it is hidden from a screen reader and
+       carries no title: a title element would put words into textContent,
+       and the label is the button's only text. */
+    eb.innerHTML = BLOG_PENCIL;
+    eb.appendChild(doc.createTextNode("Edit p" + id));
     eb.addEventListener("click", function () { AMH.tool.editPost(id); });
     var by = post.querySelector(".bs-post__by") || post;
     by.appendChild(eb);
