@@ -123,6 +123,32 @@
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  /* WHERE A POST LIVES. Every post URL on the site comes from here.
+
+     A post lives in the month file its own date names, so the date is
+     the argument and not the month: a post appended from an older month
+     still points at the file that holds it.
+
+     `from` is the surface that asks. A page at the site root says "root"
+     and gets the blog/ step; a page in blog/ says "month" and does not.
+     `focus` asks for the reading view that shows that post alone.
+
+     The fragment stays on a focused URL. With no script the month is
+     still readable and the anchor still finds the post, so the address
+     degrades to the one the site has always used. */
+  function blogPostUrl(date, id, from, focus) {
+    var file = String(date).slice(0, 4) + ".html";
+    return (from === "month" ? "" : "blog/") + file +
+      (focus ? "?post=p" + id : "") + "#p" + id;
+  }
+  /* Which surface this page is. The stream sits at the site root and a
+     month file sits in blog/, so a post URL differs by one step and every
+     builder on the page has to ask. The stream container is the test,
+     because it exists in the markup before any of this runs. */
+  function blogSurface() {
+    return doc.getElementById("blogStream") ? "root" : "month";
+  }
+
   /* [img####,caption|alt] / [png####,caption|alt] - runs of adjacent tags
      (whitespace only between) become ONE unit. Returns HTML for a post body.
      mode "stream": tag runs -> .gallery markup (upgraded to carousels).
@@ -290,23 +316,37 @@
     return -1;
   }
   /* Hide from the cut and put the control there. Expand opens as far as
-     the hard cut and hands over to Read more; Read more opens the rest.
-     Everything revealed is below the button, so the post grows downward
-     and the page does not jump. */
-  function blogCutApply(blocks, from, kind, hardAt) {
+     the hard cut and hands over to Read more; Read more is a link to the
+     post's own page, where it is read whole. */
+  function blogCutApply(post, blocks, from, kind, hardAt) {
     var i;
     for (i = from; i < blocks.length; i++) blocks[i].hidden = true;
+    /* The hard cut is where a post stops being an item in a stream and
+       becomes something to read, so it is a link to the post's own page.
+       The soft cut is still an expansion, and stays a button. */
+    if (kind === "hard") {
+      var a = doc.createElement("a");
+      a.className = "bs-more";
+      a.setAttribute("data-more", "hard");
+      a.href = blogPostUrl(post.getAttribute("data-date") || "",
+                           post.getAttribute("data-id") || "", blogSurface(), true);
+      a.textContent = "Read more";
+      blocks[from].parentNode.insertBefore(a, blocks[from]);
+      return;
+    }
     var btn = doc.createElement("button");
     btn.type = "button";
     btn.className = "bs-more";
-    btn.setAttribute("data-more", kind);
-    btn.textContent = kind === "soft" ? "Expand for more" : "Read more";
+    btn.setAttribute("data-more", "soft");
+    btn.textContent = "Expand for more";
     blocks[from].parentNode.insertBefore(btn, blocks[from]);
     btn.addEventListener("click", function () {
-      var to = (kind === "soft" && hardAt !== -1) ? hardAt : blocks.length;
+      var to = hardAt !== -1 ? hardAt : blocks.length;
       for (var j = from; j < to; j++) blocks[j].hidden = false;
       if (btn.parentNode) btn.parentNode.removeChild(btn);
-      if (kind === "soft" && hardAt !== -1) blogCutApply(blocks, hardAt, "hard", -1);
+      /* everything revealed is below the control, so the post grows
+         downward and the page does not jump */
+      if (hardAt !== -1) blogCutApply(post, blocks, hardAt, "hard", -1);
       if (AMH.site) AMH.site.requestTick();
     });
   }
@@ -323,16 +363,23 @@
        two controls in a row would ask the reader to press twice for
        nothing */
     if (hard !== -1 && (soft === -1 || hard <= soft)) soft = -1;
-    if (soft !== -1) blogCutApply(blocks, soft, "soft", hard);
-    else if (hard !== -1) blogCutApply(blocks, hard, "hard", -1);
+    if (soft !== -1) blogCutApply(post, blocks, soft, "soft", hard);
+    else if (hard !== -1) blogCutApply(post, blocks, hard, "hard", -1);
     else return false;
     return true;
   }
-  /* Every post in the stream that has not been folded yet. The loader
-     calls this for each month it appends. */
-  function blogCutAll() {
+  /* Fold the posts that are not folded yet, and say how many.
+
+     `only` is the posts to consider, and the loader passes the ones it
+     appended. Without it this reads the whole page, and on a month page
+     blogPosts() answers with that month's own posts: folding those would
+     close the posts the reader is reading, to append an older month. */
+  function blogCutAll(only) {
+    /* A focused post is read whole, past both cut points. Nothing folds
+       while that view is on, whichever caller asks. */
+    if (doc.body && doc.body.classList.contains("is-focus")) return 0;
     var n = 0;
-    blogPosts().forEach(function (p) { if (blogCutPost(p)) n++; });
+    (only || blogPosts()).forEach(function (p) { if (blogCutPost(p)) n++; });
     return n;
   }
 
@@ -605,18 +652,16 @@
 
     if (/^p\d{4}$/.test(target)) {
       var id = target.slice(1);
-      var here = doc.getElementById("s" + id) || doc.getElementById(target);
-      if (here) {
-        blogPosts().forEach(function (p) { p.classList.toggle("is-target", p === here); });
-        here.scrollIntoView({ block: "start" });
-      } else {
-        var entry = null;
-        blogManifest.entries.forEach(function (e) { if (e.id === id) entry = e; });
-        /* the post is in a month this page does not carry: its own page is
-           where it lives, and a link is what works from disk */
-        if (entry) { location.href = "blog/" + entry.month + ".html#" + target; return; }
-        unknown = true;
-      }
+      var entry = null;
+      blogManifest.entries.forEach(function (e) { if (e.id === id) entry = e; });
+      /* A post has one address, and it is the reading view on its own
+         month page. "?b=" is the route the blog used before it had a
+         page, so it resolves to that address wherever the post lives.
+
+         replace, not assign: the old address is a hop and must not
+         become a stop on the way back. */
+      if (entry) { location.replace(blogPostUrl(entry.date, id, "root", true)); return; }
+      unknown = true;
     } else if (/^\d{4}$/.test(target)) {
       if (blogManifest.months.indexOf(target) === -1) unknown = true;
       else {
@@ -632,12 +677,140 @@
       n.textContent = "That post or month wasn't found - showing the latest instead.";
       blogStream.insertBefore(n, blogStream.firstChild);
     }
-    if (push) {
-      history.pushState(null, "", target ? "?b=" + target : location.pathname);
-    }
+    /* keep the state and every other parameter: this used to pass null
+       and rebuild from the path, which dropped both */
+    if (push) AMH.site.setUrl(AMH.site.paramUrl({ b: target || null }), true);
     blogEditButtons();
     if (AMH.tool && AMH.tool.viewChanged) AMH.tool.viewChanged();
     AMH.site.requestTick();
+  }
+
+  /* ---------------- one post on its own ----------------
+
+     "?post=pNNNN" on a month page reads that post alone. The month file
+     already holds every post whole, so this hides the others; it never
+     fetches, renders, or unfolds anything.
+
+     A month page is the only surface with this view. The stream sends a
+     reader to the month file, so there is one focused address for each
+     post and not two. */
+
+  /* The post the address asks for, or "" for ordinary browsing. */
+  function blogWantPost() {
+    var m = /[?&]post=p(\d{4})/.exec(location.search);
+    return m ? m[1] : "";
+  }
+  /* The article that id names, and only when this month holds it. An id
+     from another month must not empty the page or start a search. */
+  function blogFocusFind(id) {
+    var el = id ? doc.getElementById("p" + id) : null;
+    return el && el.classList.contains("bs-post") ? el : null;
+  }
+  /* The heading a focused post reads under: its own title, or its date
+     when it has none. An untitled post still needs a name here, because
+     this is the page's only h1. */
+  function blogFocusName(post) {
+    return post.getAttribute("data-title") ||
+      blogDateLabel(post.getAttribute("data-date") || "");
+  }
+  /* Show one post and hide the rest of the month.
+
+     Runs before the folding path, so nothing here has to undo a cut.
+     Safe to call twice: it sets state rather than toggling it, and it
+     replaces its own controls instead of adding a second one. */
+  function blogFocusApply() {
+    var id = blogWantPost();
+    if (!id) return false;
+    var main = doc.querySelector("main");
+    if (!main) return false;
+    var post = blogFocusFind(id);
+    if (!post) { blogFocusMiss(main); return false; }
+
+    doc.body.classList.add("is-focus");
+    blogPosts().forEach(function (p) { p.hidden = p !== post; });
+    /* the way to the month before this one belongs to the month view: a
+       reader here asked for one post, and appending to it would answer a
+       question they did not ask.
+
+       This reads the document and not main, because the older link is
+       main's sibling and not its child. */
+    Array.prototype.forEach.call(doc.querySelectorAll(".bm-older"),
+      function (el) { el.hidden = true; });
+
+    var name = blogFocusName(post);
+    var head = doc.querySelector(".bm-top__month");
+    if (head) head.textContent = name;
+    doc.title = blogFocusTitle(name);
+    blogFocusSelf(post);
+    blogFocusWayOut(post, id);
+    return true;
+  }
+  /* The post's own title and timestamp are links to this view. A link to
+     where the reader already is only adds a history entry that goes
+     nowhere, so in this view they are not links. */
+  function blogFocusSelf(post) {
+    var t = post.querySelector(".bs-post__title a");
+    if (t) {
+      var plain = doc.createElement("span");
+      plain.textContent = t.textContent;
+      t.parentNode.replaceChild(plain, t);
+    }
+    var when = post.querySelector("a.bs-post__when");
+    if (when) when.removeAttribute("href");
+  }
+  /* The tab title keeps the site's own shape and swaps the last part,
+     so a focused post reads like every other page of the site. */
+  function blogFocusTitle(name) {
+    var parts = String(doc.title).split(" · ");
+    parts[parts.length - 1] = name;
+    return parts.join(" · ");
+  }
+  /* The ways out of the focused view, written once and replaced on a
+     second call.
+
+     Back is offered only when this site sent the reader here in this tab.
+     A pasted address, a new tab, and a duplicated tab all get the month
+     link alone, because Back there would leave the site or do nothing.
+
+     Back describes the reader's path and the month link describes a
+     destination, so both can stand at once. */
+  function blogFocusWayOut(post, id) {
+    var top = doc.querySelector(".bm-top");
+    if (!top) return;
+    Array.prototype.forEach.call(top.querySelectorAll(".bm-top__out, .bm-top__back"),
+      function (el) { el.parentNode.removeChild(el); });
+    if (AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere()) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "textlink bm-top__back";
+      b.textContent = "Back";
+      /* traverse the entry that is already there. Navigating to a copy of
+         it would append a second entry and break Forward. */
+      b.addEventListener("click", function () { history.back(); });
+      top.appendChild(b);
+    }
+    var a = doc.createElement("a");
+    a.className = "textlink bm-top__out";
+    a.href = blogPostUrl(post.getAttribute("data-date") || "", id, "month", false);
+    a.textContent = "View the whole month";
+    top.appendChild(a);
+  }
+  /* A month file carries a boot style that hides the other posts before
+     this script runs, so the whole month never flashes past first. From
+     here the hidden property does that work, and a bad id needs the whole
+     month back, so the style goes either way. */
+  function blogFocusBoot() {
+    var s = doc.getElementById("postBoot");
+    if (s && s.parentNode) s.parentNode.removeChild(s);
+  }
+  /* An id this month does not hold. The month stays readable and says so,
+     because a blank page tells the reader nothing. */
+  function blogFocusMiss(main) {
+    if (main.querySelector(".bs-note--nopost")) return;
+    var n = doc.createElement("p");
+    n.className = "bs-note bs-note--nopost";
+    n.textContent = "That post isn't in this month - showing the whole month instead.";
+    main.insertBefore(n, main.firstChild);
   }
 
   /* ==========================================================
@@ -673,6 +846,10 @@
     var link = (stream || doc).querySelector(".bm-older[href]");
     if (link) link.addEventListener("click", blogChainClick);
     if (onMonth) {
+      /* the address is answered first, so the reader sees one post
+         rather than the whole month for a frame and then one post */
+      blogFocusApply();
+      blogFocusBoot();
       /* a month page has the same bar, the same pill and the same zoom;
          it has no stream, so its posts are under main */
       blogBarFill();
@@ -721,7 +898,7 @@
          stream that anchor is another page's, so it becomes the link to
          it, which is what every post in the stream carries. */
       var when = article.querySelector(".bs-post__when");
-      if (when && id && date) when.setAttribute("href", "blog/" + date.slice(0, 4) + ".html#p" + id);
+      if (when && id && date) when.setAttribute("href", blogPostUrl(date, id, "root", true));
       return article;
     }
     var time = article.getAttribute("data-time") || "";
@@ -741,7 +918,7 @@
     by.className = "bs-post__by";
     by.innerHTML = '<img class="bs-post__avatar" src="' + BLOG_AVATAR + '" alt="" />' +
       "<b></b>" +
-      '<a class="bs-post__when" href="blog/' + date.slice(0, 4) + ".html#p" + id + '">' +
+      '<a class="bs-post__when" href="' + blogPostUrl(date, id, "root", true) + '">' +
       '<time datetime="' + blogDateTime(date) +
       (time ? "T" + time.slice(0, 2) + ":" + time.slice(2) : "") + '"></time>' +
       (zone ? '<span class="bs-post__zone"></span>' : "") + "</a>";
@@ -813,10 +990,13 @@
         divider.textContent = label;
         here.appendChild(divider);
         var brand = blogChainBrand();
+        var added = [];
         Array.prototype.slice.call(main.children).forEach(function (node) {
           var el = doc.adoptNode(node);
-          here.appendChild(blogChainRoot && el.tagName === "ARTICLE"
-            ? blogChainPost(el, brand) : el);
+          var out = blogChainRoot && el.tagName === "ARTICLE"
+            ? blogChainPost(el, brand) : el;
+          here.appendChild(out);
+          if (out.classList && out.classList.contains("bs-post")) added.push(out);
         });
         /* the fetched page's own older link, or its end note, takes the
            clicked link's place */
@@ -835,11 +1015,13 @@
            one step. In the stream the address stays blog.html, because the
            page is still the stream and a refresh should return to its top. */
         if (!blogChainRoot) {
-          history.replaceState(null, "", href);
+          /* the address still follows the month reached, as above. Only
+             the state changes hands: null threw the visit away. */
+          AMH.site.setUrl(href, false);
           if (d.title) doc.title = d.title;
         }
         blogEditButtons();
-        blogCutAll();
+        blogCutAll(added);
         if (AMH.site) AMH.site.requestTick();
         return true;
       })
@@ -1141,8 +1323,7 @@
   }
   /* Where a post lives, from whichever surface is asking. */
   function findHref(post) {
-    var at = doc.getElementById("blogStream") ? "blog/" : "";
-    return at + post.date.slice(0, 4) + ".html#p" + post.id;
+    return blogPostUrl(post.date, post.id, blogSurface(), true);
   }
   function findHit(post, groups) {
     var a = doc.createElement("a");
@@ -1182,21 +1363,14 @@
     }
     pEl.appendChild(doc.createTextNode(pass.after));
     a.appendChild(pEl);
-    a.addEventListener("click", findGo);
     return a;
   }
-  /* A hit for a post that is already on this page is a scroll, not a
-     navigation. Anything else is the link it already is. */
-  function findGo(e) {
-    var id = e.currentTarget.getAttribute("data-id");
-    var here = doc.getElementById("s" + id) || doc.getElementById("p" + id);
-    if (!here) return;
-    e.preventDefault();
-    findClose();
-    blogPosts().forEach(function (post) { post.classList.toggle("is-target", post === here); });
-    here.classList.add("is-target");
-    here.scrollIntoView({ block: "start" });
-  }
+  /* A hit is the link it is, and nothing here answers the click.
+
+     It used to scroll instead when the post was already on the page,
+     which gave one post two destinations and, in the focused view,
+     scrolled to a post that was hidden. Every hit now opens the post's
+     own reading view, whether or not this page happens to carry it. */
   function findClose() {
     if (!findList) return;
     findList.hidden = true;
@@ -1252,9 +1426,7 @@
     blogTagRest(tag);
     /* the address carries the filter, so a copied link shows what the
        person is looking at */
-    try {
-      history.replaceState(null, "", tag ? "?t=" + encodeURIComponent(tag) : location.pathname);
-    } catch (err) {}
+    AMH.site.setUrl(AMH.site.paramUrl({ t: tag || null }), false);
     if (AMH.site) AMH.site.requestTick();
   }
   /* The line under the bar: what is on screen, and the way out of it. */
@@ -1372,10 +1544,19 @@
        encodeSource(s) / decodeSource(s) -> the escaped form stored in a
                                    month file's x-blog-source tag
        monthTitle(yymm) / dateLabel(yymmdd) / dateTime(yymmdd) -> display
+       postUrl(date, id, from, focus) -> where a post lives. `from` is
+                                  "root" or "month", and `focus` asks for
+                                  the address that reads it alone. Every
+                                  post URL the site writes comes from here.
+       focusApply()               -> read "?post=pNNNN" and show that post
+                                  alone. Month pages only, and true when a
+                                  post was selected. Safe to call twice.
        show(target, push)         -> answer a deep link
        editButtons()              -> add the Edit button to the posts
-       cut()                      -> fold every post in the stream that
-                                  is not folded yet, and say how many
+       cut(only)                  -> fold the posts that are not folded
+                                  yet, and say how many. `only` limits it
+                                  to a list, which the loader uses for the
+                                  posts it appended.
 
      AMH.search
        load()                     -> Promise of the packed index, read
@@ -1403,6 +1584,8 @@
     monthTitle: blogMonthTitle,
     dateLabel: blogDateLabel,
     dateTime: blogDateTime,
+    postUrl: blogPostUrl,
+    focusApply: blogFocusApply,
     show: blogShow,
     editButtons: blogEditButtons,
     cut: blogCutAll,

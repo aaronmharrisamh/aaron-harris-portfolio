@@ -2023,6 +2023,49 @@ ul.dd-points li::before {
 }
 .bm-top__stream { display: inline-block; margin-top: .5rem; font-size: .85rem; }
 
+/* ONE POST ON ITS OWN, from "?post=pNNNN" on a month page.
+
+   blog.js hides the other posts with the hidden property, so they leave
+   the keyboard and screen-reader order as well as the screen. Nothing
+   here hides a post: these rules only space the two ways out.
+
+   The month keeps its bar, its header, and its contact block. A reader
+   who wants the rest of the site must not have to press Back to find it. */
+.bm-top__out,
+.bm-top__back { display: inline-block; margin-top: .5rem; font-size: .85rem; }
+/* Back is a button, because it moves through history rather than pointing
+   at an address. It reads as the link beside it, so the row stays a row of
+   choices and not a button next to a link. */
+.bm-top__back {
+  background: none; border: 0; padding: 0; font: inherit; font-size: .85rem;
+  cursor: pointer;
+}
+/* The space goes on the right of each control, never on the left of the
+   next one. A left margin survives a wrap and indents the row it starts,
+   which at 390px read as a mistake. */
+.bm-top__back { margin-right: 1rem; }
+/* In this view the stream link is a third way out to a place the reader
+   did not ask about, and the month is the one that answers "where is
+   this post from". The nav still carries Blog. */
+.is-focus .bm-top__stream { display: none; }
+
+/* THIS VIEW OPENS AT THE TOP OF THE PAGE.
+
+   The address keeps its "#p0007" so the page still reads with no script,
+   which means the browser scrolls to that post. Here the post is the only
+   one shown, and everything the reader needs above it, the post title,
+   Back, View the whole month, the search box and the month picker, sits
+   in the first 330px. Scrolling to the post throws all of that away.
+
+   A scroll margin taller than any window makes the browser's own target
+   position negative, so it clamps to the top of the page. Nothing is
+   corrected after the fact and no script takes part, so there is no
+   movement for the reader to see. A load handler cannot do this job: the
+   browser scrolls to the fragment AFTER DOMContentLoaded, so a script
+   that moved the page at startup would be undone a moment later. */
+.is-focus main > .bs-post { scroll-margin-top: 100vh; }
+.is-focus .bm-top__month { font-size: clamp(1.35rem, 3.4vw, 1.8rem); }
+
 /* THE SEARCH PILL, in the bar's find slot, and the hits under it.
    The floor is what stops the pill collapsing: it is the only item in
    the bar that can give, so without a floor it shrank to an input 25px
@@ -2105,7 +2148,17 @@ ul.dd-points li::before {
    shows through softened rather than being covered. The gradient is
    almost nothing on purpose: enough to give the card a top and a bottom,
    not enough to read as a colour. */
+/* A POST IS A FRAGMENT TARGET. "#p0007" is how every shared link to a
+   post is written, so the browser scrolls a post to the top of the
+   window, which is under the fixed header. This is the clearance.
+
+   It reads the UNSCROLLED header height, for the reason .blog-wrap gives:
+   the header loses .6rem when it shrinks, and a clearance that followed
+   that would move the landing place mid-scroll. The 84px fallback is what
+   a page with no script uses, because nothing publishes the real height
+   there. */
 .bs-post {
+  scroll-margin-top: calc(var(--header-top, 84px) + .75rem);
   margin-block: clamp(.7rem, 2vw, 1rem);
   padding: clamp(1.1rem, 3vw, 1.6rem);
   border: 1px solid var(--line-soft);
@@ -2162,6 +2215,13 @@ a.bs-post__when:hover { color: var(--accent-bright); }
   margin: .9rem 0 0; font-size: clamp(1.1rem, 2vw, 1.35rem);
   font-weight: 800; letter-spacing: -.01em; line-height: 1.25; color: var(--text);
 }
+/* The title is the way into the post, so it is a link. It keeps the
+   heading's own color: a stream of link-blue headings would read as a
+   list of links rather than a page of posts. The underline on hover and
+   on keyboard focus is what says it can be followed. */
+.bs-post__title a { color: inherit; text-decoration: none; }
+.bs-post__title a:hover { text-decoration: underline; }
+.bs-post__title a:focus-visible { text-decoration: underline; outline: none; }
 .bs-post__body { margin-top: .7rem; color: var(--text-soft); line-height: 1.7; }
 .bs-post__body > * + * { margin-top: .9rem; }
 .bs-post__body h2, .bs-post__body h3, .bs-post__body h4 {
@@ -2214,6 +2274,10 @@ a.bs-post__when:hover { color: var(--accent-bright); }
   border: 1px solid var(--line); border-radius: 999px;
   font: 600 .78rem var(--font); cursor: pointer;
   transition: border-color .25s var(--ease), color .25s var(--ease);
+  /* Expand for more is a button and Read more is a link to the post's own
+     page. They are one control to the reader, so the pill covers both and
+     the link gives up its underline to match. */
+  text-decoration: none;
 }
 .bs-more:hover { border-color: var(--accent); }
 .bs-more::after { content: "\2193"; }
@@ -2225,6 +2289,10 @@ a.bs-post__when:hover { color: var(--accent-bright); }
    of a month would otherwise lack, because an appended month's first post
    is no longer the first child. */
 .bm-older { display: block; margin: 1.6rem 0 0; font-size: .88rem; }
+/* The display above beats the browser's own rule for [hidden], so the
+   focused view could set hidden on this link and still leave it on
+   screen. Any element that declares display needs this to stay hidable. */
+.bm-older[hidden] { display: none; }
 .bm-older[aria-busy="true"] { color: var(--dim); pointer-events: none; }
 .bm-older--end { color: var(--dim); }
 .bm-divider {

@@ -28,6 +28,19 @@
      AMH.publish  what window.edit.blog() calls. tool.js keeps the
                 console surface, so the names people type never move
                 when a file does.
+
+   ONE DEVIATION FROM THE CLASSIC SCRIPT TAG RULE.
+
+   bcMonthSkeleton writes one line of inline script into the head of
+   each month file. It is the only inline script this site produces.
+
+   The reason is the first paint. "?post=pNNNN" reads one post alone,
+   and blog.js is deferred, so an external file cannot hide the other
+   posts before they paint. The inline script names the wanted post in
+   a style rule, so the reader sees one post and never the whole month.
+
+   It stays small on purpose. It reads the address, writes one rule,
+   and stops. blog.js removes the rule and owns the view from there.
    ============================================================ */
 /* ==========================================================
    1. HEADER AND SETUP
@@ -2022,6 +2035,20 @@
       '  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n' +
       '  <link href="' + fontHref + '" rel="stylesheet" />\n' +
       '  <link rel="stylesheet" href="../site.css" />\n' +
+      /* THE ONLY INLINE SCRIPT THIS SITE WRITES. See the file header.
+
+         "?post=pNNNN" reads one post alone. blog.js is deferred, so
+         without this the reader sees the whole month for one frame and
+         then one post. This runs in the head, before main is parsed, so
+         the other posts never paint.
+
+         It names the wanted post in the rule rather than hiding them
+         all, so the right post is on screen even if blog.js never
+         arrives. blog.js removes this style and takes the work over. */
+      '  <script>(function(){var m=/[?&]post=p(\\d{4})/.exec(location.search);' +
+      'if(!m)return;var s=document.createElement("style");s.id="postBoot";' +
+      's.textContent="main>.bs-post:not(#p"+m[1]+"),.bm-older{display:none}";' +
+      'document.head.appendChild(s);})();</script>\n' +
       "</head>\n" +
       '<body class="blog-month">\n' +
       /* The site's own chrome, lifted whole from the managed page. A month
@@ -2031,7 +2058,7 @@
       "  " + meta.chrome.header + "\n" +
       "  " + meta.chrome.scrim + "\n\n" +
       '  <div class="blog-wrap">\n' +
-      /* The heading, which scrolls away, and then the bar, which sticks.
+      /* The heading, and then the bar. Both scroll with the page.
          blog.html has the same two above its stream, so a reader who
          lands here from a search engine sees the blog and not a plainer
          copy of it.
@@ -2236,8 +2263,8 @@
   function bcHighlights(entries) {
     var B = AMH.blog;
     var rows = entries.slice(-HL_COUNT).reverse().map(function (e) {
-      return '          <a class="latest__item" href="blog/' + e.date.slice(0, 4) +
-        ".html#p" + e.id + '">\n' +
+      return '          <a class="latest__item" href="' +
+        B.postUrl(e.date, e.id, "root", true) + '">\n' +
         '            <time datetime="' + B.dateTime(e.date) + '">' +
         B.dateLabel(e.date) + "</time>\n" +
         '            <span class="latest__title">' + TOOL.escAttr(e.title) + "</span>\n" +
@@ -2290,9 +2317,9 @@
      block written before this version. The suite compares the two. */
   var BC_WHERE = {
     stream: { id: "s", img: "", tag: "blog.html?t=",
-              when: function (p) { return "blog/" + p.date.slice(0, 4) + ".html#p" + p.id; } },
+              when: function (p) { return AMH.blog.postUrl(p.date, p.id, "root", true); } },
     month: { id: "p", img: "../", tag: "../blog.html?t=",
-             when: function (p) { return "#p" + p.id; } }
+             when: function (p) { return AMH.blog.postUrl(p.date, p.id, "month", true); } }
   };
   function bcPostMarkup(post, indent, brand, where, tail) {
     var B = AMH.blog;
@@ -2321,8 +2348,11 @@
       (post.zone ? '<span class="bs-post__zone">' + esc(post.zone) + "</span>" : "") +
       "</a>\n" +
       indent + "  </header>\n" +
-      (post.title ? indent + '  <h3 class="bs-post__title">' +
-        esc(post.title).replace(/&quot;/g, '"') + "</h3>\n" : "") +
+      /* the title is the way into the post's own reading view, on both
+         surfaces. where.when is that address, and it is the same one the
+         timestamp above carries. */
+      (post.title ? indent + '  <h3 class="bs-post__title"><a href="' + where.when(post) +
+        '">' + esc(post.title).replace(/&quot;/g, '"') + "</a></h3>\n" : "") +
       indent + '  <div class="bs-post__body">\n' + body + "\n" + indent + "  </div>\n" +
       (tags.length ? indent + '  <div class="bs-post__tags">' + tags.join(" ") + "</div>\n" : "") +
       (tail || "") +
@@ -2641,11 +2671,18 @@
     };
     var newest = posts.slice().reverse().slice(0, FEED_MAX);
     var entries = newest.map(function (e) {
-      var url = base + "blog/" + e.date.slice(0, 4) + ".html#p" + e.id;
+      /* THE ID IS THE POST'S IDENTITY AND NEVER CHANGES.
+
+         A feed reader decides what is new by this string. Move it and
+         every subscriber sees every post arrive again. So the id stays
+         the month address it has always been, and only the link follows
+         the reader to the post's own reading view. */
+      var entryId = base + "blog/" + e.date.slice(0, 4) + ".html#p" + e.id;
+      var url = base + AMH.blog.postUrl(e.date, e.id, "root", true);
       return "  <entry>\n" +
         "    <title>" + esc(titles[e.id] || e.title || "Post " + e.id) + "</title>\n" +
         '    <link href="' + esc(url) + '" />\n' +
-        "    <id>" + esc(url) + "</id>\n" +
+        "    <id>" + esc(entryId) + "</id>\n" +
         "    <updated>" + feedWhen(e) + "</updated>\n" +
         '    <summary type="text">' + esc(feedSummary(e.text)) + "</summary>\n" +
         "  </entry>";
@@ -3240,14 +3277,15 @@
           ". Extract the zip at the repo root. Review the diff." +
           (bcOrphans.length ? " Delete the files in ORPHANS.txt." : "") +
           " Commit and push. Then reload this page before you compose again.",
-          "[blog] post URL once live: " + meta.base + "blog/" + yymm + ".html#p" + id +
+          "[blog] post URL once live: " +
+          meta.base + AMH.blog.postUrl(date, id, "root", true) +
           (dateChanged && oldMonth !== yymm
             ? "\n[blog] note: links shared before the move still point at blog/" + oldMonth +
               ".html - re-share the new URL"
             : ""),
           { kind: "publish", edit: !!bcEditing, id: id, stamp: stamps.publish,
             route: p.route,
-            url: meta.base + "blog/" + yymm + ".html#p" + id });
+            url: meta.base + AMH.blog.postUrl(date, id, "root", true) });
       })
       .catch(function (err) {
         bcProg = null;
@@ -3671,7 +3709,9 @@
     bcArrive();
     var m = /[?&]edit=p(\d{4})/.exec(location.search);
     if (!m) return;
-    history.replaceState(null, "", location.pathname + location.hash);
+    /* only the edit parameter goes. Rebuilding from the path took every
+       reader parameter with it, and null took the visit as well. */
+    AMH.site.setUrl(AMH.site.paramUrl({ edit: null }), false);
     if (!TOOL.editorOn()) window.edit();
     bcLoadPost(m[1]);
   }

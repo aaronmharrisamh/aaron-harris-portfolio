@@ -2959,7 +2959,8 @@ async function main() {
       '["blog/2607.html","feed.xml","robots.txt","search.js","sitemap.xml"]' &&
     /* Publish stays live now: the staging layer means the next bundle
        builds on this one rather than fighting it */
-    doneStep.added === 4 && /blog\/2607\.html#p0001$/.test(doneStep.url) &&
+    doneStep.added === 4 &&
+    /blog\/2607\.html\?post=p0001#p0001$/.test(doneStep.url) &&
     !doneStep.publishDisabled,
     JSON.stringify(doneStep).slice(0, 300));
   check("wizard: the seven rows each held for the minimum, so the steps could be read",
@@ -3050,8 +3051,8 @@ async function main() {
     const srcHome = readFileSync(join(REPO, "index.html"), "utf-8");
     const hlSpan = outHome.slice(outHome.indexOf("<!--[edit:blog-highlights]-->"),
       outHome.indexOf("<!--[/edit:blog-highlights]-->"));
-    check("highlights: the published post is listed, linked at its month file",
-      hlSpan.includes('href="blog/2607.html#p0001"') &&
+    check("highlights: the published post is listed, linked at its reading view",
+      hlSpan.includes('href="blog/2607.html?post=p0001#p0001"') &&
       hlSpan.includes("E2E first post") &&
       hlSpan.includes('<time datetime="2026-07-11">July 11, 2026</time>'),
       hlSpan.replace(/\s+/g, " ").slice(0, 150));
@@ -3169,13 +3170,21 @@ async function main() {
       feed.includes("<id>https://aaronmichaelharris.com/feed.xml</id>"),
       feed.slice(0, 240).replace(/\n/g, " "));
     const entry = (/<entry>[\s\S]*?<\/entry>/.exec(feed) || [""])[0];
-    check("feed: the entry's id and link are the post's own anchor, with the title and a summary",
+    // THE ID IS THE POST'S IDENTITY AND MUST NOT MOVE. A feed reader
+    // decides what is new by that string, so changing it would show every
+    // subscriber every post again. The link followed the reader to the
+    // reading view; the id stayed the month anchor it has always been.
+    check("feed: the entry keeps its month anchor as its permanent id",
       (feed.match(/<entry>/g) || []).length === 1 &&
       entry.includes("<title>E2E first post</title>") &&
-      entry.includes('<link href="https://aaronmichaelharris.com/blog/2607.html#p0001" />') &&
       entry.includes("<id>https://aaronmichaelharris.com/blog/2607.html#p0001</id>") &&
       /<summary type="text">First e2e post/.test(entry),
       entry.replace(/\n/g, " ").slice(0, 220));
+    check("feed: the entry's link is the reading view, and is not its id",
+      entry.includes('<link href="https://aaronmichaelharris.com/blog/2607.html?post=p0001#p0001" />') &&
+      (/<link href="([^"]+)"/.exec(entry) || [])[1] !== (/<id>([^<]+)<\/id>/.exec(entry) || [])[1],
+      JSON.stringify({ link: (/<link href="([^"]+)"/.exec(entry) || [])[1],
+                       id: (/<id>([^<]+)<\/id>/.exec(entry) || [])[1] }));
     check("feed: the entry's time is the post's own, at the zone it names",
       /<updated>2026-07-11T\d\d:\d\d:00-0[45]:00<\/updated>/.test(entry),
       (entry.match(/<updated>[^<]*/) || [""])[0]);
@@ -3225,8 +3234,8 @@ async function main() {
       /<article class="bs-post" id="s0001" data-id="0001" data-date="260711"/.test(streamSpan) &&
       /<img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent\.png" alt="" \/>/.test(streamSpan) &&
       streamSpan.includes("<b>AARON M. HARRIS</b>") &&
-      /<a class="bs-post__when" href="blog\/2607\.html#p0001"><time datetime="2026-07-11T\d\d:\d\d">July 11, 2026 · \d{1,2}:\d\d [ap]m<\/time><span class="bs-post__zone">[^<]+<\/span><\/a>/.test(streamSpan) &&
-      /<h3 class="bs-post__title">E2E first post<\/h3>/.test(streamSpan),
+      /<a class="bs-post__when" href="blog\/2607\.html\?post=p0001#p0001"><time datetime="2026-07-11T\d\d:\d\d">July 11, 2026 · \d{1,2}:\d\d [ap]m<\/time><span class="bs-post__zone">[^<]+<\/span><\/a>/.test(streamSpan) &&
+      /<h3 class="bs-post__title"><a href="blog\/2607\.html\?post=p0001#p0001">E2E first post<\/a><\/h3>/.test(streamSpan),
       streamSpan.replace(/\s+/g, " ").slice(0, 260));
     check("stream: the body is the whole post, with root paths and no source block",
       streamSpan.includes('<div class="bs-post__body">') &&
@@ -3246,6 +3255,23 @@ async function main() {
       month.includes('name="twitter:card"') && month.includes("fonts.googleapis.com") &&
       month.includes('href="../site.css"'),
       month.length + " chars");
+    // The one inline script this site writes. It hides the other posts
+    // before they paint, and it names the wanted post rather than hiding
+    // them all, so a reader whose blog.js never arrives still sees the
+    // post they asked for. blog.js removes the style and takes over.
+    check("month file: the focus boot script names the wanted post",
+      month.includes('var m=/[?&]post=p(\\d{4})/.exec(location.search)') &&
+      month.includes('s.id="postBoot"') &&
+      month.includes('main>.bs-post:not(#p"+m[1]+"),.bm-older{display:none}') &&
+      month.indexOf("postBoot") < month.indexOf("</head>"),
+      (month.match(/<script>\(function[^\n]*/) || [""])[0].slice(0, 120));
+    // The month surface carries the same address one step shorter, because
+    // it is already in blog/. Both come from the one URL builder.
+    check("month file: the title and the timestamp link to the reading view",
+      month.includes('<a class="bs-post__when" href="2607.html?post=p0001#p0001">') &&
+      month.includes('<h3 class="bs-post__title"><a href="2607.html?post=p0001#p0001">') &&
+      !month.includes('href="blog/2607.html'),
+      (month.match(/<h3 class="bs-post__title">[^\n]*/) || [""])[0].slice(0, 120));
     check("x-blog-source round-trips exactly",
       decoded.includes("[img0001,Cap one|Alt one][png0002,Cap two]") &&
       decoded.includes("Escape probe: &lt;/scr" + "ipt&gt; as text"),
@@ -3368,7 +3394,7 @@ async function main() {
       barHTML.replace(/\s+/g, " ").slice(0, 160));
     check("month page: the posts are the stream's markup with p ids, and keep their source",
       /<article class="bs-post" id="p0001" data-id="0001" data-date="260711"/.test(month) &&
-      month.includes('<a class="bs-post__when" href="#p0001">') &&
+      month.includes('<a class="bs-post__when" href="2607.html?post=p0001#p0001">') &&
       month.includes('<img class="bs-post__avatar" src="../aaron-portfolio-portrait-transparent.png"') &&
       month.includes('<div class="bs-post__body">') && month.includes('data-format="md"') &&
       !/class="blog-post"/.test(month),
@@ -3477,7 +3503,7 @@ async function main() {
     })`);
     check("bundle: the stream carries the published post in full, images and all",
       stream.posts === 1 && stream.post && stream.title === "E2E first post" &&
-      stream.when === "blog/2607.html#p0001" && stream.figs === 2 && stream.imgOk &&
+      stream.when === "blog/2607.html?post=p0001#p0001" && stream.figs === 2 && stream.imgOk &&
       /Tail paragraph with bold/.test(stream.body) && stream.fetches === 0,
       JSON.stringify(stream).slice(0, 240));
     // FN1. the grammar, every case in tools/e2e/fixtures/queries.txt run
@@ -3588,23 +3614,33 @@ async function main() {
       pill.placeholder === "Search posts, tags, captions" && pill.role === "listbox",
       JSON.stringify(pill).slice(0, 200));
     check("find: typing opens the list with the count, the post, its date and the marked hit",
-      pill.open && pill.count === "1 post" && pill.href === "blog/2607.html#p0001" &&
+      pill.open && pill.count === "1 post" && pill.href === "blog/2607.html?post=p0001#p0001" &&
       pill.title === "E2E first post" && /July 11, 2026/.test(pill.date) &&
       pill.thumb === "IMG" && pill.mark === "e2e",
       JSON.stringify(pill).slice(0, 240));
 
-    // FN4. a hit for a post that is on this page scrolls to it; Escape
-    // and a click outside close the list
+    // FN4. a hit is the link it is, even for a post already on this page.
+    // It used to scroll instead, which gave one post two destinations and,
+    // in the focused view, scrolled to a post that was hidden. Escape and
+    // a click outside still close the list.
     const click = await evaluate(`(function () {
       var list = document.querySelector('.bs-find__list');
       var input = document.querySelector('.bs-find__pill input');
       var hit = list.querySelector('.bs-find__hit');
+      /* read the click at the link, where every real listener has run,
+         then stop the navigation at the document so the harness keeps its
+         page. The site's own handlers have already had their answer. */
+      var seen = null;
+      hit.addEventListener('click', function (e) { seen = e.defaultPrevented; });
+      function stop(e) { e.preventDefault(); }
+      document.addEventListener('click', stop);
       var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       hit.dispatchEvent(ev);
+      document.removeEventListener('click', stop);
+      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
       return new Promise(function (res) { setTimeout(function () {
-        var out = { prevented: ev.defaultPrevented, closed: list.hidden,
-                    path: location.pathname,
-                    target: !!document.querySelector('.bs-post.is-target#s0001') };
+        var out = { prevented: seen, href: hit.getAttribute('href'),
+                    closed: list.hidden, path: location.pathname };
         /* and the two ways it closes */
         input.value = 'e2e'; input.dispatchEvent(new Event('input', { bubbles: true }));
         setTimeout(function () {
@@ -3620,8 +3656,9 @@ async function main() {
         }, 400);
       }, 400); });
     })()`, { awaitPromise: true });
-    check("find: a hit for a post on this page scrolls to it rather than leaving",
-      click.prevented && click.closed && /blog\.html$/.test(click.path) && click.target,
+    check("find: a hit is a link to the post's reading view, and nothing answers the click",
+      click.prevented === false && click.href === "blog/2607.html?post=p0001#p0001" &&
+      /blog\.html$/.test(click.path),
       JSON.stringify(click).slice(0, 200));
     check("find: Escape closes the list, and so does a click outside it",
       click.reopened && click.escaped && click.outside, JSON.stringify(click).slice(0, 200));
@@ -3635,14 +3672,24 @@ async function main() {
         function press(k) { input.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); }
         press('ArrowDown');
         var at = list.querySelectorAll('.bs-find__hit.is-at').length;
+        /* Enter activates the hit the arrows are on, and that hit is a
+           link now. Watch it open, and stop the navigation as above. */
+        var hit = list.querySelector('.bs-find__hit.is-at');
+        var opened = null;
+        hit.addEventListener('click', function () { opened = hit.getAttribute('href'); });
+        function stop(e) { e.preventDefault(); }
+        document.addEventListener('click', stop);
         press('Enter');
+        document.removeEventListener('click', stop);
+        try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
         setTimeout(function () {
-          res({ at: at, closed: list.hidden, target: !!document.querySelector('.is-target#s0001') });
+          res({ at: at, opened: opened });
         }, 300);
       }, 400); });
     })()`, { awaitPromise: true });
     check("find: the arrows move through the hits and Enter opens the one they are on",
-      keys.at === 1 && keys.closed && keys.target, JSON.stringify(keys));
+      keys.at === 1 && keys.opened === "blog/2607.html?post=p0001#p0001",
+      JSON.stringify(keys));
 
     // SR2. the loader: nothing is fetched until something asks, then the
     // script tag brings the index in and it is unpacked once
@@ -3672,13 +3719,22 @@ async function main() {
       JSON.stringify(loaded.tags) === "[]",
       JSON.stringify(loaded).slice(0, 200));
 
+    // "?b=" was the blog's route before it had a page of its own. A post
+    // has one address now, so the old route resolves to it and replaces
+    // itself, rather than becoming a stop on the way back.
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=p0001" });
-    await sleep(2200);
-    check("bundle: ?b=p0001 deep link lands on the post in the stream",
-      await evaluate(`!!document.querySelector('.bs-post.is-target#s0001')`));
-    const postCanon = await evaluate(`document.querySelector('link[rel="canonical"]').getAttribute('href')`);
-    check("bundle: the blog page stays canonical for itself",
-      /\/blog\.html$/.test(postCanon), postCanon);
+    await sleep(2600);
+    const legacy = await evaluate(`({
+      href: location.href,
+      shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).map(p => p.id),
+      canon: (function (el) { return el ? el.getAttribute('href') : ''; })(
+        document.querySelector('link[rel="canonical"]'))
+    })`);
+    check("bundle: the legacy ?b=p0001 route resolves to the post's reading view",
+      /\/blog\/2607\.html\?post=p0001#p0001$/.test(legacy.href) &&
+      JSON.stringify(legacy.shown) === '["p0001"]', JSON.stringify(legacy));
+    check("bundle: a month page stays canonical for its own month",
+      /\/blog\/2607\.html$/.test(legacy.canon), legacy.canon);
 
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html?b=p9999" });
     await sleep(2200);
@@ -3855,14 +3911,31 @@ async function main() {
                rows: rows,
                input: input ? Math.round(input.getBoundingClientRect().width) : 0 };
     })()`;
+    // The bar is static markup on both pages, so it is there as soon as the
+    // document is parsed. Waiting for it waits for the navigation itself.
+    // A fixed delay only guesses: at 768 the guess ran out, COLUMN read a
+    // document still on its way, and a null bar took the harness down.
+    async function barReady() {
+      for (let i = 0; i < 60; i++) {
+        try {
+          if (await evaluate(`document.readyState === "complete" &&` +
+                             ` !!document.getElementById('blogBar')`)) {
+            await sleep(200);          // one frame to settle before measuring
+            return true;
+          }
+        } catch { /* mid-navigation: ask again */ }
+        await sleep(150);
+      }
+      return false;
+    }
     for (const [w, mobile] of [[1280, false], [768, false], [390, true]]) {
       await send("Emulation.setDeviceMetricsOverride",
         { width: w, height: 900, deviceScaleFactor: 1, mobile });
       await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
-      await sleep(1500);
+      await barReady();
       const onStream = await evaluate(COLUMN);
       await send("Page.navigate", { url: "http://127.0.0.1:8124/blog/2607.html" });
-      await sleep(1500);
+      await barReady();
       const onMonth = await evaluate(COLUMN);
       check("month page @" + w + ": a post is the same width as it is in the stream",
         Math.abs(onStream.post - onMonth.post) <= 1,
@@ -4075,7 +4148,7 @@ async function main() {
       }, 1200); });
     })()`, { awaitPromise: true });
     check("month page: the pill is there too, and its hits are sibling month files",
-      monthFind.pill && monthFind.open && monthFind.href === "2607.html#p0001",
+      monthFind.pill && monthFind.open && monthFind.href === "2607.html?post=p0001#p0001",
       JSON.stringify(monthFind));
     check("month page: an image zooms there too, and Escape closes the viewer",
       monthPage.cursor === "zoom-in" && monthPage.zoomed && monthPage.closed,
@@ -4113,6 +4186,21 @@ async function main() {
       /\/blog\/2606\.html$/.test(walked.path) && /June 2026/.test(walked.title) && walked.focused === "bm-divider" &&
       walked.dividerBorder === "1px" && walked.firstAppended === "1px",
       JSON.stringify(walked).slice(0, 240));
+    // CH2b. the append folds what it appended and nothing else. blogPosts()
+    // answers with the whole page on a month page, which has no stream, so
+    // an unscoped fold closed the posts the reader was already reading.
+    // data-folded is the proof: blogCutPost stamps every post it considers,
+    // whether or not that post turns out to need a cut.
+    const folds = await evaluate(`({
+      own: (document.getElementById('p0001') || {}).getAttribute
+        ? document.getElementById('p0001').getAttribute('data-folded') : 'no post',
+      added: (document.getElementById('p0002') || {}).getAttribute
+        ? document.getElementById('p0002').getAttribute('data-folded') : 'no post',
+      ownMore: document.querySelectorAll('#p0001 .bs-more').length
+    })`);
+    check("chain: appending a month leaves the page's own posts open",
+      folds.own === null && folds.added === "1" && folds.ownMore === 0,
+      JSON.stringify(folds));
     // CH3. a month that cannot be loaded says so in the link's place and
     // stays a link; a second click while busy does nothing
     await send("Page.navigate", { url: B + "blog/2607.html" });
@@ -4249,7 +4337,10 @@ async function main() {
         var body = el.querySelector('.bs-post__body');
         var blocks = [].slice.call(body.children);
         var btn = body.querySelector('.bs-more');
-        var shown = blocks.filter(function (b) { return !b.hidden && b.tagName !== 'BUTTON'; });
+        /* by class, not by tag: Expand is a button and Read more is a
+           link, and neither is a block of the post's body */
+        var shown = blocks.filter(function (b) {
+          return !b.hidden && !(b.classList && b.classList.contains('bs-more')); });
         return {
           kind: btn ? btn.getAttribute('data-more') : '',
           label: btn ? btn.textContent : '',
@@ -4287,7 +4378,7 @@ async function main() {
     check("cuts: every folded post was counted once", cuts.folded === 7, String(cuts.folded));
 
     // CUT2. the reveal: Expand opens as far as the hard cut and hands over
-    // to Read more; Read more opens the rest; the buttons go with the press
+    // to Read more, which is a link away rather than a second press
     const reveal = await evaluate(`(function () {
       var stream = document.getElementById('blogStream');
       var a = document.createElement('article');
@@ -4307,24 +4398,31 @@ async function main() {
         var blocks = [].slice.call(body.children);
         var btn = body.querySelector('.bs-more');
         return { kind: btn ? btn.getAttribute('data-more') : '',
+                 tag: btn ? btn.tagName : '',
+                 href: btn ? btn.getAttribute('href') : null,
+                 text: btn ? btn.textContent : '',
                  shown: blocks.filter(function (b) { return !b.hidden && b.tagName === 'P'; }).length,
                  buttons: body.querySelectorAll('.bs-more').length };
       }
       var first = state();
       body.querySelector('.bs-more').click();
       var second = state();
-      body.querySelector('.bs-more').click();
-      var third = state();
       a.remove();
-      return { first: first, second: second, third: third };
+      return { first: first, second: second };
     })()`);
-    check("cuts: Expand opens as far as the hard cut and hands over to Read more",
-      reveal.first.kind === "soft" && reveal.first.shown === 4 &&
-      reveal.second.kind === "hard" && reveal.second.shown === 40 && reveal.second.buttons === 1,
-      JSON.stringify(reveal).slice(0, 200));
-    check("cuts: Read more opens the rest and the last button goes with it",
-      reveal.third.kind === "" && reveal.third.shown === 70 && reveal.third.buttons === 0,
-      JSON.stringify(reveal.third));
+    check("cuts: Expand is a button, and opens as far as the hard cut in place",
+      reveal.first.kind === "soft" && reveal.first.tag === "BUTTON" &&
+      reveal.first.text === "Expand for more" && reveal.first.shown === 4 &&
+      reveal.second.shown === 40 && reveal.second.buttons === 1,
+      JSON.stringify(reveal).slice(0, 240));
+    // Read more no longer opens the rest in place. Past the hard cut a post
+    // stops being an item in a stream, so the control is a link to the
+    // post's own reading view and the check reads where it points.
+    check("cuts: Read more is a link to the post's own reading view",
+      reveal.second.kind === "hard" && reveal.second.tag === "A" &&
+      reveal.second.text === "Read more" &&
+      reveal.second.href === "blog/2607.html?post=p9009#p9009",
+      JSON.stringify(reveal.second));
 
     // ZM1. a click on any image in a post opens the shared viewer at that
     // image, and the set is that post's own images in order
@@ -4512,7 +4610,7 @@ async function main() {
       JSON.stringify(walkedRoot.posts) === '["s0001","s0002"]' &&
       walkedRoot.shapes.every((c) => c === "bs-post") && walkedRoot.old === 0 &&
       walkedRoot.divider === "June 2026" && walkedRoot.byline === "AARON M. HARRIS" &&
-      walkedRoot.when === "blog/2606.html#p0002" && walkedRoot.title === "June post",
+      walkedRoot.when === "blog/2606.html?post=p0002#p0002" && walkedRoot.title === "June post",
       JSON.stringify(walkedRoot).slice(0, 260));
     check("P2: it rewrites the paths and the ids, keeps no source, and stays on blog.html",
       walkedRoot.up === 0 && walkedRoot.sources === 0 && walkedRoot.end &&
@@ -4623,6 +4721,285 @@ async function main() {
       rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
 
+    // P2-4b. ONE POST ON ITS OWN. June now holds two posts, so this is the
+    // first place the suite can prove that a focused view hides a sibling.
+    // The month file already carries both posts whole: the view hides one,
+    // and it never fetches, renders, or unfolds anything.
+    await send("Page.navigate", { url: B + "blog/2606.html?post=p0001" });
+    await sleep(1800);
+    const solo = await evaluate(`({
+      shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).map(p => p.id),
+      hid: [...document.querySelectorAll('main .bs-post')].filter(p => p.hidden).map(p => p.id),
+      olderHidden: !!(document.querySelector('.bm-older') || {}).hidden,
+      /* the property is not the answer: .bm-older declares display, which
+         beats the browser's own rule for [hidden]. Ask what is painted. */
+      olderShown: (function (el) {
+        return el ? getComputedStyle(el).display !== "none" : null;
+      })(document.querySelector('.bm-older')),
+      postsShown: [...document.querySelectorAll('main .bs-post')]
+        .filter(p => getComputedStyle(p).display !== "none").map(p => p.id),
+      heading: (document.querySelector('.bm-top__month') || {}).textContent,
+      title: document.title,
+      out: (document.querySelector('.bm-top__out') || {}).getAttribute
+        ? document.querySelector('.bm-top__out').getAttribute('href') : null,
+      boot: !!document.getElementById('postBoot'),
+      bar: !!document.getElementById('blogBar'),
+      find: !!document.getElementById('blogFind'),
+      picker: !!document.getElementById('blogMonth'),
+      contact: !!document.getElementById('contact'),
+      focusCls: document.body.classList.contains('is-focus'),
+    })`);
+    check("focus: ?post= shows that post alone and hides the rest of the month",
+      JSON.stringify(solo.shown) === '["p0001"]' && JSON.stringify(solo.hid) === '["p0002"]' &&
+      JSON.stringify(solo.postsShown) === '["p0001"]' &&
+      solo.olderHidden && solo.olderShown === false && solo.focusCls,
+      JSON.stringify(solo).slice(0, 240));
+    check("focus: the post names the heading and the tab, and the boot style is gone",
+      solo.heading === "Moved post" && /Moved post$/.test(solo.title) && !solo.boot,
+      JSON.stringify({ heading: solo.heading, title: solo.title, boot: solo.boot }));
+    // the way out, and the reason the site's own chrome is not hidden with
+    // the siblings: a reader who lands here from a link needs the rest of
+    // the site without pressing Back
+    check("focus: the way out is there, and so are the bar and the contact block",
+      solo.out === "2606.html#p0001" && solo.bar && solo.find && solo.picker && solo.contact,
+      JSON.stringify({ out: solo.out, bar: solo.bar, contact: solo.contact }));
+
+    // applying the view twice must not add a second way out or restate a
+    // heading: it sets state rather than toggling it
+    const twice = await evaluate(`(function () {
+      AMH.blog.focusApply();
+      return { outs: document.querySelectorAll('.bm-top__out').length,
+               heading: document.querySelector('.bm-top__month').textContent,
+               title: document.title,
+               shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length };
+    })()`);
+    check("focus: applying the view twice gives the same one result",
+      twice.outs === 1 && twice.heading === "Moved post" && twice.shown === 1 &&
+      /Moved post$/.test(twice.title), JSON.stringify(twice));
+
+    // a focused post is read whole, past both cut points, whichever caller
+    // asks for a fold. The rule lives in the fold, not in the call order.
+    const noCut = await evaluate(`({
+      folded: AMH.blog.cut(),
+      more: document.querySelectorAll('main .bs-post .bs-more').length
+    })`);
+    check("focus: nothing folds while one post is being read",
+      noCut.folded === 0 && noCut.more === 0, JSON.stringify(noCut));
+
+    // A hit for a sibling post is on this page but hidden, so the scroll
+    // that serves the stream would strand the reader here. In focused mode
+    // the hit stays a link and takes them to the month.
+    const soloFind = await evaluate(`(function () {
+      var input = document.querySelector('.bs-find__pill input');
+      if (!input) return Promise.resolve({ pill: false });
+      input.focus();
+      return new Promise(function (res) { setTimeout(function () {
+        input.value = 'post'; input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(function () {
+          var hit = document.querySelector('.bs-find__hit');
+          if (!hit) return res({ pill: true, hit: false });
+          var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+          hit.dispatchEvent(ev);
+          res({ pill: true, hit: true, href: hit.getAttribute('href'),
+                stopped: ev.defaultPrevented });
+        }, 700);
+      }, 1200); });
+    })()`, { awaitPromise: true });
+    check("focus: a search hit stays a link, so search is a way out of the post",
+      soloFind.pill && soloFind.hit && soloFind.stopped === false &&
+      /^2606\.html\?post=p000\d#p000\d$/.test(soloFind.href), JSON.stringify(soloFind));
+
+    await send("Page.navigate", { url: B + "blog/2606.html?post=p0001" });
+    await sleep(1800);
+    const purl = await evaluate(`JSON.stringify([
+      AMH.blog.postUrl("260609", "0001", "root", false),
+      AMH.blog.postUrl("260609", "0001", "root", true),
+      AMH.blog.postUrl("260609", "0001", "month", false),
+      AMH.blog.postUrl("260609", "0001", "month", true)
+    ])`);
+    check("postUrl: one builder writes every post address, plain and focused",
+      purl === '["blog/2606.html#p0001","blog/2606.html?post=p0001#p0001",' +
+              '"2606.html#p0001","2606.html?post=p0001#p0001"]', purl);
+
+    await send("Page.navigate", { url: B + "blog/2606.html?post=p9999" });
+    await sleep(1800);
+    const miss = await evaluate(`({
+      shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length,
+      note: (document.querySelector('.bs-note--nopost') || {}).textContent || '',
+      boot: !!document.getElementById('postBoot'),
+      focusCls: document.body.classList.contains('is-focus'),
+    })`);
+    check("focus: an id this month does not hold shows the month and says so",
+      miss.shown === 2 && /isn't in this month/.test(miss.note) && !miss.boot && !miss.focusCls,
+      JSON.stringify(miss));
+
+    await send("Page.navigate", { url: B + "blog/2606.html#p0001" });
+    await sleep(1800);
+    const browse = await evaluate(`({
+      shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length,
+      out: !!document.querySelector('.bm-top__out'),
+      heading: (document.querySelector('.bm-top__month') || {}).textContent,
+      focusCls: document.body.classList.contains('is-focus'),
+      /* the focused view hides this one; ordinary browsing must not */
+      streamLink: (function (el) {
+        return el ? getComputedStyle(el).display !== "none" : false;
+      })(document.querySelector('.bm-top__stream')),
+    })`);
+    check("focus: a bare month address with an old anchor still browses the month",
+      browse.shown === 2 && !browse.out && !browse.focusCls &&
+      browse.heading === "June 2026" && browse.streamLink === true,
+      JSON.stringify(browse));
+
+    // P2-4d. WHERE THE READER LANDS. The address keeps its "#p0001" so the
+    // page reads with no script, which means the browser scrolls to that
+    // post. In this view that would throw away the post title, Back, the
+    // way out and the search bar, every one of which sits above it. A
+    // scroll margin taller than the window makes the browser's own target
+    // position negative, so it clamps to the top and nothing moves.
+    // A script cannot do this job: the browser scrolls to the fragment
+    // AFTER DOMContentLoaded, so a correction at startup would be undone.
+    await send("Emulation.setDeviceMetricsOverride",
+      { width: 1280, height: 700, deviceScaleFactor: 1, mobile: false });
+    await send("Page.navigate", { url: B + "blog/2606.html?post=p0001#p0001" });
+    await sleep(2600);
+    const landedTop = await evaluate(`(function () {
+      function top(s) { var e = document.querySelector(s);
+        return e ? Math.round(e.getBoundingClientRect().top) : null; }
+      var h = document.querySelector('.site-header');
+      return { scrollY: Math.round(window.scrollY),
+               headerH: h ? Math.round(h.getBoundingClientRect().height) : 0,
+               title: top('.bm-top__month'), out: top('.bm-top__out'),
+               bar: top('#blogBar'), post: top('main .bs-post:not([hidden])') };
+    })()`);
+    check("focus: the fragment does not scroll the view past its own controls",
+      landedTop.scrollY === 0 && landedTop.title > landedTop.headerH &&
+      landedTop.out > landedTop.headerH && landedTop.bar > landedTop.headerH &&
+      landedTop.post > landedTop.headerH, JSON.stringify(landedTop));
+
+    // an ordinary month anchor still goes to the post, and now stops clear
+    // of the fixed header instead of sliding under it
+    await send("Page.navigate", { url: B + "blog/2606.html#p0001" });
+    await sleep(2600);
+    const anchored = await evaluate(`(function () {
+      var p = document.getElementById('p0001');
+      var h = document.querySelector('.site-header');
+      return { targetTop: Math.round(p.getBoundingClientRect().top),
+               headerH: Math.round(h.getBoundingClientRect().height),
+               margin: getComputedStyle(p).scrollMarginTop,
+               focusCls: document.body.classList.contains('is-focus') };
+    })()`);
+    check("month: an old #pNNNN anchor goes to the post and clears the header",
+      !anchored.focusCls && anchored.margin !== "0px" &&
+      anchored.targetTop >= anchored.headerH, JSON.stringify(anchored));
+    await send("Emulation.clearDeviceMetricsOverride");
+
+    // P2-4c. THE WAY BACK. A post link is a real link, so the browser owns
+    // Back and the reader's place. The one thing it cannot tell the page is
+    // whether THIS site sent the reader, which is what decides between a
+    // Back control and a plain way out. The referrer cannot answer that, so
+    // the departure is recorded by the click that leaves.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2000);
+    const helpers = await evaluate(`(function () {
+      history.replaceState({ keep: 5 }, "", location.pathname + "?post=p0001&t=xr&edit=p0002");
+      var only = AMH.site.paramUrl({ edit: null });
+      AMH.site.setUrl(only, false);
+      return { only: only, state: JSON.stringify(history.state), href: location.search };
+    })()`);
+    check("address: paramUrl drops one parameter and keeps the rest, state intact",
+      /[?&]post=p0001/.test(helpers.only) && /[?&]t=xr/.test(helpers.only) &&
+      !/[?&]edit=/.test(helpers.only) && helpers.state === '{"keep":5}' &&
+      !/[?&]edit=/.test(helpers.href), JSON.stringify(helpers));
+
+    // a plain left click on a post link is a departure; every other way of
+    // opening a link leaves this tab where it is, so none of them is
+    const PLANT = (extra) => `(function () {
+      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+      var a = document.createElement('a');
+      a.className = 'probeLink';
+      a.href = AMH.blog.postUrl('260609', '0001', 'root', true);
+      ${extra.target ? `a.target = '${extra.target}';` : ""}
+      ${extra.swallow ? `a.addEventListener('click', function (e) { e.preventDefault(); });` : ""}
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true,
+        button: ${extra.button || 0}, ctrlKey: ${!!extra.ctrl}, shiftKey: ${!!extra.shift},
+        metaKey: ${!!extra.meta} }));
+      var t = null; try { t = sessionStorage.getItem('amh:hop'); } catch (e) { t = 'refused'; }
+      return t;
+    })()`;
+    const guards = {};
+    for (const [name, opts] of [["ctrl", { ctrl: true }], ["middle", { button: 1 }],
+                                ["shift", { shift: true }], ["blank", { target: "_blank" }],
+                                ["answered", { swallow: true }]]) {
+      await send("Page.navigate", { url: B + "blog.html" });
+      await sleep(1800);
+      guards[name] = await evaluate(PLANT(opts));
+    }
+    check("back: a modified click, a new tab, and an answered click are not departures",
+      Object.keys(guards).every((k) => guards[k] === null), JSON.stringify(guards));
+
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2000);
+    const wrote = await evaluate(PLANT({}));
+    await sleep(2200);
+    const landed = await evaluate(`({
+      back: !!document.querySelector('.bm-top__back'),
+      out: !!document.querySelector('.bm-top__out'),
+      href: location.href, len: history.length,
+      state: JSON.stringify(history.state),
+      token: (function () { try { return sessionStorage.getItem('amh:hop'); } catch (e) { return 'refused'; } })()
+    })`);
+    check("back: a real departure offers Back beside the month link, and spends the token",
+      !!wrote && landed.back && landed.out && /\?post=p0001/.test(landed.href) &&
+      landed.token === null && landed.state === '{"amhBack":1}',
+      JSON.stringify({ wrote: !!wrote, ...landed }));
+
+    // Back must traverse the entry that is already there. Navigating to a
+    // copy of it would append a second entry and break Forward.
+    await evaluate(`document.querySelector('.bm-top__back').click()`);
+    await sleep(2200);
+    const wentBack = await evaluate(`({ href: location.href, len: history.length })`);
+    check("back: Back returns to the stream and adds no history entry",
+      /blog\.html$/.test(wentBack.href) && wentBack.len === landed.len,
+      JSON.stringify({ ...wentBack, was: landed.len }));
+
+    await send("Page.navigate", { url: B + "blog/2606.html?post=p0001" });
+    await sleep(1800);
+    const pasted = await evaluate(`({
+      back: !!document.querySelector('.bm-top__back'),
+      out: !!document.querySelector('.bm-top__out')
+    })`);
+    check("back: a pasted address gets the month link and no Back",
+      pasted.back === false && pasted.out === true, JSON.stringify(pasted));
+
+    // the reader reaching for the site's own nav must not lose the post
+    const navKept = await evaluate(`(function () {
+      history.replaceState({ keep: 9 }, "", location.href);
+      var a = document.querySelector('#nav a[href="#contact"]');
+      if (a) a.click();
+      return new Promise(function (res) { setTimeout(function () {
+        res({ href: location.href, state: JSON.stringify(history.state) });
+      }, 500); });
+    })()`, { awaitPromise: true });
+    check("address: the Contact nav link keeps the post and the visit",
+      /\?post=p0001/.test(navKept.href) && /#contact$/.test(navKept.href) &&
+      navKept.state === '{"keep":9}', JSON.stringify(navKept));
+
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2000);
+    const tagKept = await evaluate(`(function () {
+      history.replaceState({ keep: 3 }, "", location.pathname + "?post=p0001");
+      AMH.blog.filterTag('notes');
+      var on = { href: location.href, state: JSON.stringify(history.state) };
+      AMH.blog.filterTag('');
+      return { on: on, off: { href: location.href, state: JSON.stringify(history.state) } };
+    })()`);
+    check("address: a tag filter and its clear keep other parameters and the visit",
+      /post=p0001/.test(tagKept.on.href) && /[?&]t=notes/.test(tagKept.on.href) &&
+      /post=p0001/.test(tagKept.off.href) && !/[?&]t=/.test(tagKept.off.href) &&
+      tagKept.on.state === '{"keep":3}' && tagKept.off.state === '{"keep":3}',
+      JSON.stringify(tagKept));
+
     // P2-5. stream after the move: one month, two posts, edit buttons in editor mode
     await send("Page.navigate", { url: B + "blog.html" });
     await sleep(2200);
@@ -4639,7 +5016,7 @@ async function main() {
     check("P2: after the move the stream is the one June month, both posts relinked",
       JSON.stringify(after4.posts) === '["s0002","s0001"]' &&
       after4.title === "Moved post" && after4.editBtns === 2 && after4.end &&
-      after4.when.every(h => h.indexOf("blog/2606.html#") === 0),
+      after4.when.every(h => h.indexOf("blog/2606.html?post=p") === 0),
       JSON.stringify(after4));
 
     // P2-6. delete a post (keeps the month, which still has p0001)
@@ -4728,7 +5105,8 @@ async function main() {
       const mo8 = zip8["blog/2606.html"].toString("utf8");
       const ms8 = (/GENERATED[^>]*stamp:([0-9a-z]{6})/.exec(mo8) || [])[1];
       check("rebuild: the rebuilt month file carries the title and a month stamp the manifest repeats",
-        mo8.includes('<h3 class="bs-post__title">Hand title</h3>') && !!ms8 && man8.includes("month:2606=" + ms8),
+        mo8.includes('<h3 class="bs-post__title"><a href="2606.html?post=p0001#p0001">Hand title</a></h3>') &&
+        !!ms8 && man8.includes("month:2606=" + ms8),
         "stamp " + ms8);
       writeBundle(zip8);
     }
@@ -4814,7 +5192,7 @@ async function main() {
     const blk10 = (/<article class="bs-post" id="p0001"[\s\S]*?<\/article>/.exec(mo10) || [])[0] || "";
     check("HTML mode: it republishes as html, with the body, the title and the source unchanged",
       /data-format="html"/.test(blk10) && blk10.includes("EDITED BODY") && blk10.includes('data-title="Hand title"') &&
-      blk10.includes('<h3 class="bs-post__title">Hand title</h3>') &&
+      blk10.includes('<h3 class="bs-post__title"><a href="2606.html?post=p0001#p0001">Hand title</a></h3>') &&
       blk10.includes("[img0001,Cap one|Alt one][png0002,Cap two]"),
       blk10.slice(0, 220).replace(/\s+/g, " ") || "no block");
     if (zip10) writeBundle(zip10);
@@ -5222,7 +5600,11 @@ async function main() {
     await sleep(400);
     await pressRoute("Write into my repo folder");
     let refused = null;
-    for (let i = 0; i < 40 && !(refused && refused.step === "done"); i++) {
+    /* Wait for what the check reads, not for a proxy of it. The fallback
+       zip is written by a different path from the one that moves the
+       wizard, so it can land just after the step turns to "done". Waiting
+       on the step alone read zipped:false on one fast run. */
+    for (let i = 0; i < 40 && !(refused && refused.step === "done" && refused.zipped); i++) {
       await sleep(300);
       refused = await evaluate(`(function () {
         var box = document.querySelector('.bc-wizard');
@@ -5394,7 +5776,12 @@ async function main() {
   }
   // ST-C. the index's markup and its styles are retired: no page, no
   // script and no stylesheet names them any more.
-  const retired = ["bs-card", "bs-index", "bs-months", "bm-head", "bs-month ", "bs-end"];
+  /* bs-bar__month named the <select> the bar carried before the page drew
+     its own list. blog.html kept it after the picker changed, and a
+     <select> lays out none of what blog.js puts inside it, so the reader
+     got an empty native control. */
+  const retired = ["bs-card", "bs-index", "bs-months", "bm-head", "bs-month ", "bs-end",
+                   "bs-bar__month"];
   const searched = ["index.html", "gallery.html", "blog.html", "site.css", "site.js",
                     "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"];
   const stillThere = [];
@@ -5404,6 +5791,29 @@ async function main() {
   }
   check("style: the retired index classes appear in no page, script or stylesheet",
     stillThere.length === 0, stillThere.join(", "));
+
+  /* THE STREAM'S BAR IS AUTHORED, so no publish rewrites it and nothing
+     else asserts its shape. It fell a version behind the picker once: it
+     still held a <select>, which is a replaced element, so blog.js filled
+     it with a button and a list that the browser laid out nowhere. The
+     reader got an empty native control and every runtime check still
+     passed, because the list was in the DOM.
+
+     This reads the file the site ships rather than a page the harness
+     built, because that is the copy that was wrong. */
+  const barSrc = (function (src) {
+    /* bounded by the region that follows it, not by the next "</div>":
+       the bar holds divs, so a lazy match ends at the first slot and
+       never sees the second */
+    const a = src.indexOf('<div class="bs-bar" id="blogBar">');
+    const b = src.indexOf("<!--[edit:blog-stream]-->", a);
+    return a === -1 || b === -1 ? "" : src.slice(a, b);
+  })(readFileSync(join(REPO, "blog.html"), "utf-8"));
+  check("bar: blog.html gives both slots as plain containers for blog.js to fill",
+    /<div class="bs-bar__find" id="blogFind"><\/div>/.test(barSrc) &&
+    /<div class="bs-picker" id="blogMonth"><\/div>/.test(barSrc) &&
+    !/<select/.test(barSrc),
+    barSrc.replace(/\s+/g, " ") || "no bar found in blog.html");
 
   try { bs?.kill(); } catch {}
 

@@ -197,10 +197,15 @@
         <!--[edit:blog-h2]-->
         <h2>Notes from the work.</h2>
         <!--[/edit:blog-h2]-->
-        <!-- The bar sticks to the top of the column once the heading
-             above it scrolls away. It is authored chrome and carries no
-             markers: blog.js fills the month picker from the manifest,
-             and the find slot stays empty until the search pill. -->
+        <!-- The bar scrolls with the page. It is authored chrome and
+             carries no markers, so no publish rewrites it: both slots are
+             filled by blog.js, the find slot with the search pill and the
+             picker with the months the manifest names.
+
+             Both slots must be plain containers. The picker was a <select>
+             until the page drew its own list, and a <select> is a replaced
+             element: it kept the button and the list in the DOM and laid
+             out neither, so the reader saw an empty native control. -->
         <div class="bs-bar" id="blogBar">
           <div class="bs-bar__find" id="blogFind"></div>
           <div class="bs-picker" id="blogMonth"></div>
@@ -211,17 +216,17 @@
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0008"><time datetime="2026-09-04T22:23">September 4, 2026 · 10:23 pm</time><span class="bs-post__zone">EDT</span></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0008#p0008"><time datetime="2026-09-04T22:23">September 4, 2026 · 10:23 pm</time><span class="bs-post__zone">EDT</span></a>
             </header>
             <div class="bs-post__body">
-<p>First post of the day! (5)</p>
+<p>First post of the day!</p>
             </div>
           </article>
           <article class="bs-post" id="s0007" data-id="0007" data-date="260904" data-time="1656" data-zone="EDT" data-tags="">
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0007"><time datetime="2026-09-04T16:56">September 4, 2026 · 4:56 pm</time><span class="bs-post__zone">EDT</span></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0007#p0007"><time datetime="2026-09-04T16:56">September 4, 2026 · 4:56 pm</time><span class="bs-post__zone">EDT</span></a>
             </header>
             <div class="bs-post__body">
 <p>Second post of the day!</p>
@@ -231,19 +236,20 @@
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0006"><time datetime="2026-09-04T15:15">September 4, 2026 · 3:15 pm</time><span class="bs-post__zone">EDT</span></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0006#p0006"><time datetime="2026-09-04T15:15">September 4, 2026 · 3:15 pm</time><span class="bs-post__zone">EDT</span></a>
             </header>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0006#p0006">asd</a></h3>
             <div class="bs-post__body">
-<p>Third post of the week!!!</p>
+<p>123asd</p>
             </div>
           </article>
           <article class="bs-post" id="s0005" data-id="0005" data-date="260904" data-time="1445" data-zone="EDT" data-tags="">
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0005"><time datetime="2026-09-04T14:45">September 4, 2026 · 2:45 pm</time><span class="bs-post__zone">EDT</span></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0005#p0005"><time datetime="2026-09-04T14:45">September 4, 2026 · 2:45 pm</time><span class="bs-post__zone">EDT</span></a>
             </header>
-            <h3 class="bs-post__title">OMG TEST</h3>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0005#p0005">OMG TEST</a></h3>
             <div class="bs-post__body">
 <p>This is another test!</p>
             </div>
@@ -252,9 +258,9 @@
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0004"><time datetime="2026-09-04T13:26">September 4, 2026 · 1:26 pm</time><span class="bs-post__zone">EDT</span></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0004#p0004"><time datetime="2026-09-04T13:26">September 4, 2026 · 1:26 pm</time><span class="bs-post__zone">EDT</span></a>
             </header>
-            <h3 class="bs-post__title">Test 1</h3>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0004#p0004">Test 1</a></h3>
             <div class="bs-post__body">
 <h4>This is a test</h4>
 <p>Omg is it a test!</p>
@@ -268,9 +274,9 @@
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0003"><time datetime="2026-09-03">September 3, 2026</time></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0003#p0003"><time datetime="2026-09-03">September 3, 2026</time></a>
             </header>
-            <h3 class="bs-post__title">This is a blog post test.</h3>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0003#p0003">This is a blog post test.</a></h3>
             <div class="bs-post__body">
 <strong>With lots of cool visuals!</strong>
 
@@ -281,9 +287,9 @@
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0002"><time datetime="2026-09-03">September 3, 2026</time></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0002#p0002"><time datetime="2026-09-03">September 3, 2026</time></a>
             </header>
-            <h3 class="bs-post__title">Test Z</h3>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0002#p0002">Test Z</a></h3>
             <div class="bs-post__body">
 Test Z is good
             </div>
@@ -292,14 +298,24 @@ Test Z is good
             <header class="bs-post__by">
               <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
               <b>AARON M. HARRIS</b>
-              <a class="bs-post__when" href="blog/2609.html#p0001"><time datetime="2026-09-02">September 2, 2026</time></a>
+              <a class="bs-post__when" href="blog/2609.html?post=p0001#p0001"><time datetime="2026-09-02">September 2, 2026</time></a>
             </header>
-            <h3 class="bs-post__title">Test</h3>
+            <h3 class="bs-post__title"><a href="blog/2609.html?post=p0001#p0001">Test</a></h3>
             <div class="bs-post__body">
 Test abc 123
             </div>
           </article>
-          <p class="bm-older bm-older--end">This is the first month.</p>
+          <article class="bs-post" id="s0009" data-id="0009" data-date="260901" data-time="1533" data-zone="EDT" data-tags="">
+            <header class="bs-post__by">
+              <img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />
+              <b>AARON M. HARRIS</b>
+              <a class="bs-post__when" href="blog/2609.html?post=p0009#p0009"><time datetime="2026-09-01T15:33">September 1, 2026 · 3:33 pm</time><span class="bs-post__zone">EDT</span></a>
+            </header>
+            <div class="bs-post__body">
+<p>Test of a beforetime.</p>
+            </div>
+          </article>
+          <a class="bm-older" href="blog/2608.html" rel="prev">Older posts: August 2026</a>
         </div>
         <!--[/edit:blog-stream]-->
       </div>
@@ -391,11 +407,12 @@ Test abc 123
        from treating it as a text region. -->
   <!--[edit:blog-manifest]-->
   <script id="blogManifest" type="text/plain" data-ced="blog">
-next-post:0009
+next-post:0011
 next-img:0002
-stamp:n2eglx
-month:2609=ezkf6v
-2609020001Test|2609030002Test Z|2609030003This is a blog post test.|2609040004Test 1|2609040005OMG TEST|2609040006Third post of the week|2609040007Second post of the day|2609040008First post of the day! (5)
+stamp:dn6onj
+month:2608=oti962
+month:2609=glzt2i
+2608010010September, yay|2609010009Test of a beforetime|2609020001Test|2609030002Test Z|2609030003This is a blog post test.|2609040004Test 1|2609040005OMG TEST|2609040006asd|2609040007Second post of the day|2609040008First post of the day
 </script>
   <!--[/edit:blog-manifest]-->
 </body>

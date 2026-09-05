@@ -29,9 +29,9 @@
    is why they follow it.
 
    Sections:
-     1. SETUP                       4. PAGE SWEEPS
-     2. HEADER STATE AND PROGRESS   5. EXPORTS
-     3. NAV AND IN-PAGE LINKS
+     1. SETUP                       4. NAV AND IN-PAGE LINKS
+     2. HEADER STATE AND PROGRESS   5. PAGE SWEEPS
+     3. THE ADDRESS AND THE VISIT   6. EXPORTS
 
    There is no cleanup section. The page never tears this down, so an
    empty one would be a heading with nothing under it.
@@ -144,7 +144,112 @@
   onScroll();
 
   /* ==========================================================
-     3. NAV AND IN-PAGE LINKS
+     3. THE ADDRESS AND THE VISIT
+     ----------------------------------------------------------
+     Two jobs that every page shares, and that no page can own alone.
+
+     THE ADDRESS. Five places on this site rewrite the address as the
+     reader works: a deep link, a month hop, a tag filter, the editor
+     leaving, and an in-page nav link. Each one used to pass null as the
+     state, which threw away whatever the page remembered, and two of
+     them rebuilt the address from the path alone, which dropped every
+     other parameter. setUrl and paramUrl are the two repairs.
+
+     THE VISIT. A post link is a real link, so the browser owns Back and
+     restores the reader's place. The only thing the browser cannot tell
+     the arriving page is whether THIS site sent the reader, which is
+     what decides between a Back control and a plain way out.
+
+     The referrer cannot answer that. It names the page that linked here,
+     not the entry before this one, and the redirect above writes no entry
+     at all. So the departure is recorded instead of guessed: one key,
+     written by the click that leaves, read once on arrival.
+
+     This lives here because the home page carries post links and does not
+     load blog.js. It stays two strings. It is not a record of the
+     reader's browsing state, and it must not grow into one.
+     ========================================================== */
+  /* Write the address and keep what the page remembers. */
+  function setUrl(url, push) {
+    try {
+      var st = history.state;
+      if (push) history.pushState(st, "", url);
+      else history.replaceState(st, "", url);
+    } catch (e) { /* a disk page can refuse; the reading is unharmed */ }
+  }
+  /* This address with some parameters changed. A null value removes one,
+     and a parameter this does not name is left alone. */
+  function paramUrl(changes) {
+    var u = new URL(location.href);
+    Object.keys(changes).forEach(function (k) {
+      if (changes[k] === null || changes[k] === "") u.searchParams.delete(k);
+      else u.searchParams.set(k, changes[k]);
+    });
+    return u.pathname + u.search + u.hash;
+  }
+  /* Merge one field into the state of the entry showing now. */
+  function markState(patch) {
+    try {
+      var st = history.state;
+      if (!st || typeof st !== "object") st = {};
+      Object.keys(patch).forEach(function (k) { st[k] = patch[k]; });
+      history.replaceState(st, "", location.href);
+    } catch (e) {}
+  }
+
+  var HOP_KEY = "amh:hop";
+  var HOP_MAX = 60000;   /* a token older than this belongs to another trip */
+
+  /* Record a departure this site is making, for the page it is going to.
+     Only a plain left click in this tab counts. A middle click, a
+     modified click, a download, and a link that opens a new tab all leave
+     this tab where it is, so none of them is a departure. */
+  function hopWatch() {
+    /* Bubble phase, not capture. A handler nearer the link may answer the
+       click itself, and only after it has run is defaultPrevented true.
+       In capture this would record a departure that never happens. */
+    doc.addEventListener("click", function (e) {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+      if (!a || a.hasAttribute("download")) return;
+      if (a.target && a.target !== "_self") return;
+      var url;
+      try { url = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
+      if (url.origin !== location.origin) return;
+      /* only a post destination: this answers one question, and a token
+         for every link on the site would be noise */
+      if (!/[?&]post=p\d{4}/.test(url.search)) return;
+      try {
+        sessionStorage.setItem(HOP_KEY, JSON.stringify(
+          { to: url.href, at: Date.now() }));
+      } catch (err) { /* storage refused: the reader gets the plain way out */ }
+    });
+  }
+  /* Did this site send the reader to the page they are on?
+
+     True only for a departure this tab recorded, for this address, just
+     now. The token is read once and removed, so a second page cannot
+     claim it and a duplicated tab finds nothing. The answer is then kept
+     in the state of this entry, so a refresh does not lose it. */
+  function cameFromHere() {
+    var raw = null;
+    try {
+      raw = sessionStorage.getItem(HOP_KEY);
+      if (raw) sessionStorage.removeItem(HOP_KEY);
+    } catch (e) { raw = null; }
+    var rec = null;
+    if (raw) { try { rec = JSON.parse(raw); } catch (e) { rec = null; } }
+    if (rec && rec.to === location.href && Date.now() - rec.at < HOP_MAX) {
+      markState({ amhBack: 1 });
+      return true;
+    }
+    return !!(history.state && history.state.amhBack);
+  }
+  hopWatch();
+
+  /* ==========================================================
+     4. NAV AND IN-PAGE LINKS
      ========================================================== */
   /* The file name of the page being viewed. A directory URL ("/", "/blog/")
      serves the index of that directory. Every managed page is at the site
@@ -247,8 +352,10 @@
         target.scrollIntoView();
         html.style.scrollBehavior = prev;      // restore page default
         /* the bare fragment, not the page-qualified href: the URL bar should
-           read "#work", the way it did before the chrome was shared */
-        history.replaceState(null, "", frag);
+           read "#work", the way it did before the chrome was shared. A
+           fragment-only reference keeps the path and the query, so a
+           focused post keeps its "?post=" when the reader uses the nav. */
+        setUrl(frag, false);
         return;
       }
       /* This page has no section by that name. Silently doing nothing is
@@ -277,7 +384,7 @@
   });
 
   /* ==========================================================
-     4. PAGE SWEEPS
+     5. PAGE SWEEPS
      ----------------------------------------------------------
      Three one-time passes over the whole page: reveal on scroll,
      the active nav link, and the cull of empty optional blocks.
@@ -341,11 +448,30 @@
     }
   });
   /* ==========================================================
-     5. EXPORTS
+     6. EXPORTS
      ========================================================== */
   /* AMH.site.requestTick()
      Re-run the scroll handler on the next animation frame.
      blog.js calls it when the takeover view opens or closes, because that
-     hides or re-shows the hero and so changes the header's look. */
-  AMH.site = { requestTick: requestTick };
+     hides or re-shows the hero and so changes the header's look.
+
+     AMH.site.setUrl(url, push)
+     Write the address and keep history.state. Every writer on this site
+     uses it, because passing null throws away what the page remembers.
+
+     AMH.site.paramUrl(changes)
+     This address with named parameters changed, and the rest left alone.
+     A null or "" value removes one.
+
+     AMH.site.cameFromHere()
+     True when this site sent the reader to the page they are on, in this
+     tab, just now. Reads the departure token once and remembers the
+     answer on this history entry, so a refresh keeps it. It is what
+     decides whether a page can offer Back. */
+  AMH.site = {
+    requestTick: requestTick,
+    setUrl: setUrl,
+    paramUrl: paramUrl,
+    cameFromHere: cameFromHere
+  };
 })();
