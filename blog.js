@@ -373,33 +373,163 @@
      Authored chrome at the top of the column: the name, the slot the
      search pill takes in Phase 3, and the month picker. It sticks under
      the site header once the heading above it scrolls away. */
-  var blogMonthSel = null;
+  /* ---------------- the month picker ----------------
+
+     A combobox the page draws, in the select-only shape of the ARIA
+     pattern: a button that names the current month, and a listbox under
+     it. It is not a <select>.
+
+     Why not. A native select's open list is drawn by the operating
+     system, and CSS reaches none of it but its colour scheme. On a dark
+     page that left a light highlight band and a light border in the
+     middle of the blog, and nothing in a stylesheet could touch either.
+     The page draws the list, so the list matches the page.
+
+     What is given up: a phone opens a native select with its own picker,
+     which a thumb handles better than any list a page draws. Two months
+     do not need that. Forty would, and then the native control should
+     come back for touch screens. */
+  var blogMonthBox = null;    /* the element the bar authored */
+  var blogMonthBtn = null;    /* the button that names the month */
+  var blogMonthList = null;   /* the listbox */
+  var blogMonthValue = "";    /* "" for every month */
+  var blogMonthAt = -1;       /* the option the keyboard is on */
+
+  var BLOG_CARET =
+    '<svg class="bs-picker__caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="m6 9 6 6 6-6" /></svg>';
+
+  function blogMonthOptions() {
+    return blogMonthList
+      ? Array.prototype.slice.call(blogMonthList.querySelectorAll('[role="option"]'))
+      : [];
+  }
+  function blogMonthLabel(value) {
+    var hit = null;
+    blogMonthOptions().forEach(function (o) {
+      if (o.getAttribute("data-value") === value) hit = o;
+    });
+    return hit ? hit.textContent : "All months";
+  }
+  /* The button says what is chosen. Nothing else reads the value. */
+  function blogMonthSet(value) {
+    blogMonthValue = value;
+    if (blogMonthBtn) blogMonthBtn.firstChild.nodeValue = blogMonthLabel(value);
+    blogMonthOptions().forEach(function (o) {
+      o.setAttribute("aria-selected",
+        o.getAttribute("data-value") === value ? "true" : "false");
+    });
+  }
+  function blogMonthOpen(open) {
+    if (!blogMonthList) return;
+    blogMonthList.hidden = !open;
+    blogMonthBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) {
+      blogMonthAt = -1;
+      blogMonthBtn.removeAttribute("aria-activedescendant");
+      return;
+    }
+    /* opening lands on what is chosen, so the list starts where the
+       reader left it rather than at the top */
+    var opts = blogMonthOptions();
+    opts.forEach(function (o, i) {
+      if (o.getAttribute("data-value") === blogMonthValue) blogMonthAt = i;
+    });
+    blogMonthMark();
+  }
+  function blogMonthMark() {
+    var opts = blogMonthOptions();
+    opts.forEach(function (o, i) { o.classList.toggle("is-at", i === blogMonthAt); });
+    if (opts[blogMonthAt]) {
+      blogMonthBtn.setAttribute("aria-activedescendant", opts[blogMonthAt].id);
+      opts[blogMonthAt].scrollIntoView({ block: "nearest" });
+    }
+  }
+  function blogMonthTake(i) {
+    var opts = blogMonthOptions();
+    if (!opts[i]) return;
+    var value = opts[i].getAttribute("data-value");
+    blogMonthSet(value);
+    blogMonthOpen(false);
+    blogMonthBtn.focus();
+    blogGoMonth(value);
+  }
+  /* The keys a select answers, so the control is a select in every way
+     but who draws it. */
+  function blogMonthKeys(e) {
+    var opts = blogMonthOptions();
+    var open = blogMonthList && !blogMonthList.hidden;
+    if (e.key === "Escape") { if (open) { e.preventDefault(); blogMonthOpen(false); } return; }
+    if (e.key === "Tab") { if (open) blogMonthOpen(false); return; }
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+      e.preventDefault();
+      if (!open) blogMonthOpen(true);
+      else blogMonthTake(blogMonthAt);
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { blogMonthOpen(true); return; }
+      blogMonthAt = (blogMonthAt + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length;
+      blogMonthMark();
+      return;
+    }
+    if (open && (e.key === "Home" || e.key === "End")) {
+      e.preventDefault();
+      blogMonthAt = e.key === "Home" ? 0 : opts.length - 1;
+      blogMonthMark();
+    }
+  }
 
   function blogBarFill() {
-    blogMonthSel = doc.getElementById("blogMonth");
-    if (!blogMonthSel) return false;
+    blogMonthBox = doc.getElementById("blogMonth");
+    if (!blogMonthBox) return false;
     blogManifest = blogManifest || blogParseManifest();
-    blogMonthSel.innerHTML = "";
-    blogMonthSel.appendChild(blogOption("", "All months"));
     /* the count comes from the manifest, not the index, so the picker is
        right the moment the page is, with nothing to wait for */
     var per = {};
     blogManifest.entries.forEach(function (e) { per[e.month] = (per[e.month] || 0) + 1; });
+    var rows = [{ value: "", label: "All months" }];
     blogManifest.months.forEach(function (mo) {
-      blogMonthSel.appendChild(blogOption(mo,
-        blogMonthTitle(mo) + (per[mo] ? " (" + per[mo] + ")" : "")));
+      rows.push({ value: mo,
+                  label: blogMonthTitle(mo) + (per[mo] ? " (" + per[mo] + ")" : "") });
     });
-    blogMonthSel.addEventListener("change", function () {
-      blogGoMonth(blogMonthSel.value);
+
+    blogMonthBox.className = "bs-picker";
+    blogMonthBox.innerHTML =
+      '<button type="button" class="bs-picker__btn" id="blogMonthBtn" role="combobox" ' +
+      'aria-haspopup="listbox" aria-expanded="false" aria-controls="blogMonthList" ' +
+      'aria-label="Jump to a month">All months' + BLOG_CARET + "</button>" +
+      '<ul class="bs-picker__list" id="blogMonthList" role="listbox" ' +
+      'aria-label="Months" hidden></ul>';
+    blogMonthBtn = blogMonthBox.querySelector(".bs-picker__btn");
+    blogMonthList = blogMonthBox.querySelector(".bs-picker__list");
+    rows.forEach(function (r, i) {
+      var li = doc.createElement("li");
+      li.className = "bs-picker__opt";
+      li.id = "bs-pick-" + (r.value || "all");
+      li.setAttribute("role", "option");
+      li.setAttribute("data-value", r.value);
+      li.setAttribute("aria-selected", i === 0 ? "true" : "false");
+      li.textContent = r.label;
+      li.addEventListener("click", function () { blogMonthTake(i); });
+      blogMonthList.appendChild(li);
+    });
+    blogMonthSet(blogMonthValue);
+
+    blogMonthBtn.addEventListener("click", function () {
+      blogMonthOpen(blogMonthList.hidden);
+    });
+    blogMonthBtn.addEventListener("keydown", blogMonthKeys);
+    blogMonthList.addEventListener("keydown", blogMonthKeys);
+    /* a click anywhere else closes it, as a native list does */
+    doc.addEventListener("click", function (e) {
+      if (blogMonthBox && !blogMonthBox.contains(e.target)) blogMonthOpen(false);
     });
     return true;
   }
-  function blogOption(value, label) {
-    var o = doc.createElement("option");
-    o.value = value;
-    o.textContent = label;
-    return o;
-  }
+
   /* Is this month on the page already? */
   function blogFirstOf(yymm) {
     var hit = null;
@@ -490,7 +620,7 @@
     } else if (/^\d{4}$/.test(target)) {
       if (blogManifest.months.indexOf(target) === -1) unknown = true;
       else {
-        if (blogMonthSel) blogMonthSel.value = target;
+        if (blogMonthBtn) blogMonthSet(target);
         blogGoMonth(target);
         return;
       }
@@ -949,8 +1079,12 @@
     if (!findEl) return false;
     findEl.classList.add("bs-find");
     findEl.innerHTML = '<label class="bs-find__pill">' + FIND_ICON +
-      '<input type="search" spellcheck="false" placeholder="Search posts, tags, captions" /></label>' +
-      '<div class="bs-find__list" role="listbox" hidden></div>';
+      '<span class="ced-sr">Search the blog</span>' +
+      '<input type="search" spellcheck="false" role="combobox" aria-expanded="false" ' +
+      'aria-controls="blogFindList" aria-autocomplete="list" ' +
+      'placeholder="Search posts, tags, captions" /></label>' +
+      '<div class="bs-find__list" id="blogFindList" role="listbox" ' +
+      'aria-label="Search results" hidden></div>';
     findInput = findEl.querySelector("input");
     findList = findEl.querySelector(".bs-find__list");
     findInput.addEventListener("focus", findWake, { once: true });
@@ -1002,6 +1136,8 @@
     });
     findAt = -1;
     findList.hidden = false;
+    findInput.setAttribute("aria-expanded", "true");
+    findInput.removeAttribute("aria-activedescendant");
   }
   /* Where a post lives, from whichever surface is asking. */
   function findHref(post) {
@@ -1012,6 +1148,10 @@
     var a = doc.createElement("a");
     a.className = "bs-find__hit";
     a.setAttribute("role", "option");
+    a.setAttribute("aria-selected", "false");
+    /* aria-activedescendant on the input points at one of these by id, so
+       each option needs one that is unique on the page */
+    a.id = "bs-hit-" + post.id;
     a.setAttribute("href", findHref(post));
     a.setAttribute("data-id", post.id);
     if (post.thumb) {
@@ -1061,6 +1201,10 @@
     if (!findList) return;
     findList.hidden = true;
     findAt = -1;
+    if (findInput) {
+      findInput.setAttribute("aria-expanded", "false");
+      findInput.removeAttribute("aria-activedescendant");
+    }
   }
   function findKeys(e) {
     if (e.key === "Escape") { findClose(); return; }
@@ -1069,8 +1213,13 @@
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       findAt = (findAt + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-      items.forEach(function (el, i) { el.classList.toggle("is-at", i === findAt); });
+      items.forEach(function (el, i) {
+        var at = i === findAt;
+        el.classList.toggle("is-at", at);
+        el.setAttribute("aria-selected", at ? "true" : "false");
+      });
       items[findAt].scrollIntoView({ block: "nearest" });
+      findInput.setAttribute("aria-activedescendant", items[findAt].id);
     } else if (e.key === "Enter" && findAt !== -1) {
       e.preventDefault();
       items[findAt].click();

@@ -3349,7 +3349,7 @@ async function main() {
     // same post markup with "p" ids, and its own month list for the picker
     check("month page: the same bar as the stream, with the find slot and the picker",
       /<div class="bs-bar" id="blogBar">/.test(month) && month.includes('id="blogFind"') &&
-      month.includes('<select class="bs-bar__month" id="blogMonth"'),
+      month.includes('<div class="bs-picker" id="blogMonth"></div>'),
       (month.match(/<div class="bs-bar"[\s\S]*?<\/div>/) || [""])[0].replace(/\s+/g, " ").slice(0, 200));
     // MP1b. the bar holds three items and no more. The month name and the
     // stream link live in the heading above it, because a 600px measure
@@ -4036,12 +4036,12 @@ async function main() {
     // MP2. a month page has the bar with its own picker, folds nothing,
     // and zooms
     const monthPage = await evaluate(`(function () {
-      var sel = document.getElementById('blogMonth');
       var img = document.querySelector('.bp-fig img');
       var out = {
         bar: !!document.getElementById('blogBar'),
         barPosition: getComputedStyle(document.querySelector('.bs-bar')).position,
-        options: [].map.call(sel.options, function (o) { return o.value; }),
+        options: [...document.querySelectorAll('#blogMonth [role="option"]')]
+          .map(function (o) { return o.getAttribute('data-value'); }),
         posts: document.querySelectorAll('.bs-post').length,
         old: document.querySelectorAll('.blog-post').length,
         buttons: document.querySelectorAll('.bs-more').length,
@@ -4424,7 +4424,6 @@ async function main() {
     // with All months at the top
     const bar = await evaluate(`(function () {
       var el = document.getElementById('blogBar');
-      var sel = document.getElementById('blogMonth');
       var before = el.getBoundingClientRect().top;
       window.scrollTo(0, 1200);
       return new Promise(function (res) { setTimeout(function () {
@@ -4433,7 +4432,8 @@ async function main() {
         window.scrollTo(0, 0);
         res({ position: getComputedStyle(el).position, before: Math.round(before),
               after: Math.round(after), head: Math.round(head),
-              options: [].map.call(sel.options, function (o) { return o.value + ':' + o.textContent; }),
+              options: [...document.querySelectorAll('#blogMonth [role="option"]')]
+                .map(function (o) { return o.getAttribute('data-value') + ':' + o.textContent; }),
               find: !!document.getElementById('blogFind'),
               pill: !!document.querySelector('#blogFind .bs-find__pill input') });
       }, 800); });
@@ -4449,23 +4449,29 @@ async function main() {
     // change, and the bar read as a strip of bare page above a list of cards.
     const barLook = await evaluate(`(function () {
       var bar = document.getElementById('blogBar');
-      var sel = document.getElementById('blogMonth');
+      var sel = document.getElementById('blogMonthBtn');
       var cs = getComputedStyle(bar), ss = getComputedStyle(sel);
       return { ground: cs.backgroundColor, image: cs.backgroundImage !== 'none',
                radius: cs.borderTopLeftRadius,
-               /* the picker is the browser's own control: nothing is redrawn,
-                  and color-scheme is what makes its popup list dark too */
-               pickerAppearance: ss.appearance || ss.webkitAppearance,
-               pickerDrawn: ss.backgroundImage !== 'none',
-               pickerScheme: ss.colorScheme };
+               /* the picker is a combobox the page draws, so its list is the
+                  page's: a native select's list is the operating system's and
+                  CSS reaches none of it */
+               pickerTag: sel.tagName,
+               pickerRole: sel.getAttribute('role'),
+               listRole: (document.getElementById('blogMonthList') || {}).getAttribute
+                 ? document.getElementById('blogMonthList').getAttribute('role') : '',
+               listInPage: !!document.querySelector('#blogMonth .bs-picker__list'),
+               sameHeight: Math.round(document.querySelector('.bs-find__pill').getBoundingClientRect().height) ===
+                 Math.round(sel.getBoundingClientRect().height) };
     })()`);
     check("bar: it has a ground of its own, like the cards under it",
       /rgba?\(/.test(barLook.ground) &&
       barLook.ground !== "rgba(0, 0, 0, 0)" && barLook.image === true,
       JSON.stringify(barLook));
-    check("bar: the month picker is the browser's own control, drawn dark, not redrawn",
-      barLook.pickerAppearance !== "none" && barLook.pickerDrawn === false &&
-      /dark/.test(barLook.pickerScheme),
+    check("bar: the month picker's list is the page's, not the operating system's",
+      barLook.pickerTag === "BUTTON" && barLook.pickerRole === "combobox" &&
+      barLook.listRole === "listbox" && barLook.listInPage === true &&
+      barLook.sameHeight === true,
       JSON.stringify(barLook));
 
     // CUT3c. The trace: the wizard's steps are always printed, and the notes
@@ -4521,9 +4527,10 @@ async function main() {
     // CUT4. the picker, with June already on the page: it scrolls to that
     // month's first post rather than leaving the page
     const pickLoaded = await evaluate(`(function () {
-      var sel = document.getElementById('blogMonth');
-      sel.value = '2606';
-      sel.dispatchEvent(new Event('change'));
+      var o = [...document.querySelectorAll('#blogMonth [role="option"]')]
+        .find(function (x) { return x.getAttribute('data-value') === '2606'; });
+      document.getElementById('blogMonthBtn').click();
+      o.click();
       return new Promise(function (res) { setTimeout(function () {
         var post = document.querySelector('.bs-post[data-date^="2606"]');
         var top = post ? post.getBoundingClientRect().top : 9999;

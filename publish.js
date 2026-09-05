@@ -2050,7 +2050,7 @@
          the month, so a third name would say nothing new. */
       '    <div class="bs-bar" id="blogBar">\n' +
       '      <div class="bs-bar__find" id="blogFind"></div>\n' +
-      '      <select class="bs-bar__month" id="blogMonth" aria-label="Jump to a month"></select>\n' +
+      '      <div class="bs-picker" id="blogMonth"></div>\n' +
       "    </div>\n" +
       "    <main>\n" +
       blocksJoined + "\n" +
