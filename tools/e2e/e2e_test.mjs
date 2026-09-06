@@ -3351,9 +3351,13 @@ async function main() {
       month.includes('src="../aaron-portfolio-portrait-transparent.png"') &&
       month.includes('href="mailto:contact@aaronmichaelharris.com"'),
       (month.match(/href="\.\.\/[^"]*"/g) || []).slice(0, 6).join(" "));
-    check("month page links back to the blog page in its heading",
-      month.includes('href="../blog.html?b=2607"'),
-      (/bm-top__stream" href="([^"]+)"/.exec(month) || [])[1]);
+    // "Read in the full stream" is gone from the heading. The rail below
+    // names every month and the site nav carries Blog, so a third way out
+    // said only that the reader was somewhere other than the stream.
+    check("month page: the heading carries no stream link, and the rail is there instead",
+      !/bm-top__stream/.test(month) && !/blog\.html\?b=2607/.test(month) &&
+      /<nav class="bm-rail"/.test(month),
+      (month.match(/<div class="bm-top">[\s\S]{0,180}/) || [""])[0].replace(/\s+/g, " "));
     // MC3b. The editor comes to a month page too, so the corner mark is on
     // every page of the site rather than on three of them. It cannot publish
     // from here, which the composer says for itself; see the runtime checks.
@@ -3980,28 +3984,25 @@ async function main() {
     }
     await send("Emulation.clearDeviceMetricsOverride");
 
-    // MB4. The loop. "Read in the full stream" on a month page points at
-    // blog.html?b=YYMM. From disk that used to bounce the reader straight
-    // back to the month page they had just left, because blogGoMonth asked
-    // the protocol before it asked whether the month was already on the
-    // page. This runs over file:, which is the only place the loop closed.
-    const monthFile = pathToFileURL(join(bdir, "blog", "2607.html")).href;
-    await send("Page.navigate", { url: monthFile });
-    await sleep(2000);
-    const streamLink = await evaluate(
-      `(document.querySelector('.bm-top__stream') || {}).href || ''`);
-    await evaluate(`document.querySelector('.bm-top__stream').click()`);
-    await sleep(2200);
+    // MB4. The loop. "blog.html?b=YYMM" used to bounce a reader from disk
+    // straight back to the month page they had just left, because
+    // blogGoMonth asked the protocol before it asked whether the month was
+    // already on the page. The month heading no longer writes that address,
+    // but a bookmark can still hold one, so the guard stays and now goes
+    // there directly. This runs over file:, the only place the loop closed.
+    const streamLink = pathToFileURL(join(bdir, "blog.html")).href + "?b=2607";
+    await send("Page.navigate", { url: streamLink });
+    await sleep(2400);
     const landed = await evaluate(`({
       path: location.pathname,
       query: location.search,
       stream: !!document.getElementById('blogStream'),
       post: !!document.getElementById('s0001')
     })`);
-    check("month page from disk: the stream link reaches the stream and stays there",
+    check("from disk: ?b=YYMM reaches the stream and stays there",
       /blog\.html$/.test(landed.path) && !/blog\/2607\.html$/.test(landed.path) &&
       landed.stream === true && landed.post === true,
-      "from " + streamLink.split("/").slice(-2).join("/") + " to " +
+      "from " + streamLink.split("/").pop() + " to " +
       landed.path.split("/").pop() + landed.query);
   }
 
@@ -4092,9 +4093,19 @@ async function main() {
       check("chain: the backdated month is the first month, and its neighbour now points at it",
         m2606c.includes('class="bm-older bm-older--end"') && !/rel="prev"/.test(m2606c) &&
         m2607c.includes('<link rel="prev" href="2606.html" />') && m2607c.includes('<link rel="prefetch" href="2606.html" />') &&
-        m2607c.includes('<a class="bm-older" href="2606.html" rel="prev">Older posts: June 2026</a>') &&
+        /rel="prev"><svg class="bm-older__i"/.test(m2607c) &&
         m2607c.includes('id="p0001"'),
         (m2607c.match(/bm-older[^\n]*/) || ["no 2607 in the bundle"])[0]);
+      // THE WAY TO THE MONTH BEFORE, at the foot. It names the month and
+      // its size because the rail is nearly three screens above by the
+      // time a reader reaches it, so this is the only label they can see:
+      // whether one post waits or twelve is what decides the press. The
+      // arrow turns down and to the left, because this goes back in time
+      // rather than adding more below, which is what it used to do.
+      check("older link: it names the month and how many posts wait there",
+        m2607c.includes('<a class="bm-older" href="2606.html" rel="prev">') &&
+        /<\/svg>Older: June 2026 · 1 post<\/a>/.test(m2607c),
+        (m2607c.match(/<a class="bm-older"[\s\S]{0,140}/) || [""])[0].replace(/\s+/g, " "));
     }
 
     // PW7. arriving on a page that carries the bundle's own stamp clears
@@ -4129,7 +4140,7 @@ async function main() {
       exceptions.length === 0 && monthBoot.site && monthBoot.blog && monthBoot.work &&
       !monthBoot.index && monthBoot.month &&
       monthBoot.scripts === "../site.js ../work.js ../blog.js ../tool.js ../publish.js" &&
-      monthBoot.link === "Older posts: June 2026",
+      monthBoot.link === "Older: June 2026 · 1 post",
       JSON.stringify(monthBoot).slice(0, 200) + " " + exceptions.join(" | ").slice(0, 120));
     // MP2. a month page has the bar with its own picker, folds nothing,
     // and zooms
@@ -4233,72 +4244,93 @@ async function main() {
       monthPage.cursor === "zoom-in" && monthPage.zoomed && monthPage.closed,
       JSON.stringify(monthPage).slice(0, 180));
 
-    // CH2. the click appends the older month under a divider, moves the
-    // link on, replaces the URL and the title, and puts focus on the divider
+    // CH2. On a month page the link NAVIGATES. The rail at the top already
+    // carries every month, so appending here was a second way to move that
+    // had to be kept in step with the first. It was not: the address named
+    // the month reached while the heading and the rail still named this
+    // one, and every control was left scrolled off the top of the page.
+    const beforeHop = await evaluate(`history.length`);
     await evaluate(`document.querySelector('.bm-older').click()`);
-    /* Wait for the month to arrive rather than guessing at a delay. A month
-       page loads five trunks now, and the suite's server answers one request
-       at a time, so the chain's own fetch can queue behind them. */
-    for (let i = 0; i < 30; i++) {
-      await sleep(250);
+    for (let i = 0; i < 40; i++) {
+      await sleep(200);
+      if (await evaluate(`/2606\.html$/.test(location.pathname)`)) break;
+    }
+    await sleep(700);
+    const walked = await evaluate(`({
+      path: location.pathname, title: document.title,
+      h1: (document.querySelector('.bm-top__month') || {}).textContent,
+      railNow: (function (el) { return el ? el.getAttribute('href') : null; })(
+        document.querySelector('.bm-chip.is-now')),
+      dividers: document.querySelectorAll('.bm-divider').length,
+      months: [...new Set([...document.querySelectorAll('main .bs-post')]
+        .map(function (p) { return (p.getAttribute('data-date') || '').slice(0, 4); }))],
+      histLen: history.length
+    })`);
+    check("chain: on a month page Older posts opens that month and appends nothing",
+      /\/blog\/2606\.html$/.test(walked.path) && walked.dividers === 0 &&
+      JSON.stringify(walked.months) === '["2606"]' && walked.histLen > beforeHop,
+      JSON.stringify(walked));
+    // the three that used to disagree after a hop now cannot: there is one
+    // month on the page, so there is one thing for them to name
+    check("chain: the address, the heading and the rail all name the month reached",
+      /June 2026/.test(walked.title) && walked.h1 === "June 2026" &&
+      walked.railNow === "2606.html",
+      JSON.stringify({ title: walked.title, h1: walked.h1, railNow: walked.railNow }));
+    await send("Runtime.evaluate", { expression: `history.back()` });
+    await sleep(2200);
+    check("chain: the browser's own Back returns to the month before it",
+      /\/blog\/2607\.html$/.test(await evaluate(`location.pathname`)),
+      await evaluate(`location.pathname`));
+
+    // CH2b. THE STREAM still appends in place, and it is the only surface
+    // where that makes sense: its address names no month, so nothing can
+    // fall out of step with it. This is the only coverage blogChainLoad has
+    // now that a month page navigates instead.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    const sBefore = await evaluate(`document.querySelectorAll('.bs-post').length`);
+    await evaluate(`document.querySelector('#blogStream .bm-older[href]').click()`);
+    for (let i = 0; i < 40; i++) {
+      await sleep(200);
       if (await evaluate(`!!document.querySelector('.bm-divider')`)) break;
     }
-    const walked = await evaluate(`({
+    await sleep(600);
+    const sAfter = await evaluate(`({
+      posts: document.querySelectorAll('.bs-post').length,
+      path: location.pathname,
       divider: (document.querySelector('.bm-divider') || {}).textContent || '',
-      posts: [...document.querySelectorAll('main .bs-post')].map(a => a.id).join(' '),
-      sources: document.querySelectorAll('main script[type="text/x-blog-source"]').length,
-      older: (document.querySelector('.bm-older') || {}).textContent || '',
       end: !!document.querySelector('.bm-older--end'),
-      path: location.pathname, title: document.title,
-      focused: document.activeElement && document.activeElement.className,
-      dividerBorder: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider')),
-      /* a post is a card now: it carries its own border on all four sides,
-         so the divider has none to cancel */
-      firstAppended: (function (el) { return el ? getComputedStyle(el).borderTopWidth : "none"; })(document.querySelector('.bm-divider + .bs-post')),
-      cardRadius: (function (el) { return el ? getComputedStyle(el).borderRadius : "none"; })(document.querySelector('.bs-post')),
+      /* a post's source lives in its month file and nowhere else, so an
+         appended month brings none of it into the stream */
+      sources: document.querySelectorAll('#blogStream script[type="text/x-blog-source"]').length
     })`);
-    check("chain: Older posts appends June under a divider and the link becomes the end note",
-      walked.divider === "June 2026" && walked.posts === "p0001 p0002" && walked.sources === 1 &&
-      walked.end && /first month/.test(walked.older),
-      JSON.stringify(walked).slice(0, 240));
-    check("chain: the URL and the title follow the month reached, and focus lands on the divider",
-      /\/blog\/2606\.html$/.test(walked.path) && /June 2026/.test(walked.title) && walked.focused === "bm-divider" &&
-      walked.dividerBorder === "1px" && walked.firstAppended === "1px",
-      JSON.stringify(walked).slice(0, 240));
-    // CH2b. the append folds what it appended and nothing else. blogPosts()
-    // answers with the whole page on a month page, which has no stream, so
-    // an unscoped fold closed the posts the reader was already reading.
-    // data-folded is the proof: blogCutPost stamps every post it considers,
-    // whether or not that post turns out to need a cut.
-    const folds = await evaluate(`({
-      own: (document.getElementById('p0001') || {}).getAttribute
-        ? document.getElementById('p0001').getAttribute('data-folded') : 'no post',
-      added: (document.getElementById('p0002') || {}).getAttribute
-        ? document.getElementById('p0002').getAttribute('data-folded') : 'no post',
-      ownMore: document.querySelectorAll('#p0001 .bs-more').length
-    })`);
-    check("chain: appending a month leaves the page's own posts open",
-      folds.own === null && folds.added === "1" && folds.ownMore === 0,
-      JSON.stringify(folds));
+    check("chain: the stream appends the older month under a divider and keeps its address",
+      sAfter.posts > sBefore && /blog\.html$/.test(sAfter.path) &&
+      /June 2026/.test(sAfter.divider) && sAfter.end === true && sAfter.sources === 0,
+      JSON.stringify({ before: sBefore, after: sAfter }));
+
     // CH3. a month that cannot be loaded says so in the link's place and
-    // stays a link; a second click while busy does nothing
-    await send("Page.navigate", { url: B + "blog/2607.html" });
-    await sleep(800);
+    // stays a link; a second click while busy does nothing. Both guards
+    // belong to the loader, so they moved to the stream with it.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
     const failed = await evaluate(`(function () {
-      var a = document.querySelector('.bm-older');
-      a.setAttribute('href', '2605.html');
+      var a = document.querySelector('#blogStream .bm-older');
+      a.setAttribute('href', 'blog/2605.html');
       a.click();
       return new Promise(function (res) { setTimeout(function () {
-        var b = document.querySelector('.bm-older');
-        res({ text: b.textContent, href: b.getAttribute('href'), busy: b.getAttribute('aria-busy'), tag: b.tagName });
-      }, 700); });
+        var b = document.querySelector('#blogStream .bm-older');
+        res({ text: b.textContent, href: b.getAttribute('href'),
+              busy: b.getAttribute('aria-busy'), tag: b.tagName });
+      }, 900); });
     })()`, { awaitPromise: true });
     check("chain: a month that cannot be loaded says so and the link still works",
-      failed.text === "Could not load May 2026. Open it instead." && failed.href === "2605.html" &&
-      failed.busy === null && failed.tag === "A", JSON.stringify(failed));
+      /^Could not load May 2026\. Open it instead\.$/.test(failed.text) &&
+      failed.href === "blog/2605.html" && failed.busy === null && failed.tag === "A",
+      JSON.stringify(failed));
     const busy = await evaluate(`(function () {
-      var a = document.querySelector('.bm-older');
-      a.setAttribute('href', '2606.html');
+      var a = document.querySelector('#blogStream .bm-older');
+      a.setAttribute('href', 'blog/2606.html');
       var calls = 0;
       var real = window.fetch;
       window.fetch = function () { calls++; return new Promise(function () {}); };
@@ -4308,9 +4340,10 @@ async function main() {
       return r;
     })()`);
     check("chain: a second click while a month is loading does nothing",
-      busy.calls === 1 && busy.busy === "true" && busy.text === "Loading June 2026...", JSON.stringify(busy));
-    // CH4. from disk the click is a navigation: the page after it is the
-    // older month as a page of its own
+      busy.calls === 1 && busy.busy === "true" && busy.text === "Loading June 2026...",
+      JSON.stringify(busy));
+    // CH4. from disk it is a navigation too, which it always was here and
+    // is now everywhere on a month page
     await send("Page.navigate", { url: pathToFileURL(join(bdir, "blog/2607.html")).href });
     await sleep(800);
     await evaluate(`document.querySelector('.bm-older').click()`);
@@ -4318,8 +4351,8 @@ async function main() {
     const onDisk = await evaluate(`({ protocol: location.protocol, path: location.pathname,
       end: !!document.querySelector('.bm-older--end'), divider: !!document.querySelector('.bm-divider') })`);
     check("chain: from disk Older posts opens the older month as a page",
-      onDisk.protocol === "file:" && /2606\.html$/.test(onDisk.path) && onDisk.end && !onDisk.divider,
-      JSON.stringify(onDisk));
+      onDisk.protocol === "file:" && /2606\.html$/.test(onDisk.path) &&
+      onDisk.end && !onDisk.divider, JSON.stringify(onDisk));
     // CH5. a month emptied by a delete: the month after it points back
     // past it. First a post that creates May, then its deletion.
     await send("Page.navigate", { url: B + "blog.html" });
@@ -4335,7 +4368,10 @@ async function main() {
     const mayId = zipMay ? (/\n(?:[^\n]*\|)?260501(\d{4})May post/.exec(zipMay["blog.html"].toString("utf8")) || [])[1] : null;
     check("chain: a new first month is written as the first, and the month after it points at it",
       !!zipMay && !!mayId && zipMay["blog/2605.html"].toString("utf8").includes("bm-older--end") &&
-      !!zipMay["blog/2606.html"] && zipMay["blog/2606.html"].toString("utf8").includes('href="2605.html" rel="prev">Older posts: May 2026'),
+      !!zipMay["blog/2606.html"] &&
+      zipMay["blog/2606.html"].toString("utf8")
+        .includes('<a class="bm-older" href="2605.html" rel="prev">') &&
+      zipMay["blog/2606.html"].toString("utf8").includes("Older: May 2026 · 1 post"),
       zipMay ? Object.keys(zipMay).sort().join(", ") + " id " + mayId : "no zip");
     if (zipMay) writeBundle(zipMay);
     await send("Page.navigate", { url: B + "blog.html" });
@@ -4593,6 +4629,44 @@ async function main() {
     check("tags: ?t= on arrival filters the page, and an unknown tag hides every post",
       /Showing/.test(onArrival.line) && onArrival.shown === 0 && onArrival.hidden === 1,
       JSON.stringify(onArrival));
+
+    // FT2b. A TAG VIEW GETS THE SAME WAY OUT AS ONE POST. Both narrow what
+    // the reader sees, and neither can be left by the browser alone,
+    // because the address was rewritten in place. Back is offered only
+    // when this site sent the reader here: a pasted tag address gets none.
+    const tagPasted = await evaluate(`!!document.querySelector('.bm-chip--back')`);
+    check("tags: a pasted tag address gets no Back, as a pasted post address does not",
+      tagPasted === false, "back=" + tagPasted);
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
+    await sleep(2200);
+    const tagHop = await evaluate(`(function () {
+      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+      var a = document.createElement('a');
+      a.href = 'blog.html?t=e2e';
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      var t = null; try { t = sessionStorage.getItem('amh:hop'); } catch (e) {}
+      return !!t;
+    })()`);
+    await sleep(2400);
+    const tagBack = await evaluate(`(function () {
+      var b = document.querySelector('.bm-chip--back');
+      var bar = document.getElementById('blogBar');
+      var wrap = b ? b.parentNode : null;
+      return { wrote: ${tagHop},
+               back: !!b,
+               arrowSvg: !!(b && b.querySelector('svg.bm-back__i')),
+               underBar: !!(bar && bar.nextElementSibling === wrap),
+               /* the escape sits above the status line, so the order never
+                  depends on which of the two was drawn first */
+               showingUnder: !!(wrap && wrap.nextElementSibling &&
+                 wrap.nextElementSibling.classList.contains('bs-showing')),
+               url: location.search };
+    })()`);
+    check("tags: following a tag from this site offers Back under the bar",
+      tagBack.wrote && tagBack.back && tagBack.arrowSvg && tagBack.underBar &&
+      tagBack.showingUnder && tagBack.url === "?t=e2e",
+      JSON.stringify(tagBack));
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
 
@@ -4934,14 +5008,14 @@ async function main() {
       back: !!document.querySelector('.bm-chip--back'),
       heading: (document.querySelector('.bm-top__month') || {}).textContent,
       focusCls: document.body.classList.contains('is-focus'),
-      /* the focused view hides this one; ordinary browsing must not */
+      /* retired from month pages: the rail names the months instead */
       streamLink: (function (el) {
         return el ? getComputedStyle(el).display !== "none" : false;
       })(document.querySelector('.bm-top__stream')),
     })`);
     check("focus: a bare month address with an old anchor still browses the month",
       browse.shown === 2 && !browse.out && !browse.focusCls &&
-      browse.heading === "June 2026" && browse.streamLink === true &&
+      browse.heading === "June 2026" && browse.streamLink === false &&
       browse.rail && browse.nowChip === "2606.html" && browse.back === false,
       JSON.stringify(browse));
 

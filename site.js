@@ -217,9 +217,11 @@
       var url;
       try { url = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
       if (url.origin !== location.origin) return;
-      /* only a post destination: this answers one question, and a token
-         for every link on the site would be noise */
-      if (!/[?&]post=p\d{4}/.test(url.search)) return;
+      /* Only a destination that narrows what the reader sees: one post,
+         or one tag. Those are the two views a reader arrives at and then
+         wants out of. A token for every link on the site would be noise,
+         and Back on a page that shows everything answers nothing. */
+      if (!/[?&](post=p\d{4}|t=[^&]+)/.test(url.search)) return;
       try {
         sessionStorage.setItem(HOP_KEY, JSON.stringify(
           { to: url.href, at: Date.now() }));

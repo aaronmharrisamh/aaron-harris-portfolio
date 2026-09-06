@@ -2003,8 +2003,23 @@
     var pageTitle = "Aaron M. Harris · Blog · " + mt;
     var descr = "Thoughts, musings, and fun new developments from Aaron M. Harris";
     var url = base + "blog/" + yymm + ".html";
+    /* The way to the month before, at the foot of this one.
+
+       On a month page this is a plain link, not an expansion: the rail at
+       the top already carries every month, and a second navigation that
+       appended in place had to be kept in step with it. It was not, and a
+       reader who pressed it was left with an address naming one month, a
+       heading naming another, and every control scrolled off the top.
+
+       It names the month and its size because the rail is nearly three
+       screens above by the time a reader reaches this, so this is the only
+       label they can see. Whether one post waits or twelve is what decides
+       the press. */
+    var pn = (prev && nav && nav.counts) ? nav.counts[prev] : 0;
     var older = prev
-      ? '    <a class="bm-older" href="' + prev + '.html" rel="prev">Older posts: ' + B.monthTitle(prev) + "</a>\n"
+      ? '    <a class="bm-older" href="' + prev + '.html" rel="prev">' + BC_RETURN +
+        "Older: " + B.monthTitle(prev) +
+        (pn ? " · " + pn + " post" + (pn === 1 ? "" : "s") : "") + "</a>\n"
       : '    <p class="bm-older bm-older--end">This is the first month.</p>\n';
     return "<!DOCTYPE html>\n" +
       "<!-- " + bcGenerated(stamp) + " -->\n" +
@@ -2069,8 +2084,9 @@
       '    <div class="bm-top">\n' +
       '      <span class="eyebrow">' + (meta.eyebrow || "Blog") + "</span>\n" +
       '      <h1 class="bm-top__month">' + mt + "</h1>\n" +
-      '      <a class="textlink bm-top__stream" href="../blog.html?b=' + yymm +
-      '">Read in the full stream</a>\n' +
+      /* No "Read in the full stream" here. The rail below names every
+         month, and the site nav carries Blog, so a third way out said
+         only that the reader was somewhere other than the stream. */
       "    </div>\n" +
       bcMonthRail(months, nav, yymm) +
       /* The same two items blog.html's bar carries. It has no label of its
@@ -2762,6 +2778,15 @@
     var top = entries.length ? entries[entries.length - 1] : null;
     return { counts: per, top: top ? { date: top.date, id: top.id } : null };
   }
+  /* The mark on the older-month link: an arrow that turns down and to the
+     left. It reads as going back in time, where a down arrow would promise
+     that more arrives below, which is what this used to do and no longer
+     does. */
+  var BC_RETURN =
+    '<svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M20 5v6a4 4 0 0 1-4 4H5" /><path d="m9 11-4 4 4 4" /></svg>';
+
   /* "Sep 2026". The rail carries every month the blog has, so the short
      form is what keeps a year of them on one strip. */
   function bcRailLabel(yymm) {

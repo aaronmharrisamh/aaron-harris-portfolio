@@ -2349,17 +2349,49 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 .bs-more[data-more="hard"]::after { content: "\2192"; }
 .bs-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* THE CHAIN: the way back to the month before, and the divider an
-   appended month gets. The divider carries the top border the first post
-   of a month would otherwise lack, because an appended month's first post
-   is no longer the first child. */
-.bm-older { display: block; margin: 1.6rem 0 0; font-size: .88rem; }
+/* THE WAY TO THE MONTH BEFORE, at the foot of the page, and the divider
+   an appended month gets in the stream. The divider carries the top border
+   the first post of a month would otherwise lack, because an appended
+   month's first post is no longer the first child.
+
+   On a month page this link navigates and is a chip, so it reads as a
+   control and not as a line of text after the last post. In the stream it
+   still appends, and keeps the plain look that says it expands in place.
+
+   These rules come after .bm-chip on purpose: both are one class, so the
+   later one wins, and the chip look would be lost if they came first. */
+.bm-older {
+  display: inline-flex; align-items: center; gap: .4rem;
+  margin: 1.6rem 0 0; padding: .4rem .85rem;
+  border: 1px solid var(--accent); border-radius: 999px;
+  background: var(--accent); color: var(--bg-deep);
+  font: 600 .78rem var(--font); text-decoration: none;
+  transition: background .2s var(--ease), border-color .2s var(--ease);
+}
+.bm-older:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+.bm-older:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.bm-older__i { width: 15px; height: 15px; flex: none; }
 /* The display above beats the browser's own rule for [hidden], so the
    focused view could set hidden on this link and still leave it on
    screen. Any element that declares display needs this to stay hidable. */
 .bm-older[hidden] { display: none; }
-.bm-older[aria-busy="true"] { color: var(--dim); pointer-events: none; }
-.bm-older--end { color: var(--dim); }
+.bm-older[aria-busy="true"] {
+  background: none; border-color: var(--line); color: var(--dim); pointer-events: none;
+}
+/* The stream's link still expands in place, so it stays a line of text:
+   a filled chip there would promise a page that never arrives. */
+#blogStream .bm-older {
+  display: block; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--accent-bright); font-size: .88rem;
+}
+/* The end of the chain is a statement, not a control. */
+.bm-older--end,
+#blogStream .bm-older--end {
+  display: block; padding: 0; border: 0; background: none;
+  color: var(--dim); font-size: .88rem; font-weight: 400;
+}
 .bm-divider {
   margin: clamp(1.6rem, 4vw, 2.4rem) 0 0; padding-top: 1.2rem;
   border-top: 1px solid var(--line-soft);

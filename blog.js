@@ -749,7 +749,7 @@
     if (head) head.textContent = name;
     doc.title = blogFocusTitle(name);
     blogFocusSelf(post);
-    blogFocusBack();
+    blogBackChip();
     return true;
   }
   /* The post's own title and timestamp are links to this view. A link to
@@ -774,6 +774,11 @@
   }
   /* Back, under the bar, where the eye already is after the rail.
 
+     It is offered by any view that narrows what the reader sees: one post,
+     or one tag. Both are places a reader arrives at and then wants out of,
+     and neither can be left by the browser alone when the address was
+     rewritten in place.
+
      Back is offered only when this site sent the reader here in this tab.
      A pasted address, a new tab, and a duplicated tab get none, because
      Back there would leave the site or do nothing.
@@ -785,7 +790,7 @@
 
      It is a filled chip, because it is the one thing a reader in this
      view is most likely to want, and the rail above it is outlined. */
-  function blogFocusBack() {
+  function blogBackChip() {
     var old = doc.querySelector(".bm-back");
     if (old) old.parentNode.removeChild(old);
     var bar = doc.getElementById("blogBar");
@@ -854,8 +859,15 @@
     if (!onMonth && !stream) return false;
     blogChainRoot = !onMonth;
     blogChainAt = location.href;
-    var link = (stream || doc).querySelector(".bm-older[href]");
-    if (link) link.addEventListener("click", blogChainClick);
+    /* The chain appends into the stream only. On a month page the link is
+       left alone and navigates, because the rail there already carries
+       every month: appending was a second way to move that had to be kept
+       in step with the first, and when it was not, the address named one
+       month while the heading and the rail named another. */
+    if (!onMonth) {
+      var link = stream.querySelector(".bm-older[href]");
+      if (link) link.addEventListener("click", blogChainClick);
+    }
     if (onMonth) {
       /* the address is answered first, so the reader sees one post
          rather than the whole month for a frame and then one post */
@@ -1452,7 +1464,10 @@
     if (!tagLine) {
       tagLine = doc.createElement("p");
       tagLine.className = "bs-showing";
-      bar.parentNode.insertBefore(tagLine, bar.nextSibling);
+      /* under Back when there is one, so the escape sits above the status
+         and the order never depends on which was drawn first */
+      var after = doc.querySelector(".bm-back") || bar;
+      after.parentNode.insertBefore(tagLine, after.nextSibling);
     }
     tagLine.innerHTML = "";
     var what = doc.createElement("b");
@@ -1525,14 +1540,16 @@
     blogTagClicks();
     var t = /[?&]t=([^&]*)/.exec(location.search);
     if (onMonth) {
-      if (t) blogFilterTag(decodeURIComponent(t[1]));
+      if (t) { blogFilterTag(decodeURIComponent(t[1])); blogBackChip(); }
       return;
     }
     blogBarFill();
     findAttach();
     blogZoomAttach(blogStream);
     blogCutAll();
-    if (t) { blogFilterTag(decodeURIComponent(t[1])); return; }
+    /* a tag view narrows what the reader sees, so it gets the same way
+       out as one post does */
+    if (t) { blogFilterTag(decodeURIComponent(t[1])); blogBackChip(); return; }
     var m = /[?&]b=([^&]*)/.exec(location.search);
     blogShow(m ? decodeURIComponent(m[1]) : "", false);
   })();
