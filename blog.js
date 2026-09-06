@@ -742,7 +742,7 @@
     if (head) head.textContent = name;
     doc.title = blogFocusTitle(name);
     blogFocusSelf(post);
-    blogFocusWayOut(post, id);
+    blogFocusBack();
     return true;
   }
   /* The post's own title and timestamp are links to this view. A link to
@@ -765,35 +765,33 @@
     parts[parts.length - 1] = name;
     return parts.join(" · ");
   }
-  /* The ways out of the focused view, written once and replaced on a
-     second call.
+  /* Back, opposite the heading, and nothing beside it.
 
      Back is offered only when this site sent the reader here in this tab.
-     A pasted address, a new tab, and a duplicated tab all get the month
-     link alone, because Back there would leave the site or do nothing.
+     A pasted address, a new tab, and a duplicated tab get none, because
+     Back there would leave the site or do nothing.
 
-     Back describes the reader's path and the month link describes a
-     destination, so both can stand at once. */
-  function blogFocusWayOut(post, id) {
+     There is no "view the whole month" any more. The rail under the
+     heading carries this month as a link, so that destination is said
+     once instead of twice, and the rail says where the month sits among
+     the others while it does it.
+
+     A month file written before the rail has no aside to put Back in, so
+     it goes at the end of the heading block instead. */
+  function blogFocusBack() {
     var top = doc.querySelector(".bm-top");
     if (!top) return;
-    Array.prototype.forEach.call(top.querySelectorAll(".bm-top__out, .bm-top__back"),
+    Array.prototype.forEach.call(top.querySelectorAll(".bm-top__back"),
       function (el) { el.parentNode.removeChild(el); });
-    if (AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere()) {
-      var b = doc.createElement("button");
-      b.type = "button";
-      b.className = "textlink bm-top__back";
-      b.textContent = "Back";
-      /* traverse the entry that is already there. Navigating to a copy of
-         it would append a second entry and break Forward. */
-      b.addEventListener("click", function () { history.back(); });
-      top.appendChild(b);
-    }
-    var a = doc.createElement("a");
-    a.className = "textlink bm-top__out";
-    a.href = blogPostUrl(post.getAttribute("data-date") || "", id, "month", false);
-    a.textContent = "View the whole month";
-    top.appendChild(a);
+    if (!(AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere())) return;
+    var b = doc.createElement("button");
+    b.type = "button";
+    b.className = "textlink bm-top__back";
+    b.textContent = "← Back";
+    /* traverse the entry that is already there. Navigating to a copy of
+       it would append a second entry and break Forward. */
+    b.addEventListener("click", function () { history.back(); });
+    (top.querySelector(".bm-top__aside") || top).appendChild(b);
   }
   /* A month file carries a boot style that hides the other posts before
      this script runs, so the whole month never flashes past first. From

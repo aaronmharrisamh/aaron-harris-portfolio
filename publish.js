@@ -1904,10 +1904,10 @@
      or a rebuild renders again the same, keeps the stamp it has. The
      manifest carries the same stamp on the month's line, and a hand-off
      compares the two. */
-  function bcMonthText(yymm, blocks, meta, prev, months) {
+  function bcMonthText(yymm, blocks, meta, prev, months, counts) {
     var joined = bcSortBlocks(blocks).map(function (b) { return b.text; }).join("\n");
     var ms = TOOL.stamp(joined);
-    return { stamp: ms, text: bcMonthSkeleton(yymm, joined, meta, prev || null, ms, months) };
+    return { stamp: ms, text: bcMonthSkeleton(yymm, joined, meta, prev || null, ms, months, counts) };
   }
   /* The chain. months is newest first, as bcUniqueMonths gives it, and
      both work whether yymm is in the list or not: the month before it is
@@ -1927,14 +1927,14 @@
      fetches that one month, reparses it, and writes it again with the prev
      the final month list gives it. Nothing else is touched. A month the
      bundle already holds was rendered with the right prev. */
-  function bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor) {
+  function bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor, counts) {
     var newer = bcNewerOf(months, yymm);
     if (!newer || files["blog/" + newer + ".html"]) return Promise.resolve();
     return bcFetchMonth(newer, deployed).then(function (text) {
       if (text === null) return;
       var blocks = bcParseMonthBlocks(text);
       if (!blocks.length) return;
-      var mt = bcMonthText(newer, blocks, meta, bcPrevOf(months, newer), months);
+      var mt = bcMonthText(newer, blocks, meta, bcPrevOf(months, newer), months, counts);
       files["blog/" + newer + ".html"] = new TextEncoder().encode(mt.text);
       touched[newer] = mt.stamp;
       if (blocksFor) blocksFor[newer] = blocks;
@@ -1996,7 +1996,7 @@
      before it. The two script tags are site.js and blog.js, for the loader
      that walks the chain in place; neither tool.js nor publish.js loads
      here, because a month file is generated, not managed. */
-  function bcMonthSkeleton(yymm, blocksJoined, meta, prev, stamp, months) {
+  function bcMonthSkeleton(yymm, blocksJoined, meta, prev, stamp, months, counts) {
     var B = AMH.blog;
     var base = meta.base, fontHref = meta.fontHref, brand = meta.brand;
     var mt = B.monthTitle(yymm);
@@ -2067,11 +2067,20 @@
          the bar. The bar holds one row at every width, and a 600px
          measure cannot fit five items on one row. */
       '    <div class="bm-top">\n' +
-      '      <span class="eyebrow">' + (meta.eyebrow || "Blog") + "</span>\n" +
-      '      <h1 class="bm-top__month">' + mt + "</h1>\n" +
+      '      <div class="bm-top__row">\n' +
+      '        <div class="bm-top__name">\n' +
+      '          <span class="eyebrow">' + (meta.eyebrow || "Blog") + "</span>\n" +
+      '          <h1 class="bm-top__month">' + mt + "</h1>\n" +
+      "        </div>\n" +
+      /* The reading view puts Back here, opposite the heading, so it sits
+         where a reader looks to leave rather than in the row of places
+         they can go. It stays empty on the month view. */
+      '        <div class="bm-top__aside"></div>\n' +
+      "      </div>\n" +
       '      <a class="textlink bm-top__stream" href="../blog.html?b=' + yymm +
       '">Read in the full stream</a>\n' +
       "    </div>\n" +
+      bcMonthRail(months, counts, yymm) +
       /* The same two items blog.html's bar carries. It has no label of its
          own: the header above names the site and the heading above names
          the month, so a third name would say nothing new. */
@@ -2746,6 +2755,52 @@
     return { base: base, fontHref: fontHref, brand: brand, eyebrow: eyebrow,
              chrome: bcLiftChrome(src) };
   }
+  /* How many posts each month holds, for the rail. */
+  function bcMonthCounts(entries) {
+    var per = {};
+    entries.forEach(function (e) {
+      var mo = e.date.slice(0, 4);
+      per[mo] = (per[mo] || 0) + 1;
+    });
+    return per;
+  }
+  /* "Sep 2026". The rail carries every month the blog has, so the short
+     form is what keeps a year of them on one strip. */
+  function bcRailLabel(yymm) {
+    return AMH.blog.monthTitle(yymm).replace(/^(\w{3})\w*/, "$1");
+  }
+  /* THE MONTH RAIL: every month, newest first, with the count each holds
+     and the month being read marked.
+
+     This is written here and not by blog.js because a month page carries
+     no entries. Its manifest states the month list and nothing else, so
+     the page cannot count what it does not hold. Writing it also means a
+     reader with no script gets the whole navigation and not just the one
+     link back through the chain.
+
+     The month being read is a link to itself. On the month view that is a
+     reload, and in the reading view it is the way to the whole month,
+     which is the only job the old "View the whole month" link had. */
+  function bcMonthRail(months, counts, yymm) {
+    var all = (months && months.length) ? months : [yymm];
+    var list = all.map(function (mo) {
+      var now = mo === yymm;
+      var n = counts && counts[mo];
+      return '        <li><a class="bm-chip' + (now ? " is-now" : "") +
+        '" href="' + mo + '.html"' + (now ? ' aria-current="page"' : "") + ">" +
+        bcRailLabel(mo) + (n ? ' <span class="bm-chip__n">' + n + "</span>" : "") +
+        "</a></li>";
+    }).join("\n");
+    /* Newest is pinned outside the strip, so the one move a lost reader
+       always wants cannot scroll out of reach. */
+    var newest = all[0];
+    var pin = newest === yymm
+      ? '      <span class="bm-chip bm-chip--newest is-off">Newest</span>'
+      : '      <a class="bm-chip bm-chip--newest" href="' + newest + '.html">Newest</a>';
+    return '    <nav class="bm-rail" aria-label="Months">\n' +
+      '      <ul class="bm-rail__strip">\n' + list + "\n" +
+      "      </ul>\n" + pin + "\n    </nav>\n";
+  }
   function bcUniqueMonths(entries) {
     var months = [];
     entries.slice().reverse().forEach(function (e) {
@@ -3167,7 +3222,7 @@
         }
         blocks = blocks.filter(function (b) { return b.id !== id; });
         blocks.push({ id: id, date: date, text: bcRenderArticle(id, date, title, source, meta0) });
-        var mt = bcMonthText(yymm, blocks, meta, bcPrevOf(months, yymm), months);
+        var mt = bcMonthText(yymm, blocks, meta, bcPrevOf(months, yymm), months, bcMonthCounts(entries));
         files["blog/" + yymm + ".html"] = enc.encode(mt.text);
         touched[yymm] = mt.stamp;
         blocksFor[yymm] = blocks;
@@ -3180,7 +3235,7 @@
           var oldBlocks = bcParseMonthBlocks(oldText)
             .filter(function (b) { return b.id !== id; });
           if (oldBlocks.length) {
-            var ot = bcMonthText(oldMonth, oldBlocks, meta, bcPrevOf(months, oldMonth), months);
+            var ot = bcMonthText(oldMonth, oldBlocks, meta, bcPrevOf(months, oldMonth), months, bcMonthCounts(entries));
             files["blog/" + oldMonth + ".html"] = enc.encode(ot.text);
             touched[oldMonth] = ot.stamp;
             blocksFor[oldMonth] = oldBlocks;
@@ -3193,10 +3248,10 @@
         /* a month created, or a month emptied: the month after it points
            at the wrong month now */
         var created = deployed.indexOf(yymm) === -1
-          ? bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor) : Promise.resolve();
+          ? bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor, bcMonthCounts(entries)) : Promise.resolve();
         return created.then(function () {
           if (oldMonth && oldMonth !== yymm && months.indexOf(oldMonth) === -1) {
-            return bcRepairNewer(files, touched, months, oldMonth, deployed, meta, blocksFor);
+            return bcRepairNewer(files, touched, months, oldMonth, deployed, meta, blocksFor, bcMonthCounts(entries));
           }
         });
       })
@@ -3363,7 +3418,7 @@
           months = bcUniqueMonths(entries);
           var repair = Promise.resolve();
           if (blocks.length) {
-            var mt = bcMonthText(yymm, blocks, meta, bcPrevOf(months, yymm), months);
+            var mt = bcMonthText(yymm, blocks, meta, bcPrevOf(months, yymm), months, bcMonthCounts(entries));
             files["blog/" + yymm + ".html"] = new TextEncoder().encode(mt.text);
             touched[yymm] = mt.stamp;
             blocksFor[yymm] = blocks;
@@ -3371,7 +3426,7 @@
             bcOrphans.push("blog/" + yymm + ".html");
             /* the month is empty now: the month after it points at it, and
                the stream may have to show the month before it instead */
-            repair = bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor);
+            repair = bcRepairNewer(files, touched, months, yymm, deployed, meta, blocksFor, bcMonthCounts(entries));
           }
           return repair;
         }).then(function () {
@@ -3464,7 +3519,12 @@
                        text: bcRenderArticle(post.id, post.date, post.title, post.source, bcMetaOf(post)) };
             });
             /* a rebuild sets every link in the chain from the full list */
-            var mt = bcMonthText(yymm, rendered, meta, bcPrevOf(months, yymm), months);
+            /* the manifest's own entries: a rebuild reads the months one
+               at a time, so the derived list does not exist yet. Any
+               difference between the two is reported by bcDerivedManifest
+               below, and corrected by the publish that follows. */
+            var mt = bcMonthText(yymm, rendered, meta, bcPrevOf(months, yymm), months,
+                                 bcMonthCounts(man.entries));
             files["blog/" + yymm + ".html"] = enc.encode(mt.text);
             touched[yymm] = mt.stamp;
             blocksFor[yymm] = rendered;

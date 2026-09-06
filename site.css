@@ -2031,23 +2031,82 @@ ul.dd-points li::before {
 
    The month keeps its bar, its header, and its contact block. A reader
    who wants the rest of the site must not have to press Back to find it. */
-.bm-top__out,
-.bm-top__back { display: inline-block; margin-top: .5rem; font-size: .85rem; }
-/* Back is a button, because it moves through history rather than pointing
-   at an address. It reads as the link beside it, so the row stays a row of
-   choices and not a button next to a link. */
+/* Back sits opposite the heading, where a reader looks to leave, rather
+   than in the row of places they can go. It is a button because it moves
+   through history and points at no address, and it reads as a link so the
+   heading block stays two items and not a button beside a heading. */
+.bm-top__row { display: flex; align-items: flex-start; gap: 1rem; }
+.bm-top__name { min-width: 0; }
+.bm-top__aside { margin-left: auto; flex: none; padding-top: .35rem; }
 .bm-top__back {
   background: none; border: 0; padding: 0; font: inherit; font-size: .85rem;
-  cursor: pointer;
+  cursor: pointer; white-space: nowrap;
 }
-/* The space goes on the right of each control, never on the left of the
-   next one. A left margin survives a wrap and indents the row it starts,
-   which at 390px read as a mistake. */
-.bm-top__back { margin-right: 1rem; }
-/* In this view the stream link is a third way out to a place the reader
-   did not ask about, and the month is the one that answers "where is
-   this post from". The nav still carries Blog. */
+/* In this view the stream link is a way out to a place the reader did not
+   ask about, and the rail below already carries this month. The nav still
+   carries Blog. */
 .is-focus .bm-top__stream { display: none; }
+
+/* THE MONTH RAIL: every month the blog has, newest first, with the count
+   each holds and the one being read marked.
+
+   The publish writes it, because a month page carries no entries and so
+   cannot count what it does not hold. That also means it works with no
+   script, which the chain link at the foot of the page did not: that link
+   only ever ran backward, and a reader on the oldest month had no way
+   forward at all.
+
+   The strip scrolls sideways and Newest is pinned outside it, so the one
+   move a lost reader always wants cannot scroll out of reach. */
+.bm-rail {
+  display: flex; align-items: center; gap: .5rem;
+  margin: .9rem 0 0;
+}
+.bm-rail__strip {
+  display: flex; align-items: center; gap: .4rem;
+  flex: 1; min-width: 0; margin: 0; padding: 0 0 .2rem; list-style: none;
+  overflow-x: auto; scrollbar-width: thin;
+  /* a chip is never sliced in half at the edge of the strip */
+  scroll-snap-type: x proximity;
+}
+.bm-rail__strip > li { flex: none; scroll-snap-align: start; }
+.bm-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .34rem .75rem; white-space: nowrap;
+  border: 1px solid var(--line); border-radius: 999px;
+  color: var(--accent-bright); font: 600 .74rem var(--font); text-decoration: none;
+  transition: border-color .2s var(--ease), background .2s var(--ease),
+              color .2s var(--ease);
+}
+.bm-chip:hover { border-color: var(--accent); background: var(--accent-faint); }
+.bm-chip:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+/* the month being read: filled rather than outlined, so the reader finds
+   their place in the strip before they read a single label */
+.bm-chip.is-now {
+  background: var(--panel-2); border-color: var(--line); color: var(--text);
+}
+.bm-chip__n {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 .28rem;
+  border-radius: 999px; background: rgba(255,255,255,.08);
+  color: var(--muted); font-size: .62rem; font-weight: 700;
+}
+.bm-chip.is-now .bm-chip__n { background: var(--accent-faint); color: var(--accent-bright); }
+.bm-chip--newest {
+  flex: none;
+  background: var(--accent); border-color: var(--accent); color: var(--bg-deep);
+}
+.bm-chip--newest:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+/* on the newest month there is nowhere to go, so it states that rather
+   than offering a press that would do nothing */
+.bm-chip.is-off {
+  background: none; border-style: dashed; color: var(--dim);
+  cursor: default; opacity: .65;
+}
+.bm-chip.is-off:hover { border-color: var(--line); background: none; }
 
 /* THIS VIEW OPENS AT THE TOP OF THE PAGE.
 

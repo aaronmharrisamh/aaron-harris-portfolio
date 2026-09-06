@@ -3392,6 +3392,31 @@ async function main() {
           .exec(readFileSync(join(REPO, "blog.html"), "utf-8"))[1] + "</span>") &&
       month.indexOf('class="bm-top"') < month.indexOf('class="bs-bar"'),
       barHTML.replace(/\s+/g, " ").slice(0, 160));
+    // THE MONTH RAIL is written here and not by blog.js, because a month
+    // page carries no entries: its manifest states the month list and
+    // nothing else, so the page cannot count what it does not hold.
+    // Writing it also means a reader with no script gets the whole
+    // navigation, where the chain link at the foot only ever ran backward.
+    const railHTML = (function (src) {
+      const a = src.indexOf('<nav class="bm-rail"');
+      const b = src.indexOf("</nav>", a);
+      return a === -1 || b === -1 ? "" : src.slice(a, b + 6);
+    })(month);
+    // This bundle holds one month, so the rail is one chip: the month
+    // being read, marked, linking to itself. That self-link is what the
+    // reading view uses as its way to the whole month.
+    check("month rail: the month is a chip, marked, with the count it holds",
+      /<nav class="bm-rail" aria-label="Months">/.test(railHTML) &&
+      railHTML.includes('<a class="bm-chip is-now" href="2607.html" aria-current="page">Jul 2026 ' +
+                        '<span class="bm-chip__n">1</span></a>'),
+      railHTML.replace(/\s+/g, " ").slice(0, 220) || "no rail in the month file");
+    // Newest is outside the strip so it cannot scroll away. On the newest
+    // month there is nowhere to go, so it says so rather than offering a
+    // press that would do nothing.
+    check("month rail: Newest is pinned outside the strip, and inert on the newest month",
+      /<\/ul>\s*<span class="bm-chip bm-chip--newest is-off">Newest<\/span>/.test(railHTML) &&
+      !/bm-chip--newest" href/.test(railHTML),
+      (railHTML.match(/<[as][^>]*bm-chip--newest[^>]*>[^<]*/) || [""])[0]);
     check("month page: the posts are the stream's markup with p ids, and keep their source",
       /<article class="bs-post" id="p0001" data-id="0001" data-date="260711"/.test(month) &&
       month.includes('<a class="bs-post__when" href="2607.html?post=p0001#p0001">') &&
@@ -4147,6 +4172,57 @@ async function main() {
         }, 600);
       }, 1200); });
     })()`, { awaitPromise: true });
+    // Two months exist by now, so the rail carries both: newest first, the
+    // one being read marked, and Newest live because this is not it. This
+    // is the forward route the chain never had, since "Older posts" only
+    // ever ran backward and left the oldest month a dead end.
+    const railTwo = await evaluate(`(function () {
+      var chips = [].slice.call(document.querySelectorAll('.bm-chip'));
+      var strip = document.querySelector('.bm-rail__strip');
+      var pin = document.querySelector('.bm-chip--newest');
+      return {
+        labels: chips.map(function (c) { return c.textContent.trim(); }),
+        now: (function (el) { return el ? el.getAttribute('href') : null; })(
+          document.querySelector('.bm-chip.is-now')),
+        current: (function (el) { return el ? el.getAttribute('aria-current') : null; })(
+          document.querySelector('.bm-chip.is-now')),
+        pinHref: pin ? pin.getAttribute('href') : null,
+        pinOutside: !!(pin && strip && !strip.contains(pin)),
+        railLabel: (document.querySelector('.bm-rail') || {}).getAttribute
+          ? document.querySelector('.bm-rail').getAttribute('aria-label') : null
+      };
+    })()`);
+    check("month rail: both months, newest first, current marked, Newest outside the strip",
+      JSON.stringify(railTwo.labels) === '["Jul 2026 1","Jun 2026 1","Newest"]' &&
+      railTwo.now === "2607.html" && railTwo.current === "page" &&
+      /* this page IS the newest month, so the pin has nowhere to send the
+         reader and carries no address */
+      railTwo.pinHref === null && railTwo.pinOutside === true &&
+      railTwo.railLabel === "Months",
+      JSON.stringify(railTwo));
+
+    // Standing on the OLDER month is the case that had no answer at all:
+    // "Older posts" only ever ran backward, so the oldest month ended with
+    // "This is the first month" and no way forward. The pin now carries
+    // the newest month's address, and the strip carries every other month.
+    await send("Page.navigate", { url: B + "blog/2606.html" });
+    await sleep(1800);
+    const railOld = await evaluate(`(function () {
+      var pin = document.querySelector('.bm-chip--newest');
+      return { pinHref: pin ? pin.getAttribute('href') : null,
+               pinOff: !!(pin && pin.classList.contains('is-off')),
+               now: (function (el) { return el ? el.getAttribute('href') : null; })(
+                 document.querySelector('.bm-chip.is-now')),
+               forward: [...document.querySelectorAll('.bm-rail__strip a')]
+                 .map(function (a) { return a.getAttribute('href'); }) };
+    })()`);
+    check("month rail: the oldest month can reach the newest, which the chain never allowed",
+      railOld.pinHref === "2607.html" && railOld.pinOff === false &&
+      railOld.now === "2606.html" &&
+      JSON.stringify(railOld.forward) === '["2607.html","2606.html"]',
+      JSON.stringify(railOld));
+    await send("Page.navigate", { url: B + "blog/2607.html" });
+    await sleep(1800);
     check("month page: the pill is there too, and its hits are sibling month files",
       monthFind.pill && monthFind.open && monthFind.href === "2607.html?post=p0001#p0001",
       JSON.stringify(monthFind));
@@ -4740,8 +4816,12 @@ async function main() {
         .filter(p => getComputedStyle(p).display !== "none").map(p => p.id),
       heading: (document.querySelector('.bm-top__month') || {}).textContent,
       title: document.title,
-      out: (document.querySelector('.bm-top__out') || {}).getAttribute
-        ? document.querySelector('.bm-top__out').getAttribute('href') : null,
+      rail: !!document.querySelector('.bm-rail'),
+      nowChip: (function (el) { return el ? el.getAttribute('href') : null; })(
+        document.querySelector('.bm-chip.is-now')),
+      nowLabel: (function (el) { return el ? el.textContent.trim() : null; })(
+        document.querySelector('.bm-chip.is-now')),
+      out: !!document.querySelector('.bm-top__out'),
       boot: !!document.getElementById('postBoot'),
       bar: !!document.getElementById('blogBar'),
       find: !!document.getElementById('blogFind'),
@@ -4757,24 +4837,31 @@ async function main() {
     check("focus: the post names the heading and the tab, and the boot style is gone",
       solo.heading === "Moved post" && /Moved post$/.test(solo.title) && !solo.boot,
       JSON.stringify({ heading: solo.heading, title: solo.title, boot: solo.boot }));
-    // the way out, and the reason the site's own chrome is not hidden with
-    // the siblings: a reader who lands here from a link needs the rest of
-    // the site without pressing Back
-    check("focus: the way out is there, and so are the bar and the contact block",
-      solo.out === "2606.html#p0001" && solo.bar && solo.find && solo.picker && solo.contact,
-      JSON.stringify({ out: solo.out, bar: solo.bar, contact: solo.contact }));
+    // The rail is the way out, and there is no second one beside it: the
+    // month being read is a chip that links to the whole month, which is
+    // the only job the retired "View the whole month" link had.
+    // The site's own chrome is not hidden with the siblings either, because
+    // a reader who lands here from a link needs the rest of the site.
+    check("focus: the rail is the way out, and the retired link is not beside it",
+      solo.rail && solo.nowChip === "2606.html" && /Jun 2026/.test(solo.nowLabel) &&
+      solo.out === false && solo.bar && solo.find && solo.picker && solo.contact,
+      JSON.stringify({ nowChip: solo.nowChip, nowLabel: solo.nowLabel, out: solo.out,
+                       bar: solo.bar, contact: solo.contact }));
 
     // applying the view twice must not add a second way out or restate a
     // heading: it sets state rather than toggling it
     const twice = await evaluate(`(function () {
       AMH.blog.focusApply();
-      return { outs: document.querySelectorAll('.bm-top__out').length,
+      return { rails: document.querySelectorAll('.bm-rail').length,
+               nows: document.querySelectorAll('.bm-chip.is-now').length,
+               backs: document.querySelectorAll('.bm-top__back').length,
                heading: document.querySelector('.bm-top__month').textContent,
                title: document.title,
                shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length };
     })()`);
     check("focus: applying the view twice gives the same one result",
-      twice.outs === 1 && twice.heading === "Moved post" && twice.shown === 1 &&
+      twice.rails === 1 && twice.nows === 1 && twice.backs <= 1 &&
+      twice.heading === "Moved post" && twice.shown === 1 &&
       /Moved post$/.test(twice.title), JSON.stringify(twice));
 
     // a focused post is read whole, past both cut points, whichever caller
@@ -4838,6 +4925,10 @@ async function main() {
     const browse = await evaluate(`({
       shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length,
       out: !!document.querySelector('.bm-top__out'),
+      rail: !!document.querySelector('.bm-rail'),
+      nowChip: (function (el) { return el ? el.getAttribute('href') : null; })(
+        document.querySelector('.bm-chip.is-now')),
+      back: !!document.querySelector('.bm-top__back'),
       heading: (document.querySelector('.bm-top__month') || {}).textContent,
       focusCls: document.body.classList.contains('is-focus'),
       /* the focused view hides this one; ordinary browsing must not */
@@ -4847,7 +4938,8 @@ async function main() {
     })`);
     check("focus: a bare month address with an old anchor still browses the month",
       browse.shown === 2 && !browse.out && !browse.focusCls &&
-      browse.heading === "June 2026" && browse.streamLink === true,
+      browse.heading === "June 2026" && browse.streamLink === true &&
+      browse.rail && browse.nowChip === "2606.html" && browse.back === false,
       JSON.stringify(browse));
 
     // P2-4d. WHERE THE READER LANDS. The address keeps its "#p0001" so the
@@ -4868,7 +4960,7 @@ async function main() {
       var h = document.querySelector('.site-header');
       return { scrollY: Math.round(window.scrollY),
                headerH: h ? Math.round(h.getBoundingClientRect().height) : 0,
-               title: top('.bm-top__month'), out: top('.bm-top__out'),
+               title: top('.bm-top__month'), out: top('.bm-rail'),
                bar: top('#blogBar'), post: top('main .bs-post:not([hidden])') };
     })()`);
     check("focus: the fragment does not scroll the view past its own controls",
@@ -4944,13 +5036,21 @@ async function main() {
     await sleep(2200);
     const landed = await evaluate(`({
       back: !!document.querySelector('.bm-top__back'),
+      /* Back sits opposite the heading, not in the row of places the
+         reader can go, and it reads as an arrow so it is not mistaken
+         for one of the months beside it */
+      inAside: !!document.querySelector('.bm-top__aside .bm-top__back'),
+      backText: (function (el) { return el ? el.textContent.trim() : ''; })(
+        document.querySelector('.bm-top__back')),
+      rail: !!document.querySelector('.bm-rail'),
       out: !!document.querySelector('.bm-top__out'),
       href: location.href, len: history.length,
       state: JSON.stringify(history.state),
       token: (function () { try { return sessionStorage.getItem('amh:hop'); } catch (e) { return 'refused'; } })()
     })`);
-    check("back: a real departure offers Back beside the month link, and spends the token",
-      !!wrote && landed.back && landed.out && /\?post=p0001/.test(landed.href) &&
+    check("back: a real departure offers Back in the heading's aside, and spends the token",
+      !!wrote && landed.back && landed.inAside && /Back$/.test(landed.backText) &&
+      landed.rail && landed.out === false && /\?post=p0001/.test(landed.href) &&
       landed.token === null && landed.state === '{"amhBack":1}',
       JSON.stringify({ wrote: !!wrote, ...landed }));
 
@@ -4967,10 +5067,10 @@ async function main() {
     await sleep(1800);
     const pasted = await evaluate(`({
       back: !!document.querySelector('.bm-top__back'),
-      out: !!document.querySelector('.bm-top__out')
+      rail: !!document.querySelector('.bm-rail')
     })`);
-    check("back: a pasted address gets the month link and no Back",
-      pasted.back === false && pasted.out === true, JSON.stringify(pasted));
+    check("back: a pasted address gets the rail and no Back",
+      pasted.back === false && pasted.rail === true, JSON.stringify(pasted));
 
     // the reader reaching for the site's own nav must not lose the post
     const navKept = await evaluate(`(function () {
