@@ -4196,7 +4196,7 @@ async function main() {
       JSON.stringify(railTwo.labels) === '["Jul 2026 1","Jun 2026 1","Newest"]' &&
       railTwo.now === "2607.html" && railTwo.current === "page" &&
       /* this page IS the newest month, so the pin has nowhere to send the
-         reader and carries no address */
+         reader and carries no address at all */
       railTwo.pinHref === null && railTwo.pinOutside === true &&
       railTwo.railLabel === "Months",
       JSON.stringify(railTwo));
@@ -4216,8 +4216,11 @@ async function main() {
                forward: [...document.querySelectorAll('.bm-rail__strip a')]
                  .map(function (a) { return a.getAttribute('href'); }) };
     })()`);
-    check("month rail: the oldest month can reach the newest, which the chain never allowed",
-      railOld.pinHref === "2607.html" && railOld.pinOff === false &&
+    // Newest lands on the newest post itself and not on the top of that
+    // month: a reader who presses it wants the latest thing written, so
+    // the anchor puts them on it rather than near it.
+    check("month rail: the oldest month reaches the newest post, which the chain never allowed",
+      railOld.pinHref === "2607.html#p0001" && railOld.pinOff === false &&
       railOld.now === "2606.html" &&
       JSON.stringify(railOld.forward) === '["2607.html","2606.html"]',
       JSON.stringify(railOld));
@@ -4854,7 +4857,7 @@ async function main() {
       AMH.blog.focusApply();
       return { rails: document.querySelectorAll('.bm-rail').length,
                nows: document.querySelectorAll('.bm-chip.is-now').length,
-               backs: document.querySelectorAll('.bm-top__back').length,
+               backs: document.querySelectorAll('.bm-chip--back').length,
                heading: document.querySelector('.bm-top__month').textContent,
                title: document.title,
                shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).length };
@@ -4928,7 +4931,7 @@ async function main() {
       rail: !!document.querySelector('.bm-rail'),
       nowChip: (function (el) { return el ? el.getAttribute('href') : null; })(
         document.querySelector('.bm-chip.is-now')),
-      back: !!document.querySelector('.bm-top__back'),
+      back: !!document.querySelector('.bm-chip--back'),
       heading: (document.querySelector('.bm-top__month') || {}).textContent,
       focusCls: document.body.classList.contains('is-focus'),
       /* the focused view hides this one; ordinary browsing must not */
@@ -5035,28 +5038,37 @@ async function main() {
     const wrote = await evaluate(PLANT({}));
     await sleep(2200);
     const landed = await evaluate(`({
-      back: !!document.querySelector('.bm-top__back'),
-      /* Back sits opposite the heading, not in the row of places the
-         reader can go, and it reads as an arrow so it is not mistaken
-         for one of the months beside it */
-      inAside: !!document.querySelector('.bm-top__aside .bm-top__back'),
+      back: !!document.querySelector('.bm-chip--back'),
+      /* Back sits under the bar, where the eye already is after the rail,
+         and it is a filled chip so it is not mistaken for one of the
+         outlined months above it. The arrow is drawn, not typed. */
+      underBar: (function (bar) {
+        return !!(bar && bar.nextElementSibling &&
+                  bar.nextElementSibling.classList.contains('bm-back') &&
+                  bar.nextElementSibling.querySelector('.bm-chip--back'));
+      })(document.getElementById('blogBar')),
+      arrowSvg: !!document.querySelector('.bm-chip--back svg.bm-back__i'),
+      filled: (function (el) {
+        return el ? getComputedStyle(el).backgroundColor : '';
+      })(document.querySelector('.bm-chip--back')),
       backText: (function (el) { return el ? el.textContent.trim() : ''; })(
-        document.querySelector('.bm-top__back')),
+        document.querySelector('.bm-chip--back')),
       rail: !!document.querySelector('.bm-rail'),
       out: !!document.querySelector('.bm-top__out'),
       href: location.href, len: history.length,
       state: JSON.stringify(history.state),
       token: (function () { try { return sessionStorage.getItem('amh:hop'); } catch (e) { return 'refused'; } })()
     })`);
-    check("back: a real departure offers Back in the heading's aside, and spends the token",
-      !!wrote && landed.back && landed.inAside && /Back$/.test(landed.backText) &&
+    check("back: a real departure offers Back under the bar, filled, and spends the token",
+      !!wrote && landed.back && landed.underBar && landed.arrowSvg &&
+      /^rgb\(74, 165, 232\)$/.test(landed.filled) && /^Back$/.test(landed.backText) &&
       landed.rail && landed.out === false && /\?post=p0001/.test(landed.href) &&
       landed.token === null && landed.state === '{"amhBack":1}',
       JSON.stringify({ wrote: !!wrote, ...landed }));
 
     // Back must traverse the entry that is already there. Navigating to a
     // copy of it would append a second entry and break Forward.
-    await evaluate(`document.querySelector('.bm-top__back').click()`);
+    await evaluate(`document.querySelector('.bm-chip--back').click()`);
     await sleep(2200);
     const wentBack = await evaluate(`({ href: location.href, len: history.length })`);
     check("back: Back returns to the stream and adds no history entry",
@@ -5066,7 +5078,7 @@ async function main() {
     await send("Page.navigate", { url: B + "blog/2606.html?post=p0001" });
     await sleep(1800);
     const pasted = await evaluate(`({
-      back: !!document.querySelector('.bm-top__back'),
+      back: !!document.querySelector('.bm-chip--back'),
       rail: !!document.querySelector('.bm-rail')
     })`);
     check("back: a pasted address gets the rail and no Back",

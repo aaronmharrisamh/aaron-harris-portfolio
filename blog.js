@@ -232,6 +232,13 @@
   /* The mark on the post edit chip. Drawn once, here, and inlined into each
      chip: an <img> would be a request per post, and the stroke has to be
      currentColor so it stays black on the yellow ground. */
+  /* The arrow on Back. Drawn here like the caret and the pencil, so it is
+     one request fewer and takes currentColor with the chip it sits in. */
+  var BLOG_BACK =
+    '<svg class="bm-back__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>';
+
   var BLOG_PENCIL =
     '<svg class="bs-retry__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -765,7 +772,7 @@
     parts[parts.length - 1] = name;
     return parts.join(" · ");
   }
-  /* Back, opposite the heading, and nothing beside it.
+  /* Back, under the bar, where the eye already is after the rail.
 
      Back is offered only when this site sent the reader here in this tab.
      A pasted address, a new tab, and a duplicated tab get none, because
@@ -776,22 +783,28 @@
      once instead of twice, and the rail says where the month sits among
      the others while it does it.
 
-     A month file written before the rail has no aside to put Back in, so
-     it goes at the end of the heading block instead. */
+     It is a filled chip, because it is the one thing a reader in this
+     view is most likely to want, and the rail above it is outlined. */
   function blogFocusBack() {
-    var top = doc.querySelector(".bm-top");
-    if (!top) return;
-    Array.prototype.forEach.call(top.querySelectorAll(".bm-top__back"),
-      function (el) { el.parentNode.removeChild(el); });
+    var old = doc.querySelector(".bm-back");
+    if (old) old.parentNode.removeChild(old);
+    var bar = doc.getElementById("blogBar");
+    if (!bar) return;
     if (!(AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere())) return;
+    var wrap = doc.createElement("div");
+    wrap.className = "bm-back";
     var b = doc.createElement("button");
     b.type = "button";
-    b.className = "textlink bm-top__back";
-    b.textContent = "← Back";
+    b.className = "bm-chip bm-chip--back";
+    b.innerHTML = BLOG_BACK;
+    /* the label is a text node after the mark, so textContent stays
+       "Back" and the arrow adds nothing a screen reader must read */
+    b.appendChild(doc.createTextNode("Back"));
     /* traverse the entry that is already there. Navigating to a copy of
        it would append a second entry and break Forward. */
     b.addEventListener("click", function () { history.back(); });
-    (top.querySelector(".bm-top__aside") || top).appendChild(b);
+    wrap.appendChild(b);
+    bar.parentNode.insertBefore(wrap, bar.nextSibling);
   }
   /* A month file carries a boot style that hides the other posts before
      this script runs, so the whole month never flashes past first. From

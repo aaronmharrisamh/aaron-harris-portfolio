@@ -2031,17 +2031,6 @@ ul.dd-points li::before {
 
    The month keeps its bar, its header, and its contact block. A reader
    who wants the rest of the site must not have to press Back to find it. */
-/* Back sits opposite the heading, where a reader looks to leave, rather
-   than in the row of places they can go. It is a button because it moves
-   through history and points at no address, and it reads as a link so the
-   heading block stays two items and not a button beside a heading. */
-.bm-top__row { display: flex; align-items: flex-start; gap: 1rem; }
-.bm-top__name { min-width: 0; }
-.bm-top__aside { margin-left: auto; flex: none; padding-top: .35rem; }
-.bm-top__back {
-  background: none; border: 0; padding: 0; font: inherit; font-size: .85rem;
-  cursor: pointer; white-space: nowrap;
-}
 /* In this view the stream link is a way out to a place the reader did not
    ask about, and the rail below already carries this month. The nav still
    carries Blog. */
@@ -2100,6 +2089,23 @@ ul.dd-points li::before {
   background: var(--accent); border-color: var(--accent); color: var(--bg-deep);
 }
 .bm-chip--newest:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+
+/* Back sits under the bar, where the eye already is after the rail, and it
+   is a filled chip because it is the one thing a reader in this view is
+   most likely to want. The rail above it is outlined, so the two do not
+   compete. It is a button, not a link, because it moves through history
+   and points at no address.
+
+   It must come AFTER .bm-chip: both are one class, so the later rule
+   wins, and declared first it lost its colour and its border back to the
+   outlined base. */
+.bm-back { margin: .7rem 0 0; }
+.bm-chip--back {
+  background: var(--accent); border-color: var(--accent); color: var(--bg-deep);
+  cursor: pointer;
+}
+.bm-chip--back:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+.bm-back__i { width: 14px; height: 14px; flex: none; }
 /* on the newest month there is nowhere to go, so it states that rather
    than offering a press that would do nothing */
 .bm-chip.is-off {
