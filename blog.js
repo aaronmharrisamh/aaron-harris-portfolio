@@ -735,13 +735,14 @@
 
     doc.body.classList.add("is-focus");
     blogPosts().forEach(function (p) { p.hidden = p !== post; });
-    /* the way to the month before this one belongs to the month view: a
-       reader here asked for one post, and appending to it would answer a
+    /* the ways to the other months belong to the month view: a reader
+       here asked for one post, and the rest of the chain answers a
        question they did not ask.
 
-       This reads the document and not main, because the older link is
-       main's sibling and not its child. */
-    Array.prototype.forEach.call(doc.querySelectorAll(".bm-older"),
+       This reads the document and not main, because the foot is main's
+       sibling and not its child. Both names are listed because the
+       stream has the bare link and a month page has the whole foot. */
+    Array.prototype.forEach.call(doc.querySelectorAll(".bm-older, .bm-chain"),
       function (el) { el.hidden = true; });
 
     var name = blogFocusName(post);
@@ -795,9 +796,33 @@
     if (old) old.parentNode.removeChild(old);
     var bar = doc.getElementById("blogBar");
     if (!bar) return;
-    if (!(AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere())) return;
+    if (!blogCameFromHere()) return;
     var wrap = doc.createElement("div");
     wrap.className = "bm-back";
+    wrap.appendChild(blogBackButton());
+    bar.parentNode.insertBefore(wrap, bar.nextSibling);
+  }
+  /* Back, again, at the head of the chain row.
+
+     The rail and the bar are nearly three screens above by the time a
+     reader reaches the end of a month, so the way back has to be here as
+     well as up there. The publish cannot write it: only the page knows
+     whether this site sent the reader, and a pasted address gets no Back
+     at the foot for the same reason it gets none under the bar. */
+  function blogBackFoot() {
+    var row = doc.querySelector(".bm-chain__row");
+    if (!row || row.querySelector(".bm-chip--back")) return;
+    if (!blogCameFromHere()) return;
+    row.insertBefore(blogBackButton(), row.firstChild);
+  }
+  /* Did this site send the reader here? site.js owns the answer, and a
+     page that loads without it offers no Back rather than a broken one. */
+  function blogCameFromHere() {
+    return !!(AMH.site && AMH.site.cameFromHere && AMH.site.cameFromHere());
+  }
+  /* The control itself. Both places that offer Back build it here, so the
+     look and the behaviour cannot drift apart. */
+  function blogBackButton() {
     var b = doc.createElement("button");
     b.type = "button";
     b.className = "bm-chip bm-chip--back";
@@ -808,8 +833,7 @@
     /* traverse the entry that is already there. Navigating to a copy of
        it would append a second entry and break Forward. */
     b.addEventListener("click", function () { history.back(); });
-    wrap.appendChild(b);
-    bar.parentNode.insertBefore(wrap, bar.nextSibling);
+    return b;
   }
   /* A month file carries a boot style that hides the other posts before
      this script runs, so the whole month never flashes past first. From
@@ -871,13 +895,17 @@
     if (onMonth) {
       /* the address is answered first, so the reader sees one post
          rather than the whole month for a frame and then one post */
-      blogFocusApply();
+      var focused = blogFocusApply();
       blogFocusBoot();
       /* a month page has the same bar, the same pill and the same zoom;
          it has no stream, so its posts are under main */
       blogBarFill();
       findAttach();
       blogZoomAttach(doc.querySelector("main"));
+      /* the focused view hides the foot, so Back there would go into a
+         place the reader cannot reach. That view has its own, under the
+         bar, put there by blogFocusApply. */
+      if (!focused) blogBackFoot();
     }
     return onMonth;
   }
@@ -1021,15 +1049,24 @@
           here.appendChild(out);
           if (out.classList && out.classList.contains("bs-post")) added.push(out);
         });
-        /* the fetched page's own older link, or its end note, takes the
-           clicked link's place */
-        var older = d.querySelector(".bm-older");
+        /* The fetched page's own older link takes the clicked link's
+           place, and the chain goes on from there.
+
+           A month with no older link is the first month. The stream says
+           so in its own words rather than adopting the foot of that page:
+           the foot is a row of chips for a reader standing on the month,
+           and the stream ends in a line of text. The words are the ones
+           the publish writes into a stream that needs no chain at all. */
+        var older = d.querySelector(".bm-older[href]");
         if (older) {
           older = doc.adoptNode(older);
           link.parentNode.replaceChild(older, link);
-          if (older.getAttribute("href")) older.addEventListener("click", blogChainClick);
+          older.addEventListener("click", blogChainClick);
         } else {
-          link.parentNode.removeChild(link);
+          var end = doc.createElement("p");
+          end.className = "bm-older bm-older--end";
+          end.textContent = "This is the first month.";
+          link.parentNode.replaceChild(end, link);
         }
         blogChainAt = url.href;
         divider.focus();

@@ -2084,11 +2084,15 @@ ul.dd-points li::before {
   color: var(--muted); font-size: .62rem; font-weight: 700;
 }
 .bm-chip.is-now .bm-chip__n { background: var(--accent-faint); color: var(--accent-bright); }
-.bm-chip--newest {
+/* Newest in the rail, and Newest and Newer at the foot: the moves that
+   leave this month, filled so they are found before they are read. */
+.bm-chip--newest,
+.bm-chip--next {
   flex: none;
   background: var(--accent); border-color: var(--accent); color: var(--bg-deep);
 }
-.bm-chip--newest:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+.bm-chip--newest:hover,
+.bm-chip--next:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
 
 /* Back sits under the bar, where the eye already is after the rail, and it
    is a filled chip because it is the one thing a reader in this view is
@@ -2391,6 +2395,29 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 #blogStream .bm-older--end {
   display: block; padding: 0; border: 0; background: none;
   color: var(--dim); font-size: .88rem; font-weight: 400;
+}
+
+/* THE MONTH CHAIN, at the foot: the ways on, under the last post.
+
+   The rail is nearly three screens above by the time a reader reaches
+   this, so these are the only controls they can see. They are filled for
+   that reason: nothing else competes at the end of a page, and an
+   outlined chip there reads as a line of text.
+
+   blog.js puts Back at the head of the row when this site sent the reader
+   here, so the row is written even when it holds nothing. An empty row
+   has no children and takes no height. */
+.bm-chain { margin: 1.6rem 0 0; }
+.bm-chain__row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+}
+/* The older link carries its own top margin for the stream, where it
+   stands alone under the posts. In the row the row owns the spacing. */
+.bm-chain .bm-older { margin: 0; }
+.bm-chain__i { width: 14px; height: 14px; flex: none; }
+/* The oldest month says so, above the ways out and not instead of them. */
+.bm-chain__end {
+  margin: 0 0 .7rem; color: var(--dim); font-size: .88rem;
 }
 .bm-divider {
   margin: clamp(1.6rem, 4vw, 2.4rem) 0 0; padding-top: 1.2rem;

@@ -964,6 +964,14 @@
     "color:var(--text-soft);font:600 .7rem var(--font);cursor:pointer;transition:border-color .2s,color .2s;}" +
     ".ced-btn:hover{border-color:var(--accent);color:var(--text);}" +
     ".ced-btn--accent{border-color:var(--accent);color:var(--accent-bright);}" +
+    /* The panel's own buttons are filled. They are the four moves the
+       editor offers, and outlined they read as labels on a dark panel.
+       The scope is the foot, so View in the head stays plain: it reports
+       which copy is on screen and is not a move. */
+    ".ced-panel__foot .ced-btn{border-color:var(--accent);background:var(--accent);" +
+    "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
+    ".ced-panel__foot .ced-btn:hover{border-color:var(--accent-bright);" +
+    "background:var(--accent-bright);color:var(--bg-deep);}" +
     ".ced-scrim{position:fixed;inset:0;z-index:3200;background:rgba(4,6,10,.72);}" +
     /* the tutorial arrow: above every dialog, below the launcher */
     ".ced-point{position:fixed;z-index:3400;pointer-events:none;}" +
@@ -1264,6 +1272,16 @@
       foot.appendChild(b);
     }
     footBtn("Export", "ced-btn--accent", function () { api.export(); });
+    /* Rebuild renders every month file again with the current chrome. It
+       runs the same wizard a publish runs, so the route pick, the bundle
+       and the checklist are shared and not copied.
+
+       It is offered only where the publish engine is loaded. On the other
+       pages the button could only answer "the composer lives on
+       blog.html", which is not an answer worth a button. */
+    if (AMH.publish && AMH.publish.rebuild) {
+      footBtn("Rebuild", "", function () { api.blog.rebuild(); });
+    }
     footBtn("New post", "", function () { api.blog(); });
     footBtn("Revert all", "", function () { api.revertAll(); });
     footBtn("Exit", "", function () { api(); });

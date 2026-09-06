@@ -158,7 +158,7 @@
      THE VISIT. A post link is a real link, so the browser owns Back and
      restores the reader's place. The only thing the browser cannot tell
      the arriving page is whether THIS site sent the reader, which is
-     what decides between a Back control and a plain way out.
+     what decides whether a Back control is offered at all.
 
      The referrer cannot answer that. It names the page that linked here,
      not the entry before this one, and the redirect above writes no entry
@@ -217,11 +217,15 @@
       var url;
       try { url = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
       if (url.origin !== location.origin) return;
-      /* Only a destination that narrows what the reader sees: one post,
-         or one tag. Those are the two views a reader arrives at and then
-         wants out of. A token for every link on the site would be noise,
-         and Back on a page that shows everything answers nothing. */
-      if (!/[?&](post=p\d{4}|t=[^&]+)/.test(url.search)) return;
+      /* Any destination that replaces this document. A link to a fragment
+         of this same page moves the reader without leaving it, so it is
+         not a departure and must not spend a token.
+
+         This once took only a post or a tag, because those were the two
+         views that offered Back. The foot of a month page offers it now
+         as well, and a month is reached by a plain address, so the test
+         is the document and not the shape of the address. */
+      if (url.pathname === location.pathname && url.search === location.search) return;
       try {
         sessionStorage.setItem(HOP_KEY, JSON.stringify(
           { to: url.href, at: Date.now() }));

@@ -2003,24 +2003,13 @@
     var pageTitle = "Aaron M. Harris · Blog · " + mt;
     var descr = "Thoughts, musings, and fun new developments from Aaron M. Harris";
     var url = base + "blog/" + yymm + ".html";
-    /* The way to the month before, at the foot of this one.
-
-       On a month page this is a plain link, not an expansion: the rail at
-       the top already carries every month, and a second navigation that
-       appended in place had to be kept in step with it. It was not, and a
-       reader who pressed it was left with an address naming one month, a
-       heading naming another, and every control scrolled off the top.
-
-       It names the month and its size because the rail is nearly three
-       screens above by the time a reader reaches this, so this is the only
-       label they can see. Whether one post waits or twelve is what decides
-       the press. */
-    var pn = (prev && nav && nav.counts) ? nav.counts[prev] : 0;
-    var older = prev
-      ? '    <a class="bm-older" href="' + prev + '.html" rel="prev">' + BC_RETURN +
-        "Older: " + B.monthTitle(prev) +
-        (pn ? " · " + pn + " post" + (pn === 1 ? "" : "s") : "") + "</a>\n"
-      : '    <p class="bm-older bm-older--end">This is the first month.</p>\n';
+    /* The ways on, at the foot of the month. Every one of them is a plain
+       link, not an expansion: the rail at the top already carries every
+       month, and a second navigation that appended in place had to be kept
+       in step with it. It was not, and a reader who pressed it was left
+       with an address naming one month, a heading naming another, and
+       every control scrolled off the top. */
+    var foot = bcMonthChain(months, nav, yymm, prev);
     return "<!DOCTYPE html>\n" +
       "<!-- " + bcGenerated(stamp) + " -->\n" +
       '<html lang="en">\n<head>\n' +
@@ -2062,7 +2051,7 @@
          arrives. blog.js removes this style and takes the work over. */
       '  <script>(function(){var m=/[?&]post=p(\\d{4})/.exec(location.search);' +
       'if(!m)return;var s=document.createElement("style");s.id="postBoot";' +
-      's.textContent="main>.bs-post:not(#p"+m[1]+"),.bm-older{display:none}";' +
+      's.textContent="main>.bs-post:not(#p"+m[1]+"),.bm-chain{display:none}";' +
       'document.head.appendChild(s);})();</script>\n' +
       "</head>\n" +
       '<body class="blog-month">\n' +
@@ -2099,7 +2088,7 @@
       "    <main>\n" +
       blocksJoined + "\n" +
       "    </main>\n" +
-      older +
+      foot +
       "  </div>\n\n" +
       /* the contact block carries the endbar, which is the copyright line,
          so a month file needs no footer of its own */
@@ -2786,6 +2775,13 @@
     '<svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M20 5v6a4 4 0 0 1-4 4H5" /><path d="m9 11-4 4 4 4" /></svg>';
+  /* The mark on the newer-month link: the same arrow mirrored, so the two
+     ends of the chain read as one pair and the direction is the only
+     difference between them. */
+  var BC_ONWARD =
+    '<svg class="bm-chain__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M4 5v6a4 4 0 0 0 4 4h11" /><path d="m15 11 4 4-4 4" /></svg>';
 
   /* "Sep 2026". The rail carries every month the blog has, so the short
      form is what keeps a year of them on one strip. */
@@ -2816,22 +2812,76 @@
         "</a></li>";
     }).join("\n");
     /* Newest is pinned outside the strip, so the one move a lost reader
-       always wants cannot scroll out of reach.
-
-       It lands on the newest post itself rather than the top of that
-       month. A reader who presses Newest wants the latest thing written,
-       and the anchor puts them on it instead of near it. */
+       always wants cannot scroll out of reach. */
     var newest = all[0];
-    var top = nav && nav.top;
-    var to = (top && top.date.slice(0, 4) === newest)
-      ? AMH.blog.postUrl(top.date, top.id, "month", false)
-      : newest + ".html";
     var pin = newest === yymm
       ? '      <span class="bm-chip bm-chip--newest is-off">Newest</span>'
-      : '      <a class="bm-chip bm-chip--newest" href="' + to + '">Newest</a>';
+      : '      <a class="bm-chip bm-chip--newest" href="' + bcNewestHref(all, nav) +
+        '">Newest</a>';
     return '    <nav class="bm-rail" aria-label="Months">\n' +
       '      <ul class="bm-rail__strip">\n' + list + "\n" +
       "      </ul>\n" + pin + "\n    </nav>\n";
+  }
+  /* Where Newest goes, for the rail's pin and for the foot.
+
+     It lands on the newest post itself rather than the top of that month.
+     A reader who presses Newest wants the latest thing written, and the
+     anchor puts them on it instead of near it. The month is the fallback
+     for a manifest whose newest entry is not in the newest month, which a
+     half-repaired bundle can hold. */
+  function bcNewestHref(all, nav) {
+    var newest = all[0];
+    var top = nav && nav.top;
+    return (top && top.date.slice(0, 4) === newest)
+      ? AMH.blog.postUrl(top.date, top.id, "month", false)
+      : newest + ".html";
+  }
+  /* THE MONTH CHAIN, at the foot: the ways on, under the last post.
+
+     The rail is nearly three screens above by the time a reader reaches
+     this, so the foot is the only navigation they can see. It used to
+     carry one link backward, which left the reader of the oldest month
+     with a sentence and no way out at all.
+
+     Older names its month and its size, and so does Newer: whether one
+     post waits or twelve is what decides the press. Newest is left out
+     when the newer month is the newest month, because two chips for one
+     destination read as two destinations.
+
+     Back is not written here. Only the page itself knows whether this
+     site sent the reader, so blog.js puts Back at the head of the row
+     when the answer is yes. */
+  function bcMonthChain(months, nav, yymm, prev) {
+    var B = AMH.blog;
+    var counts = (nav && nav.counts) || {};
+    var all = (months && months.length) ? months : [yymm];
+    var newest = all[0];
+    var newer = bcNewerOf(all, yymm);
+    function size(mo) {
+      var n = counts[mo];
+      return n ? " · " + n + " post" + (n === 1 ? "" : "s") : "";
+    }
+    var row = [];
+    if (prev) {
+      row.push('<a class="bm-older" href="' + prev + '.html" rel="prev">' + BC_RETURN +
+        "Older: " + B.monthTitle(prev) + size(prev) + "</a>");
+    }
+    if (newer) {
+      row.push('<a class="bm-chip bm-chip--next" href="' + newer + '.html" rel="next">' +
+        "Newer: " + B.monthTitle(newer) + size(newer) + BC_ONWARD + "</a>");
+    }
+    if (newer && newer !== newest) {
+      row.push('<a class="bm-chip bm-chip--newest" href="' + bcNewestHref(all, nav) +
+        '">Newest</a>');
+    }
+    /* The row is written even when it is empty, so blog.js has one place
+       to put Back on a blog that holds a single month. */
+    var end = prev ? ""
+      : '      <p class="bm-chain__end">This is the first month. There is nothing older.</p>\n';
+    return '    <nav class="bm-chain" aria-label="More months">\n' + end +
+      '      <div class="bm-chain__row">' +
+      (row.length ? "\n        " + row.join("\n        ") + "\n      " : "") +
+      "</div>\n    </nav>\n";
   }
   function bcUniqueMonths(entries) {
     var months = [];

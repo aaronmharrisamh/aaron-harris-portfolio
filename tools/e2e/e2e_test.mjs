@@ -1227,6 +1227,26 @@ async function main() {
   check("9 IMG chips + 9 plus chips built", ui.imgChips === 9 && ui.plusChips === 9,
     "img=" + ui.imgChips + " plus=" + ui.plusChips);
   check("badges shown for visible regions", ui.chips >= 70, "chips=" + ui.chips);
+  // The panel's own moves are filled, so a reader finds them without
+  // reading them. View is not among them: it reports which copy is on
+  // screen and is not a move, so it stays plain in the head.
+  //
+  // Rebuild is not here either. It renders every month file again and
+  // needs the publish engine, which only blog.html loads.
+  const foot = await evaluate(`(function () {
+    var btns = [].slice.call(document.querySelectorAll('.ced-panel__foot .ced-btn'));
+    var view = document.querySelector('.ced-panel__view');
+    return {
+      labels: btns.map(function (b) { return b.textContent.trim(); }),
+      filled: btns.map(function (b) { return getComputedStyle(b).backgroundColor; }),
+      view: view ? getComputedStyle(view).backgroundColor : 'no view button'
+    };
+  })()`);
+  check("panel foot: the moves are filled, View stays plain, and Rebuild is not offered here",
+    JSON.stringify(foot.labels) === '["Export","New post","Revert all","Exit"]' &&
+    foot.filled.every((c) => c === "rgb(74, 165, 232)") &&
+    foot.view !== "rgb(74, 165, 232)",
+    JSON.stringify(foot));
   // The site header is fixed, so a chip that scrolls to the top of the window
   // must pass BEHIND it rather than over the navigation. The fixed band runs
   // from 900 to 1000: header 900, drawer 940, progress bar 1000.
@@ -3262,7 +3282,7 @@ async function main() {
     check("month file: the focus boot script names the wanted post",
       month.includes('var m=/[?&]post=p(\\d{4})/.exec(location.search)') &&
       month.includes('s.id="postBoot"') &&
-      month.includes('main>.bs-post:not(#p"+m[1]+"),.bm-older{display:none}') &&
+      month.includes('main>.bs-post:not(#p"+m[1]+"),.bm-chain{display:none}') &&
       month.indexOf("postBoot") < month.indexOf("</head>"),
       (month.match(/<script>\(function[^\n]*/) || [""])[0].slice(0, 120));
     // The month surface carries the same address one step shorter, because
@@ -3281,9 +3301,10 @@ async function main() {
     // every managed page, because a consumer that claims its own regions has
     // to have claimed before the editor scans.
     check("chain: the first month says so, carries no prev, and loads the trunks in order",
-      !/rel="prev"/.test(month) && month.includes('<p class="bm-older bm-older--end">This is the first month.</p>') &&
+      !/rel="prev"/.test(month) &&
+      month.includes('<p class="bm-chain__end">This is the first month. There is nothing older.</p>') &&
       /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>\n\s*<script defer src="\.\.\/tool\.js"><\/script>\n\s*<script defer src="\.\.\/publish\.js"><\/script>/.test(month),
-      (month.match(/bm-older[^\n]*/) || [""])[0]);
+      (month.match(/bm-chain__end[^\n]*/) || [""])[0]);
 
     check("bundle ships no stylesheet (site.css is a repo file)",
       !Object.keys(zipFiles).some((n) => n.endsWith(".css")),
@@ -3369,6 +3390,11 @@ async function main() {
     // MC3. the bar carries the two controls and no label. The header above
     // names the site and the heading names the month, so a third name in the
     // bar would say nothing new.
+    //
+    // "bm-foot" was a month page's own copyright footer, retired when the
+    // contact block brought the endbar with it. It stays banned by name.
+    // The ways on at the end of a month are ".bm-chain", which is a
+    // different thing with a different job.
     const barBlock = (month.match(/<div class="bs-bar"[\s\S]*?\n    <\/div>/) || [""])[0];
     check("month page: the bar is the two controls, with no label of its own",
       /id="blogFind"/.test(barBlock) && /id="blogMonth"/.test(barBlock) &&
@@ -4091,7 +4117,7 @@ async function main() {
         t2.posts[0].title === "June post" && t2.posts[1].thumb.length > 100,
         t2.posts.map((e) => e.id + ":" + e.date).join(" "));
       check("chain: the backdated month is the first month, and its neighbour now points at it",
-        m2606c.includes('class="bm-older bm-older--end"') && !/rel="prev"/.test(m2606c) &&
+        m2606c.includes('class="bm-chain__end"') && !/rel="prev"/.test(m2606c) &&
         m2607c.includes('<link rel="prev" href="2606.html" />') && m2607c.includes('<link rel="prefetch" href="2606.html" />') &&
         /rel="prev"><svg class="bm-older__i"/.test(m2607c) &&
         m2607c.includes('id="p0001"'),
@@ -4121,6 +4147,27 @@ async function main() {
       arrived.rec === null && arrived.lineHidden === true && arrived.chips === 0,
       JSON.stringify(arrived).slice(0, 200));
     await evaluate(`sessionStorage.removeItem('amh-publish-pending'); window.edit();`);
+    // Rebuild is offered here and nowhere else: it renders every month
+    // file again, which needs the publish engine. It runs the wizard a
+    // publish runs, so the route pick, the bundle and the checklist are
+    // one implementation and not a second copy of one.
+    await sleep(400);
+    const blogFoot = await evaluate(`(function () {
+      var btns = [].slice.call(document.querySelectorAll('.ced-panel__foot .ced-btn'));
+      var b = btns.filter(function (x) { return x.textContent.trim() === 'Rebuild'; })[0];
+      return { labels: btns.map(function (x) { return x.textContent.trim(); }),
+               filled: b ? getComputedStyle(b).backgroundColor : '',
+               /* the button, the console name and the engine are one
+                  path: edit.blog.rebuild() calls AMH.publish.rebuild */
+               shared: !!(window.AMH && AMH.publish &&
+                          typeof AMH.publish.rebuild === 'function' &&
+                          window.edit.blog &&
+                          typeof window.edit.blog.rebuild === 'function') };
+    })()`);
+    check("panel foot: blog.html offers Rebuild, filled, beside Export",
+      JSON.stringify(blogFoot.labels) === '["Export","Rebuild","New post","Revert all","Exit"]' &&
+      blogFoot.filled === "rgb(74, 165, 232)" && blogFoot.shared,
+      JSON.stringify(blogFoot));
 
     // ---- the month chain, on the served bundle: 2607 points at 2606 ----
     // CH1. a month page boots with the two scripts and no console error,
@@ -4235,6 +4282,89 @@ async function main() {
       railOld.now === "2606.html" &&
       JSON.stringify(railOld.forward) === '["2607.html","2606.html"]',
       JSON.stringify(railOld));
+
+    // THE FOOT. The rail is screens above by the time a reader reaches the
+    // end of a month, so the foot carries the ways on as well. Here, on
+    // the oldest of two months, that is the sentence and one chip: there
+    // is nothing older, and the newer month is also the newest, so Newest
+    // would be the same destination said twice.
+    const chainOld = await evaluate(`(function () {
+      var row = document.querySelector('.bm-chain__row');
+      var next = document.querySelector('.bm-chip--next');
+      return {
+        end: (document.querySelector('.bm-chain__end') || {}).textContent || '',
+        endBeforeRow: !!(row && row.previousElementSibling &&
+          row.previousElementSibling.classList.contains('bm-chain__end')),
+        label: (document.querySelector('.bm-chain') || { getAttribute: function () {} })
+          .getAttribute('aria-label'),
+        chips: [].slice.call(row ? row.children : []).map(function (c) {
+          return c.textContent.trim();
+        }),
+        nextHref: next ? next.getAttribute('href') : null,
+        nextRel: next ? next.getAttribute('rel') : null,
+        nextArrow: !!(next && next.querySelector('svg.bm-chain__i')),
+        nextFilled: next ? getComputedStyle(next).backgroundColor : '',
+        older: !!document.querySelector('.bm-chain .bm-older')
+      };
+    })()`);
+    check("month chain: the oldest month says so and offers the way forward",
+      chainOld.end === "This is the first month. There is nothing older." &&
+      chainOld.endBeforeRow && chainOld.label === "More months" &&
+      JSON.stringify(chainOld.chips) === '["Newer: July 2026 · 1 post"]' &&
+      chainOld.nextHref === "2607.html" && chainOld.nextRel === "next" &&
+      chainOld.nextArrow && chainOld.nextFilled === "rgb(74, 165, 232)" &&
+      chainOld.older === false,
+      JSON.stringify(chainOld));
+
+    // Back at the foot. The token is spent by a real in-site navigation,
+    // so this presses Older on the newest month and arrives on the oldest,
+    // which is the trip that used to end in a sentence and no way out.
+    await send("Page.navigate", { url: B + "blog/2607.html" });
+    await sleep(1800);
+    const chainNew = await evaluate(`(function () {
+      var row = document.querySelector('.bm-chain__row');
+      return { end: !!document.querySelector('.bm-chain__end'),
+               chips: [].slice.call(row ? row.children : []).map(function (c) {
+                 return c.textContent.trim(); }) };
+    })()`);
+    check("month chain: the newest month offers only the way back through the chain",
+      chainNew.end === false &&
+      JSON.stringify(chainNew.chips) === '["Older: June 2026 · 1 post"]',
+      JSON.stringify(chainNew));
+    const chainHopLen = await evaluate(`history.length`);
+    await evaluate(`document.querySelector('.bm-chain .bm-older').click()`);
+    await sleep(2200);
+    const chainBack = await evaluate(`(function () {
+      var row = document.querySelector('.bm-chain__row');
+      var b = row ? row.querySelector('.bm-chip--back') : null;
+      return { path: location.pathname,
+               first: !!(b && row.firstElementChild === b),
+               arrowSvg: !!(b && b.querySelector('svg.bm-back__i')),
+               text: b ? b.textContent.trim() : '',
+               filled: b ? getComputedStyle(b).backgroundColor : '',
+               /* under the bar there is none: the whole month is on
+                  screen, so nothing up there has been narrowed away */
+               underBar: !!document.querySelector('.bm-back'),
+               len: history.length };
+    })()`);
+    check("month chain: a real arrival puts Back at the head of the row",
+      /2606\.html$/.test(chainBack.path) && chainBack.first && chainBack.arrowSvg &&
+      chainBack.text === "Back" && chainBack.filled === "rgb(74, 165, 232)" &&
+      chainBack.underBar === false,
+      JSON.stringify(chainBack));
+    await evaluate(`document.querySelector('.bm-chain .bm-chip--back').click()`);
+    await sleep(2200);
+    const chainWent = await evaluate(`({ path: location.pathname, len: history.length })`);
+    check("month chain: Back returns to the month it came from and adds no entry",
+      /2607\.html$/.test(chainWent.path) && chainWent.len === chainBack.len,
+      JSON.stringify({ ...chainWent, was: chainBack.len, before: chainHopLen }));
+    /* Back left the tab on 2607 with a forward entry to 2606. Leaving by
+       the stream truncates that entry, so the navigation below is a real
+       one: a navigation to the address already showing is a replace, and
+       the next check counts on the entry it adds. */
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(1600);
+
     await send("Page.navigate", { url: B + "blog/2607.html" });
     await sleep(1800);
     check("month page: the pill is there too, and its hits are sibling month files",
@@ -4269,7 +4399,7 @@ async function main() {
     check("chain: on a month page Older posts opens that month and appends nothing",
       /\/blog\/2606\.html$/.test(walked.path) && walked.dividers === 0 &&
       JSON.stringify(walked.months) === '["2606"]' && walked.histLen > beforeHop,
-      JSON.stringify(walked));
+      JSON.stringify({ ...walked, before: beforeHop }));
     // the three that used to disagree after a hop now cannot: there is one
     // month on the page, so there is one thing for them to name
     check("chain: the address, the heading and the rail all name the month reached",
@@ -4349,7 +4479,7 @@ async function main() {
     await evaluate(`document.querySelector('.bm-older').click()`);
     await sleep(800);
     const onDisk = await evaluate(`({ protocol: location.protocol, path: location.pathname,
-      end: !!document.querySelector('.bm-older--end'), divider: !!document.querySelector('.bm-divider') })`);
+      end: !!document.querySelector('.bm-chain__end'), divider: !!document.querySelector('.bm-divider') })`);
     check("chain: from disk Older posts opens the older month as a page",
       onDisk.protocol === "file:" && /2606\.html$/.test(onDisk.path) &&
       onDisk.end && !onDisk.divider, JSON.stringify(onDisk));
@@ -4367,12 +4497,23 @@ async function main() {
     const zipMay = await capturePublish();
     const mayId = zipMay ? (/\n(?:[^\n]*\|)?260501(\d{4})May post/.exec(zipMay["blog.html"].toString("utf8")) || [])[1] : null;
     check("chain: a new first month is written as the first, and the month after it points at it",
-      !!zipMay && !!mayId && zipMay["blog/2605.html"].toString("utf8").includes("bm-older--end") &&
+      !!zipMay && !!mayId && zipMay["blog/2605.html"].toString("utf8").includes("bm-chain__end") &&
       !!zipMay["blog/2606.html"] &&
       zipMay["blog/2606.html"].toString("utf8")
         .includes('<a class="bm-older" href="2605.html" rel="prev">') &&
       zipMay["blog/2606.html"].toString("utf8").includes("Older: May 2026 · 1 post"),
       zipMay ? Object.keys(zipMay).sort().join(", ") + " id " + mayId : "no zip");
+    // Three months is where the foot carries everything it has. On the
+    // oldest of them Newest is a month past Newer, so the two are two
+    // destinations and both are offered.
+    const mayChain = zipMay ? zipMay["blog/2605.html"].toString("utf8") : "";
+    check("month chain: the first month of three offers Newer and Newest, and no Older",
+      /<p class="bm-chain__end">This is the first month\. There is nothing older\.<\/p>/.test(mayChain) &&
+      !/class="bm-older"/.test(mayChain) &&
+      /<a class="bm-chip bm-chip--next" href="2606\.html" rel="next">Newer: June 2026 · \d+ post/.test(mayChain) &&
+      /<a class="bm-chip bm-chip--newest" href="2607\.html#p0001">Newest<\/a>/.test(mayChain),
+      (mayChain.match(/<nav class="bm-chain"[\s\S]*?<\/nav>/) || ["no foot"])[0]
+        .replace(/\s+/g, " ").replace(/<svg[\s\S]*?<\/svg>/g, "[svg]").slice(0, 240));
     if (zipMay) writeBundle(zipMay);
     await send("Page.navigate", { url: B + "blog.html" });
     await sleep(2200);
@@ -4883,12 +5024,14 @@ async function main() {
     const solo = await evaluate(`({
       shown: [...document.querySelectorAll('main .bs-post')].filter(p => !p.hidden).map(p => p.id),
       hid: [...document.querySelectorAll('main .bs-post')].filter(p => p.hidden).map(p => p.id),
-      olderHidden: !!(document.querySelector('.bm-older') || {}).hidden,
-      /* the property is not the answer: .bm-older declares display, which
-         beats the browser's own rule for [hidden]. Ask what is painted. */
-      olderShown: (function (el) {
+      /* the whole chain goes, not only the link back through it: a reader
+         who asked for one post did not ask for the rest of the months.
+         June is the first month here, so it carries no older link at all
+         and the nav around it is the thing to ask about. */
+      chainHidden: !!(document.querySelector('.bm-chain') || {}).hidden,
+      chainShown: (function (el) {
         return el ? getComputedStyle(el).display !== "none" : null;
-      })(document.querySelector('.bm-older')),
+      })(document.querySelector('.bm-chain')),
       postsShown: [...document.querySelectorAll('main .bs-post')]
         .filter(p => getComputedStyle(p).display !== "none").map(p => p.id),
       heading: (document.querySelector('.bm-top__month') || {}).textContent,
@@ -4909,7 +5052,7 @@ async function main() {
     check("focus: ?post= shows that post alone and hides the rest of the month",
       JSON.stringify(solo.shown) === '["p0001"]' && JSON.stringify(solo.hid) === '["p0002"]' &&
       JSON.stringify(solo.postsShown) === '["p0001"]' &&
-      solo.olderHidden && solo.olderShown === false && solo.focusCls,
+      solo.chainHidden && solo.chainShown === false && solo.focusCls,
       JSON.stringify(solo).slice(0, 240));
     check("focus: the post names the heading and the tab, and the boot style is gone",
       solo.heading === "Moved post" && /Moved post$/.test(solo.title) && !solo.boot,
