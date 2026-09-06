@@ -318,7 +318,7 @@ body.nav-open { overflow: hidden; }
 .textlink svg { width: 1em; height: 1em; }
 
 /* text-size utilities — the copy sizes this page already uses, exposed as
-   named classes for inline <span> wraps (the built-in copy editor's toolbar
+   named classes for inline <span> wraps (the built-in site editor's toolbar
    inserts these; safe to hand-author anywhere). em-based, so each step is
    relative to the text it sits inside:
      xs ≈ chip size (.76rem on body copy) · sm ≈ meta/eyebrow (.85rem)
@@ -1930,6 +1930,11 @@ ul.dd-points li::before {
    the same: each post below is a card with a backdrop filter, which makes
    a stacking context of its own, and the search results would otherwise be
    painted over by the first card they reach. */
+/* Search on the left, the month picker on the right. The two ends of the
+   bar are the two jobs it does, and a reader looking for one is not
+   reading past the other to reach it. The auto margin does it, so the row
+   still collapses to one column when the bar wraps. */
+.bs-bar__find { margin-right: auto; }
 .bs-bar {
   position: relative; z-index: 5;
   display: flex; align-items: center; justify-content: flex-end;

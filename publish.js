@@ -2,7 +2,7 @@
    publish.js - the blog composer and the publish bundle writer.
 
    Loads on blog.html only, and after tool.js, because it is an
-   extension of the copy editor rather than a page of its own. The
+   extension of the site editor rather than a page of its own. The
    manifest and the reading engine are both on that page, and a
    publish needs all three.
 
@@ -123,11 +123,26 @@
      edit.blog.trace(true) turns the notes on for the page load. It is not
      remembered: a switch that outlives the hunt becomes noise later. */
   var bcNotes = false;
+  /* Set by the progress step while a bundle is built. Both levels of the
+     trace feed it, so the reader watching the box sees the work the
+     console would see rather than an animation that would run just the
+     same over a dead build.
+
+     It takes the name of the thing and not the detail with it. A note's
+     detail is often an object, and "read blog/2607.html" is what a reader
+     wants from it; the console keeps the rest.
+
+     Notes reach it whether or not the console is printing them. The
+     switch is about console noise, and this is one line that replaces
+     itself. */
+  var bcOnTrace = null;
   function bcStep(what, info) {
     console.info("[blog] step: " + what + (info === undefined ? "" : " " + bcSay(info)));
+    if (bcOnTrace) bcOnTrace(what);
   }
   function bcNote(what, info) {
     if (bcNotes) console.debug("[blog]   " + what + (info === undefined ? "" : " " + bcSay(info)));
+    if (bcOnTrace) bcOnTrace(what);
   }
   function bcSay(info) {
     if (info === null || info === undefined) return "";
@@ -324,7 +339,7 @@
   /* ==========================================================
      4. COMPOSER UI
      ----------------------------------------------------------
-     The panel: write, images, preview. It is a sibling of the copy editor's
+     The panel: write, images, preview. It is a sibling of the site editor's
      modal, not a child, so it carries its own scrim and its own Escape rule.
      The toolbar is the editor's, reached through AMH.tool.toolbar.
      ========================================================== */
@@ -440,7 +455,19 @@
     ".bc-wiz__reads{padding:0;margin:.3rem 0 .2rem;}" +
     ".bc-wiz__reads .is-opt{border-style:dashed;}" +
     ".bc-wiz__zone{margin:.5rem 0;}" +
-    ".bc-wiz__note{min-height:1em;color:var(--text);}";
+    ".bc-wiz__note{min-height:1em;color:var(--text);}" +
+    /* the last word, set off from the list above it because it is the one
+       thing to do after the box closes */
+    ".bc-wiz__last{margin:.9rem 0 0;padding:.6rem .7rem;border:1px solid var(--line);" +
+      "border-left:3px solid var(--accent);border-radius:var(--radius-sm);" +
+      "background:var(--bg-deep);font-size:.8rem;}" +
+    /* THE HEARTBEAT, under the step rows: the step running now, and a
+       word that keeps moving so a long build cannot be mistaken for a
+       dead one. */
+    ".bc-wiz__beat{margin:.8rem 0 0;padding-top:.6rem;border-top:1px solid var(--line-soft);" +
+      "font-size:.78rem;color:var(--muted);}" +
+    ".bc-wiz__beat b{display:block;color:var(--accent-bright);font-weight:700;}" +
+    ".bc-wiz__beat span{font-variant-numeric:tabular-nums;}";
   TOOL.addStyles(BC_CSS);
 
   function bcBtn(label, cls, fn, parent) {
@@ -1261,6 +1288,7 @@
   }
   function bcWizClose() {
     if (!bcWiz) return;
+    if (bcBeat) bcBeat.stop();
     bcWizUnhand();
     doc.removeEventListener("keydown", bcWizKeys, true);
     if (bcWiz.scrim.parentNode) bcWiz.scrim.parentNode.removeChild(bcWiz.scrim);
@@ -1570,6 +1598,7 @@
       paint();
     };
     doc.addEventListener("ced:handoff", w.onHand);
+    var beat = bcHeartbeat(w.body);
     return {
       mark: function (i) {
         chain = chain.then(function () {
@@ -1581,10 +1610,69 @@
       },
       finish: function () {
         return chain.then(function () {
+          beat.stop();
           if (bcWiz) bcWiz.box.setAttribute("data-elapsed", String(Date.now() - t0));
         });
       }
     };
+  }
+
+  /* THE HEARTBEAT. A row of steps that ticks over is a picture of the
+     work, not proof of it: the rows would look the same if the build had
+     stopped between two of them. This is the proof.
+
+     Two lines. The top one is the step the publish is actually on, taken
+     from the same trace the console prints, so it says what is happening
+     and not that something is. The bottom one is a word and a run of
+     periods that changes every second, which is the part a reader watches
+     to know the page is alive.
+
+     The word escalates with the wait, because the answer to "is this
+     stuck" changes as the wait grows: at four seconds the build is long,
+     at eight it is longer than any publish should be, and the words say
+     so rather than repeating one reassurance.
+
+     Every timer is cleared by stop(), and the step hook is put back the
+     way it was found, so a second publish in one page load starts clean. */
+  var BEAT_MS = 1000;
+  var BEAT_WORDS = [[8000, "Stand by"], [4000, "Still working on it"], [0, "Finishing up"]];
+
+  var bcBeat = null;            /* the heartbeat, while the build runs */
+
+  function bcHeartbeat(body) {
+    if (bcBeat) bcBeat.stop();
+    var el = doc.createElement("p");
+    el.className = "bc-wiz__beat";
+    el.setAttribute("aria-live", "polite");
+    el.innerHTML = "<b></b><span></span>";
+    body.appendChild(el);
+    var line = el.querySelector("b"), tick = el.querySelector("span");
+    var t0 = Date.now(), dots = 2, timer = 0, was = bcOnTrace;
+
+    bcOnTrace = function (what) { line.textContent = what; };
+    function paint() {
+      /* the box can go without a finish: a failure, or the reader
+         pressing Escape. A beat left running would write into a node
+         nobody can see and keep the step hook for the next publish. */
+      if (!el.parentNode) { out.stop(); return; }
+      var waited = Date.now() - t0;
+      var word = BEAT_WORDS.find(function (w) { return waited >= w[0]; })[1];
+      /* two periods, then three, then two: the change is the signal, so
+         it has to be visible without being read */
+      dots = dots === 2 ? 3 : 2;
+      tick.textContent = word + (dots === 2 ? ".." : "...");
+      timer = window.setTimeout(paint, BEAT_MS);
+    }
+    var out = {
+      stop: function () {
+        window.clearTimeout(timer);
+        bcOnTrace = was;
+        if (bcBeat === out) bcBeat = null;
+      }
+    };
+    bcBeat = out;
+    paint();
+    return out;
   }
 
   /* The publish record: what the last bundle was and how far it has been
@@ -1725,7 +1813,8 @@
         ? "<p><strong>This bundle is too large to stage.</strong> Upload it before you " +
           "make another post, or the next bundle will not carry it.</p>"
         : "<p>You can compose another post now. The next bundle carries this one too, " +
-          "so the newest zip is always the whole of what you have not uploaded.</p>");
+          "so the newest zip is always the whole of what you have not uploaded.</p>") +
+      bcRefreshWords(rec);
     w.body.addEventListener("change", function (e) {
       var cb = e.target;
       var key = cb && cb.getAttribute ? cb.getAttribute("data-check") : null;
@@ -1734,10 +1823,16 @@
       rec.checks[key] = !!cb.checked;
       bcRecordSave(rec);
     });
-    /* The two plain choices come last and read as a sentence: go back to
-       this post, or finish with it. The quieter buttons are the ones a
-       reader needs only sometimes. */
-    var close = function () { bcWizClose(); };
+    /* This step is the end of the job, so it ends in one button.
+
+       There is no way back to the post that was published. The work is in
+       a bundle and the composer that made it has nothing left to add: an
+       edit made here would not be in the bundle already built, so the
+       offer read as a promise the publish could not keep. Editing that
+       post again is Edit on the post, from a page that shows it.
+
+       The quieter buttons are the ones a reader needs only sometimes. */
+    var done = function () { bcClose(); bcWizClose(); };
     if (rec.files && Object.keys(rec.files).length) {
       bcWizBtn("Download again", "", function () { bcDownloadAgain(rec); });
     }
@@ -1747,8 +1842,6 @@
         if (again.parentNode) again.parentNode.removeChild(again);
       });
     }
-    /* a new empty composer, which is not the same as going back to the
-       post that was published: both are offered, and named for what they do */
     bcWizBtn("Compose another", "", function () {
       bcWizClose();
       bcClose();
@@ -1756,28 +1849,16 @@
       openComposer(null);
     });
     bcWizSpacer();
-    /* only a post can be resumed: a delete has nothing to go back to, and
-       a rebuild was never a post */
-    if (rec.kind === "publish" && rec.id) {
-      bcWizBtn("Resume editing this post", "", function () {
-        bcWizClose();
-        /* the composer that published is finished with: openComposer
-           refuses to open over one that is still on screen, so this
-           button would otherwise do nothing at all */
-        bcClose();
-        if (!TOOL.editorOn()) window.edit();
-        bcLoadPost(rec.id);
-      });
-    }
-    bcWizBtn("All done, close the post!", "ced-btn--accent", function () {
-      bcClose();
-      bcWizRefresh(rec);
-    }).focus();
-    w.onEscape = close;
+    /* It closes the composer behind it as well as this box. The composer
+       is finished with at this point, and leaving it on screen behind a
+       closed wizard says the opposite. */
+    bcWizBtn("OK! Done!", "ced-btn--accent", done).focus();
+    w.onEscape = done;
   }
 
-  /* The last word. What the reader does next is not the same for the two
-     routes, and saying the wrong one wastes their time.
+  /* The last word, at the foot of the Done step. What the reader does
+     next is not the same for the two routes, and saying the wrong one
+     wastes their time.
 
      A folder write has already changed the files on disk, so the page in
      front of them is the old one and a refresh shows the new. A zip has
@@ -1788,25 +1869,23 @@
      browser bypass its cache: location.reload(true) is ignored by every
      current browser. A normal reload usually brings the HTML back, but it
      can serve search.js from cache, and then find would answer from an
-     index that is one publish behind. */
-  function bcWizRefresh(rec) {
+     index that is one publish behind.
+
+     This used to be a step of its own after Done, which made the reader
+     press twice to finish one job. It is a paragraph now, so Done ends
+     the job. */
+  function bcRefreshWords(rec) {
     var wrote = rec && rec.route === BC_ROUTE_FOLDER && !rec.fellBack;
-    var w = bcWizShow("refresh", wrote ? "All done" : "One step left");
-    w.body.innerHTML = wrote
-      ? "<p><strong>The files are in your repo.</strong> This page is still the one " +
-        "your browser loaded before the write, so it shows the old post.</p>" +
-        "<p><strong>Press Ctrl+F5 to do a hard refresh.</strong> A plain reload can " +
+    return wrote
+      ? '<p class="bc-wiz__last"><strong>The files are in your repo.</strong> This page ' +
+        "is still the one your browser loaded before the write, so it shows the old " +
+        "post. <strong>Press Ctrl+F5 to do a hard refresh.</strong> A plain reload can " +
         "serve <code>search.js</code> from the cache, and find would then answer from " +
-        "an index one publish behind.</p>" +
-        "<p>Review the diff, commit and push when you are ready.</p>"
-      : "<p><strong>The zip is in your Downloads folder.</strong> Nothing has changed " +
-        "in your repo yet, so a refresh now would show you the same page.</p>" +
-        "<p>Extract it at the repo root, then press <strong>Ctrl+F5</strong> to do a " +
-        "hard refresh. Review the diff, commit and push.</p>";
-    var close = function () { bcWizClose(); };
-    bcWizSpacer();
-    bcWizBtn("Got it", "ced-btn--accent", close).focus();
-    w.onEscape = close;
+        "an index one publish behind.</p>"
+      : '<p class="bc-wiz__last"><strong>The zip is in your Downloads folder.</strong> ' +
+        "Nothing has changed in your repo yet, so a refresh now would show you the same " +
+        "page. Extract it at the repo root, then press <strong>Ctrl+F5</strong> to do a " +
+        "hard refresh.</p>";
   }
 
   /* Step four. Nothing was written, and the composer keeps the post. */
@@ -2413,6 +2492,27 @@
      blocksFor holds the blocks of every month this operation rendered.
      deployed is the month list the loaded manifest held. */
   function bcStreamInto(src, months, blocksFor, brand, deployed) {
+    return bcStreamBody(src, months, blocksFor, brand, deployed)
+      .then(function (out) { return bcHeadInto(out, months[0]); });
+  }
+  /* The page's heading names the month the stream is showing, the way a
+     month page's heading names its own. The blog then has one name for
+     where the reader is, wherever they are standing.
+
+     It is written at every publish, and not only when the stream changes:
+     the heading is one short string, and a heading that disagreed with
+     the posts under it would be worse than the work saved. */
+  function bcHeadInto(src, newest) {
+    if (!newest) return src;
+    var out = TOOL.spliceRegion(src, "blog-h2", AMH.blog.monthTitle(newest));
+    if (out === null) {
+      console.warn("[blog] blog.html has no [blog-h2] region, so the heading still names " +
+        "whatever it named before. The stream is written either way.");
+      return src;
+    }
+    return out;
+  }
+  function bcStreamBody(src, months, blocksFor, brand, deployed) {
     var newest = months[0];
     if (!newest) return Promise.resolve(bcSpliceStream(src, bcStreamBlocks([], null, brand)));
     if (blocksFor[newest]) {
@@ -2818,8 +2918,9 @@
     var counts = (nav && nav.counts) || {};
     var all = (months && months.length) ? months : [yymm];
     /* The strip carries the newest few and this month, not every month
-       the blog ever had. blog.js owns the rule and the stream uses the
-       same call, so the two surfaces cannot cap differently. */
+       the blog ever had, and it runs oldest to newest so the newest ends
+       beside the Newest pin. blog.js owns that rule and the stream makes
+       the same call, so the two surfaces cannot cap or order differently. */
     var list = AMH.blog.railMonths(all, yymm).map(function (mo) {
       var now = mo === yymm;
       var n = counts[mo];
@@ -3055,6 +3156,13 @@
            files are already in the repo. The checklist is reopened from
            this record long after the wizard closes. */
         bcRecordSave(record);
+        /* the panel put the button that started this on screen, and it is
+           behind the wizard waiting to say what happened. publish.js does
+           not know the panel, so it says so on the document, the way the
+           hand-off does. */
+        doc.dispatchEvent(new CustomEvent("ced:published", {
+          detail: { kind: record.kind, route: record.route }
+        }));
         bcWizDone(record);
       });
   }

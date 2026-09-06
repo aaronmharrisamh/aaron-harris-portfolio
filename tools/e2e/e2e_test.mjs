@@ -1,4 +1,4 @@
-// End-to-end test of the built-in copy editor + blog engine via headless Chrome + CDP.
+// End-to-end test of the built-in site editor + blog engine via headless Chrome + CDP.
 // Run:  node tools/e2e/e2e_test.mjs   (from anywhere; paths self-locate)
 // Requires: node 22+ (native WebSocket/fetch), Chrome, py launcher (http.server).
 // The harness starts its own local server and Chrome, and cleans both up.
@@ -772,7 +772,7 @@ async function main() {
     const only = [
       ["index.html", "hero-h1", "SOLO HOME EDIT"],
       ["gallery.html", "gallery-h2", "SOLO GALLERY EDIT"],
-      ["blog.html", "blog-h2", "SOLO BLOG EDIT"],
+      ["blog.html", "blog-eyebrow", "SOLO BLOG EDIT"],
     ];
     for (const [page, slug, marker] of only) {
       await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/${page}` });
@@ -1247,6 +1247,32 @@ async function main() {
     foot.filled.every((c) => c === "rgb(74, 165, 232)") &&
     foot.view !== "rgb(74, 165, 232)",
     JSON.stringify(foot));
+  // The panel names itself, and its head carries the close where a window
+  // always puts one. Exit at the foot does the same job for a reader who
+  // has worked down the panel; this is for one who wants out at once.
+  const panelHead = await evaluate(`(function () {
+    var head = document.querySelector('.ced-panel__head');
+    var x = head ? head.querySelector('.ced-panel__x') : null;
+    return { name: head ? head.firstElementChild.textContent : '',
+             upper: head ? getComputedStyle(head).textTransform : '',
+             x: !!x, xSvg: !!(x && x.querySelector('svg')),
+             label: x ? x.getAttribute('aria-label') : '',
+             /* last in the head, so it is the top-right corner */
+             xLast: !!(head && head.lastElementChild === x) };
+  })()`);
+  check("panel: it is the site editor, and its head closes from the corner",
+    panelHead.name === "Site editor" && panelHead.upper === "uppercase" &&
+    panelHead.x && panelHead.xSvg && panelHead.xLast &&
+    panelHead.label === "Close the site editor",
+    JSON.stringify(panelHead));
+  await evaluate(`document.querySelector('.ced-panel__x').click()`);
+  await sleep(300);
+  check("panel: the corner close puts the editor away",
+    (await evaluate(`({ panel: !!document.querySelector('.ced-panel'),
+                        on: AMH.tool.editorOn() })`)).panel === false,
+    JSON.stringify(await evaluate(`({ panel: !!document.querySelector('.ced-panel') })`)));
+  await evaluate(`window.edit()`);
+  await sleep(400);
   // The site header is fixed, so a chip that scrolls to the top of the window
   // must pass BEHIND it rather than over the navigation. The fixed band runs
   // from 900 to 1000: header 900, drawer 940, progress bar 1000.
@@ -2397,7 +2423,7 @@ async function main() {
     blogUI.rows === 18 && blogUI.chips > 0, JSON.stringify(blogUI));
 
   await evaluate(`[...document.querySelectorAll('.ced-panel__row')]
-    .find(r => r.textContent.indexOf('blog-h2') >= 0).click()`);
+    .find(r => r.textContent.indexOf('blog-eyebrow') >= 0).click()`);
   await sleep(300);
   await evaluate(`document.querySelector('.ced-modal textarea').value = '<h2>NOTES FROM THE BLOG PAGE</h2>'`);
   await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
@@ -2436,7 +2462,7 @@ async function main() {
     const iOut = bzip["index.html"].toString("utf8");
     check("blog page: each page carries its own edit",
       bOut.indexOf("NOTES FROM THE BLOG PAGE") >= 0 && iOut.indexOf("TWOPAGE") >= 0);
-    const bx = exportIsByteExact("blog.html", bOut, ["blog-h2"]);
+    const bx = exportIsByteExact("blog.html", bOut, ["blog-eyebrow"]);
     check("blog page: byte-identical outside its edited region", bx.ok, bx.detail);
     const ix = exportIsByteExact("index.html", iOut, ["hero-h1"]);
     check("blog page: the home page is byte-identical outside its edited region", ix.ok, ix.detail);
@@ -2942,7 +2968,25 @@ async function main() {
     progressStep.step !== "files" && progressStep.step === "progress", progressStep.step);
 
   let zipB64 = null;
-  for (let i = 0; i < 30 && !zipB64; i++) { await sleep(500); zipB64 = await evaluate(`window.__zipB64`); }
+  /* Sampled here, because this is the loop that spans the build: the
+     progress step is up for its whole length and the box has moved on to
+     Done by the time the zip lands. The test watches the same movement
+     the reader does rather than that the element exists. */
+  const beats = { seen: [], said: [], moved: false, gone: false };
+  for (let i = 0; i < 30 && !zipB64; i++) {
+    await sleep(500);
+    const beat = await evaluate(`(function () {
+      var el = document.querySelector('.bc-wiz__beat');
+      if (!el) return null;
+      return { tick: el.querySelector('span').textContent,
+               step: el.querySelector('b').textContent };
+    })()`);
+    if (beat) {
+      if (beats.seen.indexOf(beat.tick) === -1) beats.seen.push(beat.tick);
+      if (beat.step && beats.said.indexOf(beat.step) === -1) beats.said.push(beat.step);
+    }
+    zipB64 = await evaluate(`window.__zipB64`);
+  }
   const pubStatus = await evaluate(`document.querySelector('.bc-status').textContent`);
   check("publish produced a bundle", !!zipB64, pubStatus.slice(0, 80));
   check("wizard: the browser confirm box is gone from the publish path",
@@ -2971,6 +3015,8 @@ async function main() {
       };
     })()`);
   }
+  beats.moved = beats.seen.length > 1;
+  beats.gone = await evaluate(`!document.querySelector('.bc-wiz__beat')`);
   check("wizard: the done step says what was published, where the zip went, and what is in it",
     doneStep.step === "done" && /Published p0001/.test(doneStep.head) &&
     /blog-publish-260711\.zip/.test(doneStep.body) && /Downloads folder/.test(doneStep.body) &&
@@ -2985,18 +3031,38 @@ async function main() {
     JSON.stringify(doneStep).slice(0, 300));
   check("wizard: the seven rows each held for the minimum, so the steps could be read",
     doneStep.elapsed >= 7 * 350 - 100, "elapsed " + doneStep.elapsed + "ms");
+  // WD0. The heartbeat proves the build is alive, which the ticking rows
+  // cannot: they would look the same if the work had stopped between two
+  // of them. It shows the step the publish is on, taken from the same
+  // trace the console prints, and a word whose periods change every
+  // second. It goes when the build does, and it puts the step hook back,
+  // so a second publish in one page load starts clean.
+  check("wizard: the heartbeat named the running step and is gone once the build ends",
+    /Finishing up\.\.|Still working on it\.\.|Stand by\.\./.test(beats.seen.join(" ")) &&
+    beats.moved && beats.said.length > 0 && beats.gone,
+    JSON.stringify(beats).slice(0, 260));
   check("wizard: the list is extract, review, commit, push, and a live box the page owns",
     JSON.stringify(doneStep.checks) === '["extract","review","commit","push","live!"]' &&
     JSON.stringify(doneStep.btns) ===
-      '["Download again","Compose another","Resume editing this post","All done, close the post!"]',
+      '["Download again","Compose another","OK! Done!"]',
     JSON.stringify(doneStep.checks) + " " + JSON.stringify(doneStep.btns));
-  // WD1. the last step ends in two plain choices: go back to this post, or
-  // finish with it. The quieter buttons stay for the times they are wanted.
-  check("wizard: the done step's two clear choices are last, and finishing is the default",
-    doneStep.btns[doneStep.btns.length - 2] === "Resume editing this post" &&
-    doneStep.btns[doneStep.btns.length - 1] === "All done, close the post!" &&
-    doneStep.focused === "All done, close the post!",
+  // WD1. The done step is the end of the job, so it ends in one button.
+  // There is no way back to the post that was published: the work is in a
+  // bundle already built, so an edit made there would not be in it, and
+  // the offer read as a promise the publish could not keep.
+  check("wizard: the done step ends in one button, and there is no way back to the post",
+    doneStep.btns[doneStep.btns.length - 1] === "OK! Done!" &&
+    doneStep.focused === "OK! Done!" &&
+    doneStep.btns.indexOf("Resume editing this post") === -1,
     JSON.stringify({ btns: doneStep.btns, focused: doneStep.focused }));
+  // WD2. The last word is on this step now, and it fits the route taken.
+  // This publish went to a zip, so a refresh at this moment would show the
+  // reader the same page they are already on.
+  check("wizard: the done step carries the last word, and it fits the route taken",
+    /Downloads folder/.test(doneStep.body) &&
+    /Extract it at the repo root/.test(doneStep.body) &&
+    /Ctrl\+F5/.test(doneStep.body),
+    doneStep.body.replace(/\s+/g, " ").slice(-200));
 
   // PW4. a tick is remembered in the record, and the panel line reads it
   const ticked = await evaluate(`(function () {
@@ -3012,22 +3078,17 @@ async function main() {
     ticked.checked && ticked.rec === true && ticked.id === "0001" && !ticked.hidden &&
     /p0001 is in a bundle that is not live yet\. 1 of 4 steps ticked\./.test(ticked.line),
     JSON.stringify(ticked).slice(0, 200));
-  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
-  // PW4b. Finishing does not close the wizard: it says what to do next, and
-  // that is not the same for the two routes. This publish went to a zip, so
-  // a refresh now would show the reader the same page they are already on.
-  const lastWord = await evaluate(`(function () {
-    var box = document.querySelector('.bc-wizard');
-    return { step: box && box.getAttribute('data-step'),
-             text: box ? box.querySelector('.bc-wiz__body').textContent : '',
-             btns: box ? [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) : [] };
-  })()`);
-  check("wizard: the last step tells you what to do next, and it fits the route taken",
-    lastWord.step === "refresh" && /Downloads folder/.test(lastWord.text) &&
-    /Extract it at the repo root/.test(lastWord.text) &&
-    /Ctrl\+F5/.test(lastWord.text) && JSON.stringify(lastWord.btns) === '["Got it"]',
-    JSON.stringify(lastWord).slice(0, 220));
-  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!').click()`);
+  // PW4b. Finishing ends the job in one press: the box goes, and so does
+  // the composer behind it. Leaving the composer on screen under a closed
+  // wizard said the work was not finished when it was.
+  const finished = await evaluate(`({
+    wizard: !!document.querySelector('.bc-wizard'),
+    composer: !!document.querySelector('.bc-panel'),
+  })`);
+  check("wizard: OK! Done! closes the box and the composer behind it",
+    finished.wizard === false && finished.composer === false,
+    JSON.stringify(finished));
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,
@@ -3240,11 +3301,12 @@ async function main() {
     check("manifest: a line neither parser understands is reported by both, and skipped",
       parsers.warned.length === 2 && parsers.warned.every((w) => /bogus line here/.test(w)),
       JSON.stringify(parsers.warned));
-    // a publish writes two regions on this page now: the manifest and the
-    // index card for the post. Everything else must still be untouched.
-    check("bundle blog.html byte-identical outside the manifest and the index",
-      stripSpans(outIdx, ["blog-stream", "blog-manifest"]) ===
-      stripSpans(srcIdx, ["blog-stream", "blog-manifest"]));
+    // a publish writes three regions on this page now: the manifest, the
+    // stream, and the heading that names the month the stream shows.
+    // Everything else must still be untouched.
+    check("bundle blog.html byte-identical outside the manifest, the stream and the heading",
+      stripSpans(outIdx, ["blog-stream", "blog-manifest", "blog-h2"]) ===
+      stripSpans(srcIdx, ["blog-stream", "blog-manifest", "blog-h2"]));
     const streamSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-stream]-->"),
       outIdx.indexOf("<!--[/edit:blog-stream]-->"));
     // ST-A. the stream is the newest month in full, in the A markup: the
@@ -4089,8 +4151,7 @@ async function main() {
     check("wizard: the done step can switch the reminder back on",
       done2.step === "done" && done2.btns.indexOf("Show the reminder again") !== -1 &&
       remindAgain.cleared && remindAgain.gone, JSON.stringify(done2) + " " + JSON.stringify(remindAgain));
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!').click()`);
     check("P2: second post published into an earlier month", !!zip2 && !!zip2["blog/2606.html"],
       zip2 ? Object.keys(zip2).sort().join(", ") : "no zip");
     if (zip2) {
@@ -4251,8 +4312,8 @@ async function main() {
           ? document.querySelector('.bm-rail').getAttribute('aria-label') : null
       };
     })()`);
-    check("month rail: both months, newest first, current marked, Newest outside the strip",
-      JSON.stringify(railTwo.labels) === '["Jul 2026 1","Jun 2026 1","Newest"]' &&
+    check("month rail: both months, oldest first, current marked, Newest outside the strip",
+      JSON.stringify(railTwo.labels) === '["Jun 2026 1","Jul 2026 1","Newest"]' &&
       railTwo.now === "2607.html" && railTwo.current === "page" &&
       /* this page IS the newest month, and the pin still carries an
          address: it lands on the newest post rather than doing nothing */
@@ -4281,7 +4342,7 @@ async function main() {
     check("month rail: the oldest month reaches the newest post, which the chain never allowed",
       railOld.pinHref === "2607.html#p0001" && railOld.pinOff === false &&
       railOld.now === "2606.html" &&
-      JSON.stringify(railOld.forward) === '["2607.html","2606.html"]',
+      JSON.stringify(railOld.forward) === '["2606.html","2607.html"]',
       JSON.stringify(railOld));
 
     // THE FOOT. The rail is screens above by the time a reader reaches the
@@ -4534,8 +4595,7 @@ async function main() {
       rmSync(join(bdir, "blog/2605.html"), { force: true });
       rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!')?.click()`);
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!')?.click()`);
 
     // P2-2. the stream shows the newest month and loads nothing until it
     // is asked to. Two months are deployed now, so the stream is July and
@@ -4864,6 +4924,36 @@ async function main() {
         olderText: older ? older.textContent.trim() : ''
       };
     })()`);
+    // The heading names the month the stream is showing, the way a month
+    // page's heading names its own, so the blog has one name for where
+    // you are. The publish writes it, so it cannot disagree with the
+    // posts under it, and the editor opens it read-only.
+    const blogHead = await evaluate(`(function () {
+      var h = document.querySelector('.blog-page h2.bm-top__month');
+      var bar = document.getElementById('blogRail');
+      return { text: h ? h.textContent.trim() : '',
+               owner: h ? h.getAttribute('data-ced') : null,
+               aboveRail: !!(h && h.nextElementSibling === bar) };
+    })()`);
+    check("blog page: the heading names the month the stream shows",
+      /^[A-Z][a-z]+ 20\d\d$/.test(blogHead.text) && blogHead.owner === "generated" &&
+      blogHead.aboveRail, JSON.stringify(blogHead));
+    // Search on the left, the month picker on the right. The two ends of
+    // the bar are the two jobs it does.
+    const barEnds = await evaluate(`(function () {
+      var bar = document.getElementById('blogBar');
+      var find = document.getElementById('blogFind');
+      var pick = document.getElementById('blogMonth');
+      if (!bar || !find || !pick) return { ok: false };
+      var b = bar.getBoundingClientRect(), f = find.getBoundingClientRect(),
+          p = pick.getBoundingClientRect();
+      return { ok: true, findLeft: Math.round(f.left - b.left),
+               pickRight: Math.round(b.right - p.right),
+               order: f.left < p.left };
+    })()`);
+    check("blog bar: search sits at the left end and the picker at the right",
+      barEnds.ok && barEnds.order && barEnds.findLeft < 24 && barEnds.pickRight < 24,
+      JSON.stringify(barEnds));
     check("stream rail: the rail sits above the bar, months link to month files",
       railRoot.cls === "bm-rail" && railRoot.label === "Months" && railRoot.aboveBar &&
       railRoot.hrefs.length > 0 && railRoot.hrefs.length <= 3 &&
@@ -4894,12 +4984,17 @@ async function main() {
       unknown: AMH.blog.railMonths(['2610','2609','2608'], '2501'),
       short: AMH.blog.railMonths(['2607','2606'], '2606')
     })`);
+    // The list comes back in the order it is shown: oldest on the left,
+    // newest on the right, so time runs the way the strip reads and the
+    // newest month ends beside the Newest pin. A month being read from
+    // outside the newest few is older than all of them, so it lands
+    // leftmost and the strip stays in date order either way.
     check("month rail: the strip caps at three months, plus the one being read",
-      JSON.stringify(railCap.three) === '["2610","2609","2608"]' &&
-      JSON.stringify(railCap.outside) === '["2610","2609","2608","2606"]' &&
-      JSON.stringify(railCap.inside) === '["2610","2609","2608"]' &&
-      JSON.stringify(railCap.unknown) === '["2610","2609","2608"]' &&
-      JSON.stringify(railCap.short) === '["2607","2606"]',
+      JSON.stringify(railCap.three) === '["2608","2609","2610"]' &&
+      JSON.stringify(railCap.outside) === '["2606","2608","2609","2610"]' &&
+      JSON.stringify(railCap.inside) === '["2608","2609","2610"]' &&
+      JSON.stringify(railCap.unknown) === '["2608","2609","2610"]' &&
+      JSON.stringify(railCap.short) === '["2606","2607"]',
       JSON.stringify(railCap));
 
     // CUT3. the bar: it scrolls away with the page, leaving the site header
@@ -5873,19 +5968,24 @@ async function main() {
       /Layer two/.test(again["blog.html"].toString("utf8")) &&
       !Object.keys(again).some((n) => /\.(jpg|png)$/.test(n)),
       again ? Object.keys(again).sort().join(", ") : "no zip");
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'All done, close the post!').click()`);
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Got it')?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!').click()`);
 
-    // LY2. an authored region is never replaced from the layer
+    // LY2. an authored region is never replaced from the layer. The
+    // eyebrow is the authored one on this page: the heading beside it
+    // names the month the stream shows, so the publish owns that.
     const authored = await evaluate(`(function () {
-      var h2 = document.querySelector('.blog-page h2');
-      var was = h2.textContent;
-      h2.textContent = 'AUTHORED, NOT STAGED';
+      var el = document.querySelector('.blog-page .eyebrow');
+      var was = el.textContent;
+      el.textContent = 'AUTHORED, NOT STAGED';
       AMH.publish.staged();
-      return { after: h2.textContent, was: was };
+      var head = document.querySelector('.blog-page h2.bm-top__month');
+      return { after: el.textContent, was: was,
+               /* and the machine-owned one beside it still is */
+               owned: head ? head.getAttribute('data-ced') : null };
     })()`);
     check("layer: it replaces the machine-owned regions and leaves an authored one alone",
-      authored.after === "AUTHORED, NOT STAGED", JSON.stringify(authored));
+      authored.after === "AUTHORED, NOT STAGED" && authored.owned === "generated",
+      JSON.stringify(authored));
 
     // LY3. the layer is dropped when the page arrives carrying its stamp
     if (zipL2) writeBundle(zipL2);
@@ -5979,19 +6079,17 @@ async function main() {
     // and the last word after a folder write is the other one: the files ARE
     // in the repo, so a hard refresh is the next thing and there is nothing
     // to extract.
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'All done, close the post!'; })?.click()`);
     const folderLastWord = await evaluate(`(function () {
-      var box = document.querySelector('.bc-wizard');
-      return { step: box && box.getAttribute('data-step'),
-               text: box ? box.querySelector('.bc-wiz__body').textContent : '' };
+      var el = document.querySelector('.bc-wizard .bc-wiz__last');
+      return { there: !!el, text: el ? el.textContent : '' };
     })()`);
-    check("folder route: the last step says the files are in the repo, and to hard refresh",
-      folderLastWord.step === "refresh" &&
+    check("folder route: the last word says the files are in the repo, and to hard refresh",
+      folderLastWord.there &&
       /files are in your repo/.test(folderLastWord.text) &&
       /Ctrl\+F5/.test(folderLastWord.text) &&
       !/Downloads folder/.test(folderLastWord.text),
       JSON.stringify(folderLastWord).slice(0, 200));
-    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'Got it'; })?.click()`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'OK! Done!'; })?.click()`);
 
     check("folder route: the done step drops the extract step and says the files are in place",
       /written straight into your repo folder/.test(folderDone.body) &&

@@ -1,5 +1,5 @@
 /* ============================================================
-   tool.js - the site's authoring surface: the copy editor, image
+   tool.js - the site's authoring surface: the site editor, image
    editing, and the export that writes a page back.
 
    Every page loads it, last in the fixed order. Nothing else depends
@@ -201,7 +201,7 @@
         el = el.nextSibling;
       }
       if (!el || el.nodeType !== 1) {
-        console.warn("[copy editor] marker '" + o.slug + "' is not followed by an element - skipped");
+        console.warn("[site editor] marker '" + o.slug + "' is not followed by an element - skipped");
         return;
       }
       var after = el.nextSibling;
@@ -209,12 +209,12 @@
       var ok = after && after.nodeType === 8 &&
                after.nodeValue.trim() === "[/edit:" + o.slug + "]";
       if (!ok) {
-        console.warn("[copy editor] marker '" + o.slug + "' has no matching close right after its element - skipped");
+        console.warn("[site editor] marker '" + o.slug + "' has no matching close right after its element - skipped");
         return;
       }
       /* data-ced names the owner of a region:
            "blog"       the blog composer's publish pipeline owns it outright,
-                        so the copy editor does not register it at all
+                        so the site editor does not register it at all
            "generated"  the publisher writes it on every publish that changes
                         its input. It is registered, listed and exported like
                         any other region, but never hand-edited: an edit here
@@ -255,7 +255,7 @@
         }
       }
     });
-    console.info("[copy editor] " + regions.length + " text regions and " +
+    console.info("[site editor] " + regions.length + " text regions and " +
       gals.length + " galleries registered.");
   }
 
@@ -392,7 +392,7 @@
       fetch(en.src, { method: "HEAD", cache: "no-store" }).then(function (res) {
         en.missing = !res.ok;
         if (en.missing) {
-          console.warn("[copy editor] " + en.src + " not found on the server - " +
+          console.warn("[site editor] " + en.src + " not found on the server - " +
             "copy the file into img/work/ before uploading the export.");
         }
         if (openImage && openImage.entry === en) updateSrcLine(en);
@@ -890,7 +890,7 @@
       if (g.tpl !== r.el) return;
       g.el = r.el.content.querySelector(".gallery");
       if (!g.el) {
-        console.warn("[copy editor] " + g.slug +
+        console.warn("[site editor] " + g.slug +
           " gallery markup was removed by a text edit - image edits for it are disabled until revert.");
         return;
       }
@@ -923,10 +923,20 @@
     "display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);" +
     "border-radius:12px;box-shadow:0 24px 60px -30px rgba(0,0,0,.9);font-size:.78rem;color:var(--text-soft);}" +
     ".ced-panel__head{padding:.6rem .8rem;border-bottom:1px solid var(--line-soft);display:flex;" +
-    "align-items:center;justify-content:space-between;font-weight:800;letter-spacing:.14em;" +
+    "align-items:center;gap:.4rem;font-weight:800;letter-spacing:.14em;" +
     "font-size:.66rem;color:var(--accent);text-transform:uppercase;}" +
-    ".ced-panel__view{font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted);}" +
+    /* the name takes the row and the two controls sit at the right end,
+       so the close is where a window's close always is */
+    ".ced-panel__view{margin-left:auto;font-weight:600;letter-spacing:0;" +
+    "text-transform:none;color:var(--muted);}" +
     ".ced-panel__view b{color:var(--c-yellow);font-weight:700;}" +
+    ".ced-panel__x{display:flex;align-items:center;justify-content:center;flex:none;" +
+    "width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:50%;" +
+    "background:none;color:var(--muted);cursor:pointer;transition:color .2s,border-color .2s;}" +
+    ".ced-panel__x:hover{border-color:var(--accent);color:var(--text);}" +
+    ".ced-panel__x svg{width:12px;height:12px;display:block;}" +
+    /* the tick the Rebuild button wears while it says Done */
+    ".ced-tick{width:11px;height:11px;margin-right:.25rem;vertical-align:-1px;}" +
     /* the unsaved-changes chip: a full-width bar under the panel head, shown
        only when something is waiting */
     ".ced-pending{display:block;width:100%;border:0;border-bottom:1px solid var(--line-soft);" +
@@ -1189,6 +1199,51 @@
     refreshPendingChip();
   }
 
+  /* The close mark, for the panel head and the region modal. One drawing,
+     so the two closes on screen cannot end up different shapes. It takes
+     currentColor and costs no request. */
+  var CED_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+    '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+  var CED_TICK = '<svg class="ced-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="m5 13 5 5L20 7" /></svg>';
+
+  /* WHAT THE REBUILD BUTTON SAYS.
+
+     A rebuild opens the wizard, and the wizard covers the button that
+     started it. When the box closes the reader is back at a panel that
+     looks exactly as it did before they pressed anything, so the button
+     itself has to carry the outcome for a moment.
+
+     "Rebuilding..." from the press, then a tick and "Done!" for three
+     seconds, then the name back. The name comes back because the button
+     is a control and not a status line: a tick that stayed would be read
+     as the state of the site rather than the result of one press.
+
+     publish.js announces the finish on the document, because it does not
+     know the panel. A failure never announces, and the timeout is what
+     puts the name back, so a build that dies cannot leave "Rebuilding..."
+     on screen for the rest of the page load. */
+  var REBUILD_SAY_MS = 3000;
+  var REBUILD_GIVEUP_MS = 120000;
+  var rebuildBtn = null;
+
+  function armRebuildSay(btn) {
+    var timer = 0;
+    function say(html, ms) {
+      window.clearTimeout(timer);
+      btn.innerHTML = html;
+      timer = window.setTimeout(function () { btn.textContent = "Rebuild"; }, ms);
+    }
+    btn.addEventListener("click", function () { say("Rebuilding...", REBUILD_GIVEUP_MS); });
+    doc.addEventListener("ced:published", function (e) {
+      if (!btn.parentNode) return;
+      if (!e.detail || e.detail.kind !== "rebuild") return;
+      say(CED_TICK + "Done!", REBUILD_SAY_MS);
+    });
+  }
+
   function buildUI() {
     overlay = doc.createElement("div");
     overlay.setAttribute("aria-hidden", "true");
@@ -1198,7 +1253,7 @@
     panel.className = "ced-panel";
     var head = doc.createElement("div");
     head.className = "ced-panel__head";
-    head.innerHTML = "<span>Copy editor</span>";
+    head.innerHTML = "<span>Site editor</span>";
     viewBtn = doc.createElement("button");
     viewBtn.type = "button";
     viewBtn.className = "ced-btn ced-panel__view";
@@ -1206,6 +1261,17 @@
       (viewing === "after" ? api.before : api.after)();
     });
     head.appendChild(viewBtn);
+    /* The close, where a window's close is. It is the same move as Exit at
+       the foot: the foot is where a reader who has worked down the panel
+       ends, and this is where a reader who wants out looks first. */
+    var shut = doc.createElement("button");
+    shut.type = "button";
+    shut.className = "ced-panel__x";
+    shut.setAttribute("aria-label", "Close the site editor");
+    shut.title = "Close the site editor";
+    shut.innerHTML = CED_X;
+    shut.addEventListener("click", function () { api(); });
+    head.appendChild(shut);
     panel.appendChild(head);
 
     pendingChip = doc.createElement("button");
@@ -1226,7 +1292,7 @@
     publishLine.title = "The last bundle you built. Click for the list of what to do with it.";
     publishLine.addEventListener("click", function () {
       if (AMH.publish && AMH.publish.checklist) AMH.publish.checklist();
-      else console.info("[copy editor] the checklist opens on blog.html.");
+      else console.info("[site editor] the checklist opens on blog.html.");
     });
     panel.appendChild(publishLine);
     refreshPublishLine();
@@ -1270,6 +1336,7 @@
       b.textContent = label;
       b.addEventListener("click", fn);
       foot.appendChild(b);
+      return b;
     }
     footBtn("Export", "ced-btn--accent", function () { api.export(); });
     /* Rebuild renders every month file again with the current chrome. It
@@ -1280,7 +1347,8 @@
        pages the button could only answer "the composer lives on
        blog.html", which is not an answer worth a button. */
     if (AMH.publish && AMH.publish.rebuild) {
-      footBtn("Rebuild", "", function () { api.blog.rebuild(); });
+      rebuildBtn = footBtn("Rebuild", "", function () { api.blog.rebuild(); });
+      armRebuildSay(rebuildBtn);
     }
     footBtn("New post", "", function () { api.blog(); });
     footBtn("Revert all", "", function () { api.revertAll(); });
@@ -1452,7 +1520,7 @@
     launcher.classList.toggle("is-on", active);
     launcher.setAttribute("aria-pressed", active ? "true" : "false");
     launcher.setAttribute("aria-label",
-      active ? "Close the copy editor" : "Open the copy editor");
+      active ? "Close the site editor" : "Open the site editor");
   }
 
   function teardownUI() {
@@ -1535,9 +1603,7 @@
     xBtn.className = "ced-modal__x";
     xBtn.setAttribute("aria-label", "Close editor");
     xBtn.title = "Close";
-    xBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-      'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
-      '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+    xBtn.innerHTML = CED_X;
     xBtn.addEventListener("click", requestClose);
     modal.appendChild(xBtn);
 
@@ -1889,7 +1955,7 @@
       entries = imageRegion.exportForm(g.seeds, g.kind);
     }
     if (!entries.length && !g.kind.mayBeEmpty) {
-      console.warn("[copy editor] " + g.slug + " exports EMPTY - no images and no seed fallback.");
+      console.warn("[site editor] " + g.slug + " exports EMPTY - no images and no seed fallback.");
     }
     return spliceRegion(src, g.slug, imageRegion.serializeFor(entries, ind, g.kind));
   }
@@ -2007,7 +2073,7 @@
       if (rec) window.sessionStorage.setItem(LAYER_KEY, JSON.stringify(rec));
       else window.sessionStorage.removeItem(LAYER_KEY);
     } catch (err) {
-      console.warn("[copy editor] the staging layer could not be kept (" +
+      console.warn("[site editor] the staging layer could not be kept (" +
         (err && err.message ? err.message : "storage refused it") +
         "). Upload the bundle you have before you make another post.");
       return false;
@@ -2029,7 +2095,7 @@
     rec.images = images || [];
     var size = JSON.stringify(rec).length;
     if (size > LAYER_MAX) {
-      console.warn("[copy editor] this bundle is " + Math.round(size / 1024) +
+      console.warn("[site editor] this bundle is " + Math.round(size / 1024) +
         " KB, over the " + Math.round(LAYER_MAX / 1024) + " KB the staging layer keeps. " +
         "It is not staged: upload it before you make another post.");
       rec.files = {};
@@ -2120,7 +2186,7 @@
      will find it. Returns the sentence, for a dialog to show. */
   function errText(code, extra) {
     var msg = (ERR[code] || "Unexpected problem.") + (extra ? " " + extra : "");
-    console.warn("[copy editor] " + code + " " + msg);
+    console.warn("[site editor] " + code + " " + msg);
     return code + " - " + msg;
   }
   function errObj(code, extra) {
@@ -2311,7 +2377,7 @@
         if (text !== null) {
           verifyWarn(path, want, text);
           handed[path] = text;
-          console.info("[copy editor] " + path + " read from the repo folder.");
+          console.info("[site editor] " + path + " read from the repo folder.");
           return text;
         }
         if (mayBeAbsent) {
@@ -2319,7 +2385,7 @@
           errText("BLG-E09", "Wanted: " + want + ".");
           return null;
         }
-        console.info("[copy editor] " + path + " is not in the repo folder; asking for it.");
+        console.info("[site editor] " + path + " is not in the repo folder; asking for it.");
         return handOffDialog(path, want, mayBeAbsent, netErr);
       });
     }
@@ -2889,7 +2955,7 @@
             (took ? " Found " + took + " other file(s) it needs." : ""));
           return;
         }
-        console.info("[copy editor] took " + took + " file(s) from the folder; " +
+        console.info("[site editor] took " + took + " file(s) from the folder; " +
           "this publish will not ask again.");
         done();
         resolve(handed[path]);
@@ -3054,7 +3120,7 @@
      nothing, when the page is not managed. */
   function stageEdit(path, slug, html) {
     if (!isManaged(path)) {
-      console.warn("[copy editor] refusing to stage " + slug + " for " + path +
+      console.warn("[site editor] refusing to stage " + slug + " for " + path +
         " - not a managed page.");
       return false;
     }
@@ -3089,7 +3155,7 @@
   function pendingWarn(err) {
     if (pendingBroken) return;
     pendingBroken = true;
-    console.warn("[copy editor] pending edits cannot be stored in this context (" +
+    console.warn("[site editor] pending edits cannot be stored in this context (" +
       (err && err.message ? err.message : "storage unavailable") +
       "). Edits stay in memory on this page only, and are lost on navigation. " +
       "This is normal for a page opened from disk.");
@@ -3104,7 +3170,7 @@
       var all = JSON.parse(raw);
       return (all && typeof all === "object") ? all : {};
     } catch (err) {
-      console.warn("[copy editor] the pending-edit store was unreadable and has been dropped.");
+      console.warn("[site editor] the pending-edit store was unreadable and has been dropped.");
       pendingWriteAll({});
       return {};
     }
@@ -3227,13 +3293,13 @@
     });
 
     if (lost.length) {
-      console.warn("[copy editor] these pending edits no longer match this page and were dropped: " +
+      console.warn("[site editor] these pending edits no longer match this page and were dropped: " +
         lost.join(", "));
     }
     if (applied) {
       exportedClean = false;
       armGuard();
-      console.info("[copy editor] restored " + applied + " pending edit(s) on " + here +
+      console.info("[site editor] restored " + applied + " pending edit(s) on " + here +
         ". Run edit() to see them, or edit.export() to write them out.");
     }
     return applied;
@@ -3298,7 +3364,7 @@
       else src = out;
     });
     if (skipped.length) {
-      console.warn("[copy editor] this page does not carry: " + skipped.join(", ") +
+      console.warn("[site editor] this page does not carry: " + skipped.join(", ") +
         " - skipped, the rest of the page is written as normal.");
     }
     Object.keys(galleries || {}).forEach(function (slug) {
@@ -3434,7 +3500,7 @@
       /* and the work that is built and not yet uploaded goes on screen
          with them: the layer is the author's, so it waits for the editor */
       if (AMH.publish && AMH.publish.staged) AMH.publish.staged();
-      console.info("[copy editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
+      console.info("[site editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
     } else {
       AMH.tool.editPost = null;
       /* strip any Edit buttons the stream rendered while we were active */
@@ -3451,7 +3517,7 @@
         }
       });
       teardownUI();
-      console.info("[copy editor] OFF" + (dirty() ? " - you still have unexported edits (edit.export())." : "."));
+      console.info("[site editor] OFF" + (dirty() ? " - you still have unexported edits (edit.export())." : "."));
     }
     syncLauncher();
     return active ? "editor mode ON" : "editor mode OFF";
@@ -3538,14 +3604,14 @@
   /* edit.pending() - what is waiting, and on which pages */
   api.pending = function () {
     var c = pendingCount();
-    if (!c.changes) { console.info("[copy editor] nothing pending."); return "nothing pending"; }
+    if (!c.changes) { console.info("[site editor] nothing pending."); return "nothing pending"; }
     var lines = [];
     Object.keys(c.byPage).sort().forEach(function (path) {
       var pg = c.byPage[path];
       Object.keys(pg.text || {}).forEach(function (s) { lines.push("  " + path + "  " + s); });
       Object.keys(pg.gallery || {}).forEach(function (s) { lines.push("  " + path + "  " + s + "  (gallery)"); });
     });
-    console.info("[copy editor] " + pendingLabel(c) + ":\n" + lines.join("\n") +
+    console.info("[site editor] " + pendingLabel(c) + ":\n" + lines.join("\n") +
       "\n\nedit.export() writes them all. edit.pending.clear() discards them.");
     return pendingLabel(c);
   };
@@ -3579,7 +3645,7 @@
     var editedGals = gals.filter(galDirty);
     var pages = changedPages();
     if (!pages.length) {
-      console.warn("[copy editor] no edits to export.");
+      console.warn("[site editor] no edits to export.");
       return "no edits to export";
     }
     var missing = [];
@@ -3591,11 +3657,11 @@
       });
     });
     if (missing.length) {
-      console.warn("[copy editor] these image files were NOT confirmed on the server - " +
+      console.warn("[site editor] these image files were NOT confirmed on the server - " +
         "the export will reference them anyway, so make sure they exist in img/work/ before uploading:\n  " +
         missing.join("\n  "));
     }
-    console.info("[copy editor] exporting " + edited.length + " text region(s) and " +
+    console.info("[site editor] exporting " + edited.length + " text region(s) and " +
       editedGals.length + " gallery/ies; this export will write: " +
       pages.map(function (pg) { return pg + " (" + pageLabel(pg) + ")"; }).join(", "));
     Promise.all(pages.map(buildPage))
@@ -3611,12 +3677,12 @@
           })));
         }
         exportedClean = true;
-        console.info("[copy editor] exported " +
+        console.info("[site editor] exported " +
           built.map(function (b) { return b.path; }).join(", ") + " with " +
           edited.length + " text region(s) and " + editedGals.length + " gallery/ies spliced in.");
       })
       .catch(function (err) {
-        console.error("[copy editor] export failed: " + err.message +
+        console.error("[site editor] export failed: " + err.message +
           (location.protocol === "file:" ? " (export needs the page served over HTTP, not file://)" : ""));
       });
     return "export started (check downloads)";
@@ -3952,7 +4018,7 @@
      outstanding edits inside its own bundle says so here. */
   AMH.tool.markExported = function () { exportedClean = true; };
 
-  /* True while the copy editor owns the keyboard. A consumer with its own
+  /* True while the site editor owns the keyboard. A consumer with its own
      Escape rule asks before it acts, so the two never fight over one key. */
   AMH.tool.modalOpen = function () { return !!(openRegion || openImage); };
 

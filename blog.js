@@ -889,21 +889,27 @@
   var blogChainAt = "";      /* the url the last hop came from */
   var blogChainRoot = false; /* the stream, rather than a month page */
 
-  /* THE RAIL'S MONTHS. The newest few, and the month being read when it
-     is not among them.
+  /* THE RAIL'S MONTHS, in the order they are shown: oldest on the left,
+     newest on the right.
 
      A blog runs for years, and a strip that carries every month it ever
      had is a strip nobody reads. The rail is the quick move to recent
      work; the picker in the bar below is the full list, and that is the
      division between the two controls.
 
-     `months` runs newest first. The month being read is appended rather
-     than inserted, so the strip stays in date order with the reader's own
-     month last: it is the one they are standing on, so it needs no place
-     among the recent ones to be found.
+     The strip reads left to right and time runs the same way, so the
+     newest month ends beside Newest, which is pinned to the right. The
+     selection is made newest first, because that is the order `months`
+     comes in and the newest few are what the rail keeps; the list is then
+     turned around for the reader.
+
+     The month being read joins the selection last when it falls outside
+     the newest few. It is older than all of them, so turning the list
+     around puts it leftmost, and the strip stays in date order either
+     way.
 
      publish.js calls this through AMH.blog so a month file and the stream
-     cap the same way. One rule, two surfaces. */
+     cap and order the same way. One rule, two surfaces. */
   var BLOG_RAIL_KEEP = 3;
 
   function blogRailMonths(months, current) {
@@ -912,7 +918,7 @@
     if (current && keep.indexOf(current) === -1 && all.indexOf(current) !== -1) {
       keep.push(current);
     }
-    return keep;
+    return keep.reverse();
   }
   /* THE RAIL, on the stream. A month file has its rail written into it by
      the publish; this page draws its own from the entries it holds, so
