@@ -3440,12 +3440,13 @@ async function main() {
       railHTML.includes('<a class="bm-chip is-now" href="2607.html" aria-current="page">Jul 2026 ' +
                         '<span class="bm-chip__n">1</span></a>'),
       railHTML.replace(/\s+/g, " ").slice(0, 220) || "no rail in the month file");
-    // Newest is outside the strip so it cannot scroll away. On the newest
-    // month there is nowhere to go, so it says so rather than offering a
-    // press that would do nothing.
-    check("month rail: Newest is pinned outside the strip, and inert on the newest month",
-      /<\/ul>\s*<span class="bm-chip bm-chip--newest is-off">Newest<\/span>/.test(railHTML) &&
-      !/bm-chip--newest" href/.test(railHTML),
+    // Newest is outside the strip so it cannot scroll away, and it is a
+    // live link here as everywhere. This IS the newest month, so it lands
+    // on the newest post rather than doing nothing: a control that is
+    // sometimes inert has to be read before it can be used.
+    check("month rail: Newest is pinned outside the strip, and live on the newest month",
+      /<\/ul>\s*<a class="bm-chip bm-chip--newest" href="2607\.html#p0001">Newest<\/a>/
+        .test(railHTML) && !/is-off/.test(railHTML),
       (railHTML.match(/<[as][^>]*bm-chip--newest[^>]*>[^<]*/) || [""])[0]);
     check("month page: the posts are the stream's markup with p ids, and keep their source",
       /<article class="bs-post" id="p0001" data-id="0001" data-date="260711"/.test(month) &&
@@ -4253,9 +4254,9 @@ async function main() {
     check("month rail: both months, newest first, current marked, Newest outside the strip",
       JSON.stringify(railTwo.labels) === '["Jul 2026 1","Jun 2026 1","Newest"]' &&
       railTwo.now === "2607.html" && railTwo.current === "page" &&
-      /* this page IS the newest month, so the pin has nowhere to send the
-         reader and carries no address at all */
-      railTwo.pinHref === null && railTwo.pinOutside === true &&
+      /* this page IS the newest month, and the pin still carries an
+         address: it lands on the newest post rather than doing nothing */
+      railTwo.pinHref === "2607.html#p0001" && railTwo.pinOutside === true &&
       railTwo.railLabel === "Months",
       JSON.stringify(railTwo));
 
@@ -4268,7 +4269,7 @@ async function main() {
     const railOld = await evaluate(`(function () {
       var pin = document.querySelector('.bm-chip--newest');
       return { pinHref: pin ? pin.getAttribute('href') : null,
-               pinOff: !!(pin && pin.classList.contains('is-off')),
+               pinOff: !!(pin && pin.classList.contains('is-off')),   /* retired: never true */
                now: (function (el) { return el ? el.getAttribute('href') : null; })(
                  document.querySelector('.bm-chip.is-now')),
                forward: [...document.querySelectorAll('.bm-rail__strip a')]
@@ -4735,14 +4736,22 @@ async function main() {
       chip.dispatchEvent(ev);
       return new Promise(function (res) { setTimeout(function () {
         var line = document.querySelector('.bs-showing');
+        var head = document.querySelector('.bs-results');
+        var bar = document.getElementById('blogBar');
         var out = { prevented: ev.defaultPrevented, search: location.search,
                     kept: !a.hidden, gone: b.hidden,
                     line: line ? line.textContent : '',
+                    head: head ? head.textContent : '',
+                    headTag: head ? head.tagName : '',
+                    /* the heading is the first thing under the bar, so the
+                       reader gets the question before the answer */
+                    headFirst: !!(bar && bar.nextElementSibling === head),
                     clear: !!(line && line.querySelector('.bs-showing__clear')) };
         if (line) line.querySelector('.bs-showing__clear').click();
         setTimeout(function () {
           out.afterClear = { kept: !a.hidden, shown: !b.hidden,
                              line: !!document.querySelector('.bs-showing'),
+                             head: !!document.querySelector('.bs-results'),
                              search: location.search };
           a.remove(); b.remove();
           res(out);
@@ -4752,10 +4761,14 @@ async function main() {
     check("tags: a chip filters the feed in place and the address carries the filter",
       tagFilter.prevented && tagFilter.search === "?t=xr" && tagFilter.kept && tagFilter.gone,
       JSON.stringify(tagFilter).slice(0, 200));
-    check("tags: the line says what is showing, and clear puts every post back",
-      /Showing/.test(tagFilter.line) && /#xr/.test(tagFilter.line) && /1 post here/.test(tagFilter.line) &&
+    check("tags: the heading names the tag, first under the bar, as a heading",
+      tagFilter.head === "Results for #xr" && tagFilter.headTag === "H2" &&
+      tagFilter.headFirst, JSON.stringify(tagFilter).slice(0, 240));
+    check("tags: the line says how many are here, and clear puts every post back",
+      /^1 post here/.test(tagFilter.line) && !/Showing/.test(tagFilter.line) &&
       tagFilter.clear && tagFilter.afterClear.shown && tagFilter.afterClear.kept &&
-      !tagFilter.afterClear.line && tagFilter.afterClear.search === "",
+      !tagFilter.afterClear.line && !tagFilter.afterClear.head &&
+      tagFilter.afterClear.search === "",
       JSON.stringify(tagFilter).slice(0, 240));
 
     // FT2. ?t= on arrival filters the same way, and lists the posts with
@@ -4764,11 +4777,12 @@ async function main() {
     await sleep(2200);
     const onArrival = await evaluate(`({
       line: (document.querySelector('.bs-showing') || {}).textContent || '',
+      head: (document.querySelector('.bs-results') || {}).textContent || '',
       shown: [...document.querySelectorAll('.bs-post')].filter(p => !p.hidden).length,
       hidden: [...document.querySelectorAll('.bs-post')].filter(p => p.hidden).length,
     })`);
     check("tags: ?t= on arrival filters the page, and an unknown tag hides every post",
-      /Showing/.test(onArrival.line) && onArrival.shown === 0 && onArrival.hidden === 1,
+      onArrival.head === "Results for #e2e" && onArrival.shown === 0 && onArrival.hidden === 1,
       JSON.stringify(onArrival));
 
     // FT2b. A TAG VIEW GETS THE SAME WAY OUT AS ONE POST. Both narrow what
@@ -4794,22 +4808,99 @@ async function main() {
       var b = document.querySelector('.bm-chip--back');
       var bar = document.getElementById('blogBar');
       var wrap = b ? b.parentNode : null;
+      /* The column reads question, way out, then the size of the answer:
+         bar, .bs-results, .bm-back, .bs-showing. The order never depends
+         on which of the three was drawn first. */
+      var order = [].slice.call(bar ? bar.parentNode.children : [])
+        .map(function (el) { return el.className; })
+        .filter(function (c) { return /bs-bar|bs-results|bm-back|bs-showing/.test(c); });
       return { wrote: ${tagHop},
                back: !!b,
                arrowSvg: !!(b && b.querySelector('svg.bm-back__i')),
-               underBar: !!(bar && bar.nextElementSibling === wrap),
-               /* the escape sits above the status line, so the order never
-                  depends on which of the two was drawn first */
+               order: order,
+               headAbove: !!(wrap && wrap.previousElementSibling &&
+                 wrap.previousElementSibling.classList.contains('bs-results')),
                showingUnder: !!(wrap && wrap.nextElementSibling &&
                  wrap.nextElementSibling.classList.contains('bs-showing')),
                url: location.search };
     })()`);
-    check("tags: following a tag from this site offers Back under the bar",
-      tagBack.wrote && tagBack.back && tagBack.arrowSvg && tagBack.underBar &&
-      tagBack.showingUnder && tagBack.url === "?t=e2e",
+    check("tags: following a tag offers Back between the heading and the count",
+      tagBack.wrote && tagBack.back && tagBack.arrowSvg && tagBack.headAbove &&
+      tagBack.showingUnder && tagBack.url === "?t=e2e" &&
+      JSON.stringify(tagBack.order) === '["bs-bar","bs-results","bm-back","bs-showing"]',
       JSON.stringify(tagBack));
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
+
+    // THE RAIL ON THE STREAM. A month page gets its rail from the publish,
+    // because it holds no entries and a reader with no script still needs
+    // the way out. This page holds every entry and draws its own, so the
+    // blog carries the same control in the same place throughout.
+    const railRoot = await evaluate(`(function () {
+      var rail = document.getElementById('blogRail');
+      var bar = document.getElementById('blogBar');
+      var strip = rail ? rail.querySelector('.bm-rail__strip') : null;
+      var pin = rail ? rail.querySelector('.bm-chip--newest') : null;
+      var links = strip ? [].slice.call(strip.querySelectorAll('a')) : [];
+      var older = document.querySelector('#blogStream .bm-older[href]');
+      return {
+        cls: rail ? rail.className : '',
+        label: rail ? rail.getAttribute('aria-label') : null,
+        aboveBar: !!(rail && rail.nextElementSibling === bar),
+        hrefs: links.map(function (a) { return a.getAttribute('href'); }),
+        counted: links.every(function (a) { return !!a.querySelector('.bm-chip__n'); }),
+        pinHref: pin ? pin.getAttribute('href') : null,
+        pinFilled: pin ? getComputedStyle(pin).backgroundColor : '',
+        pinOutside: !!(pin && strip && !strip.contains(pin)),
+        /* the picker is not replaced by the rail. The rail is the quick
+           move to recent work; the picker is every month and All months,
+           which the rail has no chip for. */
+        picker: !!document.getElementById('blogMonthBtn'),
+        /* the stream's own chain link is a chip here too, marked with a
+           down arrow because the month arrives below rather than
+           replacing the page */
+        olderFilled: older ? getComputedStyle(older).backgroundColor : '',
+        olderArrow: !!(older && older.querySelector('svg.bm-older__i')),
+        olderText: older ? older.textContent.trim() : ''
+      };
+    })()`);
+    check("stream rail: the rail sits above the bar, months link to month files",
+      railRoot.cls === "bm-rail" && railRoot.label === "Months" && railRoot.aboveBar &&
+      railRoot.hrefs.length > 0 && railRoot.hrefs.length <= 3 &&
+      railRoot.hrefs.every((h) => /^blog\/\d{4}\.html$/.test(h)) &&
+      railRoot.counted && railRoot.picker,
+      JSON.stringify(railRoot));
+    check("stream rail: Newest is live and filled here as it is on a month page",
+      /^blog\/\d{4}\.html#p\d{4}$/.test(railRoot.pinHref || "") &&
+      railRoot.pinFilled === "rgb(74, 165, 232)" && railRoot.pinOutside,
+      JSON.stringify({ pinHref: railRoot.pinHref, filled: railRoot.pinFilled,
+                       outside: railRoot.pinOutside }));
+    check("stream chain: the way to the older month is a chip with a down arrow",
+      railRoot.olderFilled === "rgb(74, 165, 232)" && railRoot.olderArrow &&
+      /^Older posts: /.test(railRoot.olderText),
+      JSON.stringify({ filled: railRoot.olderFilled, arrow: railRoot.olderArrow,
+                       text: railRoot.olderText }));
+
+    // THE CAP. A blog runs for years, and a strip carrying every month it
+    // ever had is a strip nobody reads. blog.js owns the rule and the
+    // publish calls it, so a month file and the stream cap the same way.
+    const railCap = await evaluate(`({
+      three: AMH.blog.railMonths(['2610','2609','2608','2607','2606'], ''),
+      /* the month being read is appended when it falls outside them, so
+         the reader always finds where they are standing */
+      outside: AMH.blog.railMonths(['2610','2609','2608','2607','2606'], '2606'),
+      inside: AMH.blog.railMonths(['2610','2609','2608','2607','2606'], '2609'),
+      /* a month the list does not hold adds nothing */
+      unknown: AMH.blog.railMonths(['2610','2609','2608'], '2501'),
+      short: AMH.blog.railMonths(['2607','2606'], '2606')
+    })`);
+    check("month rail: the strip caps at three months, plus the one being read",
+      JSON.stringify(railCap.three) === '["2610","2609","2608"]' &&
+      JSON.stringify(railCap.outside) === '["2610","2609","2608","2606"]' &&
+      JSON.stringify(railCap.inside) === '["2610","2609","2608"]' &&
+      JSON.stringify(railCap.unknown) === '["2610","2609","2608"]' &&
+      JSON.stringify(railCap.short) === '["2607","2606"]',
+      JSON.stringify(railCap));
 
     // CUT3. the bar: it scrolls away with the page, leaving the site header
     // as the only thing pinned, and the picker lists the months newest first
@@ -6133,12 +6224,14 @@ async function main() {
   const barSrc = (function (src) {
     /* bounded by the region that follows it, not by the next "</div>":
        the bar holds divs, so a lazy match ends at the first slot and
-       never sees the second */
-    const a = src.indexOf('<div class="bs-bar" id="blogBar">');
+       never sees the second. It starts at the rail slot, which is the
+       first of the three and sits above the bar. */
+    const a = src.indexOf('<div id="blogRail">');
     const b = src.indexOf("<!--[edit:blog-stream]-->", a);
     return a === -1 || b === -1 ? "" : src.slice(a, b);
   })(readFileSync(join(REPO, "blog.html"), "utf-8"));
-  check("bar: blog.html gives both slots as plain containers for blog.js to fill",
+  check("bar: blog.html gives every slot as a plain container for blog.js to fill",
+    /<div id="blogRail"><\/div>\s*<div class="bs-bar" id="blogBar">/.test(barSrc) &&
     /<div class="bs-bar__find" id="blogFind"><\/div>/.test(barSrc) &&
     /<div class="bs-picker" id="blogMonth"><\/div>/.test(barSrc) &&
     !/<select/.test(barSrc),

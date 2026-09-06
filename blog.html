@@ -197,15 +197,20 @@
         <!--[edit:blog-h2]-->
         <h2>Notes from the work.</h2>
         <!--[/edit:blog-h2]-->
-        <!-- The bar scrolls with the page. It is authored chrome and
-             carries no markers, so no publish rewrites it: both slots are
-             filled by blog.js, the find slot with the search pill and the
-             picker with the months the manifest names.
+        <!-- The rail and the bar, in that order, as a month page has them.
+             Both are authored chrome and carry no markers, so no publish
+             rewrites them: every slot is filled by blog.js.
 
-             Both slots must be plain containers. The picker was a <select>
-             until the page drew its own list, and a <select> is a replaced
-             element: it kept the button and the list in the DOM and laid
-             out neither, so the reader saw an empty native control. -->
+             A month page gets its rail from the publish, because it holds
+             no entries and a reader with no script still needs the way
+             out. This page holds every entry, so it draws its own.
+
+             Each slot must be a plain container that takes its class when
+             it is filled. The picker was a <select> until the page drew
+             its own list, and a <select> is a replaced element: it kept
+             the button and the list in the DOM and laid out neither, so
+             the reader saw an empty native control. -->
+        <div id="blogRail"></div>
         <div class="bs-bar" id="blogBar">
           <div class="bs-bar__find" id="blogFind"></div>
           <div class="bs-picker" id="blogMonth"></div>
@@ -316,7 +321,7 @@ Test abc 123
 <p>Test of a beforetime.</p>
             </div>
           </article>
-          <a class="bm-older" href="blog/2608.html" rel="prev">Older posts: August 2026</a>
+          <a class="bm-older" href="blog/2608.html" rel="prev"><svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>Older posts: August 2026</a>
         </div>
         <!--[/edit:blog-stream]-->
       </div>
@@ -410,7 +415,7 @@ Test abc 123
   <script id="blogManifest" type="text/plain" data-ced="blog">
 next-post:0011
 next-img:0002
-stamp:8j6nox
+stamp:nqak99
 month:2608=tshrh2
 month:2609=9oh31l
 2608010010September, yay|2609010009Test of a beforetime|2609020001Test|2609030002Test Z|2609030003This is a blog post test.|2609040004Test 1|2609040005OMG TEST|2609040006asd|2609040007Second post of the day|2609040008First post of the day

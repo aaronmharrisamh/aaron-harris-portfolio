@@ -239,6 +239,14 @@
     'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>';
 
+  /* The mark on the stream's older link: down, because the month arrives
+     below rather than replacing the page. publish.js carries the same
+     glyph as BC_DOWN, for the link it writes before any append. */
+  var BLOG_DOWN =
+    '<svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>';
+
   var BLOG_PENCIL =
     '<svg class="bs-retry__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -466,7 +474,9 @@
     });
     return hit ? hit.textContent : "All months";
   }
-  /* The button says what is chosen. Nothing else reads the value. */
+  /* The button says what is chosen, and the rail above marks the same
+     month. This is the one place the value changes, so marking here is
+     what keeps the two controls saying the same thing. */
   function blogMonthSet(value) {
     blogMonthValue = value;
     if (blogMonthBtn) blogMonthBtn.firstChild.nodeValue = blogMonthLabel(value);
@@ -474,6 +484,7 @@
       o.setAttribute("aria-selected",
         o.getAttribute("data-value") === value ? "true" : "false");
     });
+    blogRailMark();
   }
   function blogMonthOpen(open) {
     if (!blogMonthList) return;
@@ -800,7 +811,11 @@
     var wrap = doc.createElement("div");
     wrap.className = "bm-back";
     wrap.appendChild(blogBackButton());
-    bar.parentNode.insertBefore(wrap, bar.nextSibling);
+    /* under the tag heading when there is one, so the reader gets the
+       question before the way out of it. One post has no heading, and
+       there Back is the first thing under the bar. */
+    var after = doc.querySelector(".bs-results") || bar;
+    after.parentNode.insertBefore(wrap, after.nextSibling);
   }
   /* Back, again, at the head of the chain row.
 
@@ -874,6 +889,105 @@
   var blogChainAt = "";      /* the url the last hop came from */
   var blogChainRoot = false; /* the stream, rather than a month page */
 
+  /* THE RAIL'S MONTHS. The newest few, and the month being read when it
+     is not among them.
+
+     A blog runs for years, and a strip that carries every month it ever
+     had is a strip nobody reads. The rail is the quick move to recent
+     work; the picker in the bar below is the full list, and that is the
+     division between the two controls.
+
+     `months` runs newest first. The month being read is appended rather
+     than inserted, so the strip stays in date order with the reader's own
+     month last: it is the one they are standing on, so it needs no place
+     among the recent ones to be found.
+
+     publish.js calls this through AMH.blog so a month file and the stream
+     cap the same way. One rule, two surfaces. */
+  var BLOG_RAIL_KEEP = 3;
+
+  function blogRailMonths(months, current) {
+    var all = (months || []).slice();
+    var keep = all.slice(0, BLOG_RAIL_KEEP);
+    if (current && keep.indexOf(current) === -1 && all.indexOf(current) !== -1) {
+      keep.push(current);
+    }
+    return keep;
+  }
+  /* THE RAIL, on the stream. A month file has its rail written into it by
+     the publish; this page draws its own from the entries it holds, so
+     the two surfaces carry the same control in the same place.
+
+     Its month chips address month files, because a month is a page. The
+     picker below stays the way to every month and to All months, which is
+     the one destination the rail has no chip for. */
+  function blogRailFill() {
+    var slot = doc.getElementById("blogRail");
+    if (!slot) return false;
+    blogManifest = blogManifest || blogParseManifest();
+    var per = {};
+    blogManifest.entries.forEach(function (e) { per[e.month] = (per[e.month] || 0) + 1; });
+    var show = blogRailMonths(blogManifest.months, blogMonthValue || "");
+    if (!show.length) return false;
+
+    slot.className = "bm-rail";
+    slot.setAttribute("aria-label", "Months");
+    var strip = doc.createElement("ul");
+    strip.className = "bm-rail__strip";
+    show.forEach(function (mo) {
+      var li = doc.createElement("li");
+      var a = doc.createElement("a");
+      a.className = "bm-chip";
+      a.href = "blog/" + mo + ".html";
+      a.textContent = blogMonthTitle(mo).replace(/^(\w{3})\w*/, "$1");
+      if (per[mo]) {
+        var n = doc.createElement("span");
+        n.className = "bm-chip__n";
+        n.textContent = per[mo];
+        a.appendChild(doc.createTextNode(" "));
+        a.appendChild(n);
+      }
+      li.appendChild(a);
+      strip.appendChild(li);
+    });
+    slot.innerHTML = "";
+    slot.appendChild(strip);
+    slot.appendChild(blogRailPin());
+    blogRailMark();
+    return true;
+  }
+  /* Newest, pinned outside the strip. It is a live link on every surface
+     and in every state, including the newest month itself, where it moves
+     the reader to the newest post rather than doing nothing. A control
+     that is sometimes inert has to be read before it can be used. */
+  function blogRailPin() {
+    var a = doc.createElement("a");
+    a.className = "bm-chip bm-chip--newest";
+    a.textContent = "Newest";
+    var top = blogManifest.entries[blogManifest.entries.length - 1];
+    a.href = top ? blogPostUrl(top.date, top.id, "root", false)
+                 : "blog/" + blogManifest.months[0] + ".html";
+    return a;
+  }
+  /* Which chip is the reader standing in. On the stream that is the month
+     the page is scoped to, which changes as they use the picker, so this
+     runs again rather than being set once.
+
+     It reads the slot by id and not the rail by class, so a month page is
+     left alone: its mark is written by the publish and is the month the
+     file IS, which no picker on it can change. */
+  function blogRailMark() {
+    var slot = doc.getElementById("blogRail");
+    if (!slot) return;
+    Array.prototype.forEach.call(slot.querySelectorAll(".bm-rail__strip a"),
+      function (a) {
+        var mine = a.getAttribute("href") === "blog/" + blogMonthValue + ".html";
+        a.classList.toggle("is-now", !!blogMonthValue && mine);
+        if (!!blogMonthValue && mine) a.setAttribute("aria-current", "page");
+        else a.removeAttribute("aria-current");
+      });
+  }
+
   /* Returns true when this page is a month page, which is the surface
      that has nothing else to do. blog.html gets the chain too and
      answers its deep link as well, so it returns false there. */
@@ -908,6 +1022,26 @@
       if (!focused) blogBackFoot();
     }
     return onMonth;
+  }
+  /* The stream's own way back through the chain, for the month that comes
+     after the one just appended.
+
+     It is the same chip every other way through the blog is, so the
+     column reads as one set of controls. What it does is still different:
+     the month arrives below rather than replacing the page, and the down
+     arrow is what says so.
+
+     publish.js writes the same chip into a stream that has never been
+     appended to, so the two must be changed together. */
+  function blogChainLink(yymm) {
+    var a = doc.createElement("a");
+    a.className = "bm-older";
+    a.setAttribute("href", "blog/" + yymm + ".html");
+    a.setAttribute("rel", "prev");
+    a.innerHTML = BLOG_DOWN;
+    a.appendChild(doc.createTextNode("Older posts: " + blogMonthTitle(yymm)));
+    a.addEventListener("click", blogChainClick);
+    return a;
   }
   /* Where the appended posts go: the stream on blog.html, the main
      element on a month page. */
@@ -1049,19 +1183,19 @@
           here.appendChild(out);
           if (out.classList && out.classList.contains("bs-post")) added.push(out);
         });
-        /* The fetched page's own older link takes the clicked link's
-           place, and the chain goes on from there.
+        /* The fetched page says where the chain goes next. Its own link
+           is read for that and not adopted: it is a month page's chip,
+           worded and marked for a reader who is standing on the month,
+           and this surface writes its own. Adopting it left the stream
+           carrying two shapes of the same control.
 
-           A month with no older link is the first month. The stream says
-           so in its own words rather than adopting the foot of that page:
-           the foot is a row of chips for a reader standing on the month,
-           and the stream ends in a line of text. The words are the ones
-           the publish writes into a stream that needs no chain at all. */
+           A month with no older link is the first month, and the stream
+           says so in the words the publish writes into a stream that
+           needs no chain at all. */
         var older = d.querySelector(".bm-older[href]");
-        if (older) {
-          older = doc.adoptNode(older);
-          link.parentNode.replaceChild(older, link);
-          older.addEventListener("click", blogChainClick);
+        var next = older && /(\d{4})\.html/.exec(older.getAttribute("href") || "");
+        if (next) {
+          link.parentNode.replaceChild(blogChainLink(next[1]), link);
         } else {
           var end = doc.createElement("p");
           end.className = "bm-older bm-older--end";
@@ -1489,8 +1623,39 @@
     AMH.site.setUrl(AMH.site.paramUrl({ t: tag || null }), false);
     if (AMH.site) AMH.site.requestTick();
   }
-  /* The line under the bar: what is on screen, and the way out of it. */
+  /* THE HEADING OF A TAG VIEW: the question the reader asked, above the
+     answer, in the words they asked it in.
+
+     It is a heading and not another status line, because it names what is
+     on screen and the page has no other name for this state. It goes
+     directly under the bar, and Back goes under it, so the column reads
+     question, way out, then the size of the answer.
+
+     It takes a list, so several tags read as one question: "Results for
+     #one, #two". The address carries one tag today. */
+  function blogTagHead(tags) {
+    var head = doc.querySelector(".bs-results");
+    if (!tags.length) {
+      if (head && head.parentNode) head.parentNode.removeChild(head);
+      return;
+    }
+    var bar = doc.getElementById("blogBar");
+    if (!bar) return;
+    if (!head) {
+      head = doc.createElement("h2");
+      head.className = "bs-results";
+      bar.parentNode.insertBefore(head, bar.nextSibling);
+    }
+    head.innerHTML = "";
+    var what = doc.createElement("b");
+    what.textContent = tags.map(function (t) { return "#" + t; }).join(", ");
+    head.appendChild(doc.createTextNode("Results for "));
+    head.appendChild(what);
+  }
+  /* The line under the heading: how much of the answer is on this page,
+     and the way to put the whole blog back. */
   function blogTagLine(tag, shown) {
+    blogTagHead(tag ? [tag] : []);
     if (!tag) {
       if (tagLine && tagLine.parentNode) tagLine.parentNode.removeChild(tagLine);
       tagLine = null;
@@ -1501,17 +1666,15 @@
     if (!tagLine) {
       tagLine = doc.createElement("p");
       tagLine.className = "bs-showing";
-      /* under Back when there is one, so the escape sits above the status
-         and the order never depends on which was drawn first */
-      var after = doc.querySelector(".bm-back") || bar;
+      /* last of the three, so the order never depends on which of them
+         was drawn first */
+      var after = doc.querySelector(".bm-back") ||
+                  doc.querySelector(".bs-results") || bar;
       after.parentNode.insertBefore(tagLine, after.nextSibling);
     }
     tagLine.innerHTML = "";
-    var what = doc.createElement("b");
-    what.textContent = "#" + tag;
-    tagLine.appendChild(doc.createTextNode("Showing "));
-    tagLine.appendChild(what);
-    tagLine.appendChild(doc.createTextNode(" · " + shown + (shown === 1 ? " post here · " : " posts here · ")));
+    tagLine.appendChild(doc.createTextNode(
+      shown + (shown === 1 ? " post here · " : " posts here · ")));
     var clear = doc.createElement("button");
     clear.type = "button";
     clear.className = "bs-showing__clear";
@@ -1580,6 +1743,7 @@
       if (t) { blogFilterTag(decodeURIComponent(t[1])); blogBackChip(); }
       return;
     }
+    blogRailFill();
     blogBarFill();
     findAttach();
     blogZoomAttach(blogStream);
@@ -1613,6 +1777,11 @@
                                   "root" or "month", and `focus` asks for
                                   the address that reads it alone. Every
                                   post URL the site writes comes from here.
+       railMonths(months, current) -> the months the rail shows: the
+                                  newest few, plus the month being read
+                                  when it falls outside them. publish.js
+                                  calls it so a month file and the stream
+                                  cap the same way.
        focusApply()               -> read "?post=pNNNN" and show that post
                                   alone. Month pages only, and true when a
                                   post was selected. Safe to call twice.
@@ -1650,6 +1819,9 @@
     dateLabel: blogDateLabel,
     dateTime: blogDateTime,
     postUrl: blogPostUrl,
+    /* the rail's month rule, so a month file caps its strip the same way
+       this page does. publish.js is the only other caller. */
+    railMonths: blogRailMonths,
     focusApply: blogFocusApply,
     show: blogShow,
     editButtons: blogEditButtons,

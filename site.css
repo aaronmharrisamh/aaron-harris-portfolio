@@ -2110,13 +2110,9 @@ ul.dd-points li::before {
 }
 .bm-chip--back:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
 .bm-back__i { width: 14px; height: 14px; flex: none; }
-/* on the newest month there is nowhere to go, so it states that rather
-   than offering a press that would do nothing */
-.bm-chip.is-off {
-  background: none; border-style: dashed; color: var(--dim);
-  cursor: default; opacity: .65;
-}
-.bm-chip.is-off:hover { border-color: var(--line); background: none; }
+/* Newest is live in every state, the newest month included, where it
+   moves the reader to the newest post. It was inert there, and a control
+   that is sometimes inert has to be read before it can be used. */
 
 /* THIS VIEW OPENS AT THE TOP OF THE PAGE.
 
@@ -2196,6 +2192,18 @@ ul.dd-points li::before {
 .bs-find__hit mark { background: rgba(74,165,232,.28); color: var(--text); border-radius: 3px; }
 
 /* THE FILTER LINE, under the bar while one tag is showing. */
+/* THE HEADING OF A TAG VIEW. The reader asked a question with a tag, and
+   this is that question above the answer, in the words they asked it in.
+
+   It is a heading and not a status line: it names what is on screen, and
+   the page has no other name for this state. Back sits under it, so the
+   column reads question, way out, then answer. */
+.bs-results {
+  margin: 1.2rem 0 0;
+  font-size: clamp(1.15rem, 3vw, 1.5rem); font-weight: 700;
+  letter-spacing: -.01em; color: var(--text);
+}
+.bs-results b { color: var(--accent-bright); font-weight: 700; }
 .bs-showing {
   margin: .6rem 0 0; font-size: .78rem; color: var(--muted);
   display: flex; align-items: center; gap: .3rem; flex-wrap: wrap;
@@ -2384,12 +2392,10 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 .bm-older[aria-busy="true"] {
   background: none; border-color: var(--line); color: var(--dim); pointer-events: none;
 }
-/* The stream's link still expands in place, so it stays a line of text:
-   a filled chip there would promise a page that never arrives. */
-#blogStream .bm-older {
-  display: block; padding: 0; border: 0; border-radius: 0;
-  background: none; color: var(--accent-bright); font-size: .88rem;
-}
+/* The stream's link is the same chip, because every other way through
+   the blog is one and a plain line of text there read as an afterthought.
+   What it does is still different: it expands in place rather than
+   navigating, and its arrow points down to say so. */
 /* The end of the chain is a statement, not a control. */
 .bm-older--end,
 #blogStream .bm-older--end {

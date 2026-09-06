@@ -2384,9 +2384,15 @@
     if (!posts.length) {
       return '\n          <p class="bs-note">No posts yet - check back soon.</p>\n        ';
     }
+    /* The stream's own chip, in the stream's own words. A month page
+       navigates and marks that with a return arrow; here the month
+       arrives below, which is what the down arrow says.
+
+       blog.js writes the same chip for each month it appends, so the two
+       must be changed together. */
     var older = prev
-      ? '          <a class="bm-older" href="blog/' + prev + '.html" rel="prev">Older posts: ' +
-        AMH.blog.monthTitle(prev) + "</a>"
+      ? '          <a class="bm-older" href="blog/' + prev + '.html" rel="prev">' + BC_DOWN +
+        "Older posts: " + AMH.blog.monthTitle(prev) + "</a>"
       : '          <p class="bm-older bm-older--end">This is the first month.</p>';
     return "\n" + posts.join("\n") + "\n" + older + "\n        ";
   }
@@ -2775,6 +2781,14 @@
     '<svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M20 5v6a4 4 0 0 1-4 4H5" /><path d="m9 11-4 4 4 4" /></svg>';
+  /* The mark on the stream's older link. It points down because the month
+     arrives below rather than replacing the page, which is the one thing
+     that surface does differently. blog.js carries the same glyph for the
+     links it appends. */
+  var BC_DOWN =
+    '<svg class="bm-older__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>';
   /* The mark on the newer-month link: the same arrow mirrored, so the two
      ends of the chain read as one pair and the direction is the only
      difference between them. */
@@ -2803,7 +2817,10 @@
   function bcMonthRail(months, nav, yymm) {
     var counts = (nav && nav.counts) || {};
     var all = (months && months.length) ? months : [yymm];
-    var list = all.map(function (mo) {
+    /* The strip carries the newest few and this month, not every month
+       the blog ever had. blog.js owns the rule and the stream uses the
+       same call, so the two surfaces cannot cap differently. */
+    var list = AMH.blog.railMonths(all, yymm).map(function (mo) {
       var now = mo === yymm;
       var n = counts[mo];
       return '        <li><a class="bm-chip' + (now ? " is-now" : "") +
@@ -2812,12 +2829,14 @@
         "</a></li>";
     }).join("\n");
     /* Newest is pinned outside the strip, so the one move a lost reader
-       always wants cannot scroll out of reach. */
-    var newest = all[0];
-    var pin = newest === yymm
-      ? '      <span class="bm-chip bm-chip--newest is-off">Newest</span>'
-      : '      <a class="bm-chip bm-chip--newest" href="' + bcNewestHref(all, nav) +
-        '">Newest</a>';
+       always wants cannot scroll out of reach.
+
+       It is a live link in every state, the newest month included, where
+       it moves the reader to the newest post rather than doing nothing.
+       It was inert there, and a control that is sometimes inert has to be
+       read before it can be used. */
+    var pin = '      <a class="bm-chip bm-chip--newest" href="' + bcNewestHref(all, nav) +
+      '">Newest</a>';
     return '    <nav class="bm-rail" aria-label="Months">\n' +
       '      <ul class="bm-rail__strip">\n' + list + "\n" +
       "      </ul>\n" + pin + "\n    </nav>\n";
