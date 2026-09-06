@@ -416,9 +416,28 @@
     ".bc-imgnote{padding:.4rem 0;font-size:.7rem;color:var(--muted);}" +
     ".bc-btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;}" +
     ".bc-btns .ced-spacer{flex:1 1 auto;}";
-  /* the wizard: one box, four bodies */
+  /* THE WIZARD: ONE BOX, EVERY STEP.
+
+     A publish is one job with several screens. The box took its height
+     from whichever screen was up, and it is centred by a transform, so
+     it re-centred itself at every change: the buttons walked up and down
+     the screen, and the steps read as separate dialogs stacking rather
+     than one thing moving forward.
+
+     The height is fixed, so the head, the body and the buttons are in
+     the same place from Confirm to Done, and the reader knows the job is
+     over because the box is gone and not because it changed shape again.
+
+     A step shorter than the box carries empty space under its words.
+     That is the price of buttons that never move, and it is worth it. A
+     step longer than the box scrolls its own body, which keeps the
+     buttons in place at any height of screen; Done is the only step long
+     enough to reach that. */
   BC_CSS +=
-    ".bc-wizard{width:min(560px,92vw);}" +
+    ".bc-wizard{width:min(560px,92vw);height:min(560px,86vh);}" +
+    /* the body takes what the head and the buttons leave. min-height:0 is
+       what lets a flex child scroll rather than push the box open. */
+    ".bc-wizard .bc-wiz__body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;}" +
     ".bc-wiz__body{padding:.2rem 1.1rem .4rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
     ".bc-wiz__body p{margin:.35rem 0;}" +
@@ -1278,6 +1297,9 @@
     bcWiz.btns.innerHTML = "";
     bcWiz.onEscape = null;
     bcWizUnhand();
+    /* a note points at a button of the step being replaced, so it goes
+       with that step. The one this step wants is drawn as it is built. */
+    TOOL.unpoint();
     return bcWiz;
   }
   /* the progress step listens for the hand-off; the next step, or the
@@ -1289,6 +1311,9 @@
   function bcWizClose() {
     if (!bcWiz) return;
     if (bcBeat) bcBeat.stop();
+    /* the note goes with the box it was drawn over, whichever way the
+       box leaves: a press, Escape, or a failure */
+    TOOL.unpoint();
     bcWizUnhand();
     doc.removeEventListener("keydown", bcWizKeys, true);
     if (bcWiz.scrim.parentNode) bcWiz.scrim.parentNode.removeChild(bcWiz.scrim);
@@ -1362,6 +1387,14 @@
     if (!can) {
       folder.disabled = true;
       folder.title = "This browser has no folder picker. Chrome and Edge have one.";
+    }
+    /* A folder already remembered turns this from a choice into the
+       obvious move: there is nothing to pick and nothing to extract, so
+       the note says the press is available rather than explaining it.
+       With no folder remembered the button opens a picker, which the
+       blurb under the lists already describes, so no note is added. */
+    if (can && TOOL.hasRepo()) {
+      TOOL.point(folder, "You can do this now!", { onHover: true });
     }
     /* the one to focus is the one that can be pressed */
     return can ? folder : zip;
@@ -1520,6 +1553,10 @@
         if (!left.length) { leave(true); return; }
         note.textContent = "Still needed: " + left.map(name).join(", ") +
           ". Drop them here, or click Continue and the publish asks for each one.";
+        /* the step stays open, and a folder may have been chosen since
+           the note was drawn. pointRepo reads that and stops telling the
+           reader to do what they have already done. */
+        TOOL.pointRepo(repo);
       }
       function takeFrom(files) {
         TOOL.takeFiles(files, reads.all).then(function (took) {
@@ -1852,7 +1889,13 @@
     /* It closes the composer behind it as well as this box. The composer
        is finished with at this point, and leaving it on screen behind a
        closed wizard says the opposite. */
-    bcWizBtn("OK! Done!", "ced-btn--accent", done).focus();
+    var end = bcWizBtn("OK! Done!", "ced-btn--accent", done);
+    end.focus();
+    /* The note beside it carries the two things that are still to do
+       after the box is gone. It leaves on the way to the button, so the
+       last thing on screen is the page and not a note about a dialog
+       that has closed. */
+    TOOL.point(end, "Done! Remember to commit/CTRL+F5!", { onHover: true });
     w.onEscape = done;
   }
 

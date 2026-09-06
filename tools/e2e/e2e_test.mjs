@@ -78,6 +78,31 @@ const ZIP_CAPTURE = `
     })).then(b64 => { window.__zipB64 = b64; });
   };`;
 
+// The wizard box, measured. A publish is one job with several screens, so
+// the box must be one box: the same height, and the buttons in the same
+// place, from Confirm to Done. It used to take its height from whichever
+// screen was up, and because it is centred by a transform it re-centred
+// itself each time, walking the buttons up and down the screen.
+//
+// Declared page-side once and called from each step's probe, so the three
+// measurements are taken exactly the same way.
+const WIZ_GEO = `
+  window.WIZ_GEO = function (box) {
+    var r = box.getBoundingClientRect();
+    var bt = box.querySelector('.ced-modal__btns');
+    var body = box.querySelector('.bc-wiz__body');
+    /* the BOTTOM of the button row is the zone: the row is the last child
+       of a fixed-height box, so its bottom edge is the same on every step,
+       and any button that exists sits against it. Its top moves, because
+       the progress step has no buttons and the empty row is shorter. */
+    return { top: Math.round(r.top), h: Math.round(r.height),
+             btnBottom: bt ? Math.round(bt.getBoundingClientRect().bottom) : null,
+             btnTop: bt ? Math.round(bt.getBoundingClientRect().top) : null,
+             /* the body scrolls rather than pushing the box open, which is
+                what keeps the buttons in place on a step that overruns */
+             over: body ? body.scrollHeight > body.clientHeight + 1 : null };
+  };`;
+
 // The search index, read out of the file a publish wrote. Since V057 the
 // file is one assignment holding readable JSON, so the table is the object
 // in it and there is nothing to decompress.
@@ -2029,6 +2054,44 @@ async function main() {
     JSON.stringify({ mid: geo.mid.headDist, edge: geo.edge.headDist, low: geo.low.headDist }));
   check("arrow: the label stays on screen in every placement",
     geo.mid.inView && geo.edge.inView && geo.low.inView && geo.gone, JSON.stringify(geo));
+  // A2b. A long label shrinks to the room beside the tail instead of being
+  // dragged to the screen edge by the clamp, which left the words sitting
+  // apart from the arrow that was pointing for them. It shrinks and never
+  // grows, and it stops at a floor, because a label too small to read
+  // points at nothing.
+  const fit = await evaluate(`(function () {
+    var t = document.createElement('button');
+    t.textContent = 'fit';
+    t.style.cssText = 'position:fixed;right:6px;top:200px;';
+    document.body.appendChild(t);
+    function one(label) {
+      AMH.tool.point(t, label);
+      var lbl = document.querySelector('.ced-point__label');
+      var r = lbl.getBoundingClientRect();
+      var curve = document.querySelector('.ced-point__curve');
+      var tail = curve.getPointAtLength(0).matrixTransform(curve.getScreenCTM());
+      return { px: parseFloat(getComputedStyle(lbl).fontSize),
+               inView: r.left >= 0 && r.right <= window.innerWidth,
+               /* still beside the tail, not clamped away from it */
+               gap: Math.round(Math.min(Math.abs(r.right - tail.x), Math.abs(r.left - tail.x))) };
+    }
+    var out = { short: one('Short one'),
+                long: one("Done! Remember to commit/CTRL+F5!"),
+                huge: one("A label so long that no screen could ever hold it at " +
+                          "the size this pointer likes to draw its words in") };
+    AMH.tool.unpoint(true);
+    t.remove();
+    return out;
+  })()`);
+  // It shrinks only when it must. "long" fits the room beside this tail on
+  // a wide window, so it stays at the full size, which is the point: the
+  // size answers the room and not the length of the words.
+  check("arrow: a label too long for the room shrinks to fit and stays beside the tail",
+    fit.short.px === 22 && fit.long.px === 22 &&
+    fit.huge.px < 22 && fit.huge.px >= 13 &&
+    fit.short.inView && fit.long.inView && fit.huge.inView &&
+    [fit.short, fit.long, fit.huge].every((f) => f.gap <= 14),
+    JSON.stringify(fit));
   check("arrow: the words never touch the stroke or cover the target",
     geo.mid.strokeHits === 0 && geo.edge.strokeHits === 0 && geo.low.strokeHits === 0 &&
     !geo.mid.overTarget && !geo.edge.overTarget && !geo.low.overTarget,
@@ -2916,6 +2979,7 @@ async function main() {
 
   // PW2. the confirm step replaces the browser box: the two lists, the
   // reminder, the checkbox, and no window.confirm at all
+  await evaluate(WIZ_GEO);
   const dcBefore = dialogCount;
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
   await sleep(400);
@@ -2933,6 +2997,7 @@ async function main() {
       disabled: [...box.querySelectorAll('.ced-modal__btns button')]
         .filter(function (b) { return b.disabled; }).map(function (b) { return b.textContent; }),
       focused: document.activeElement && document.activeElement.textContent,
+      geo: WIZ_GEO(box),
     };
   })()`);
   check("wizard: the confirm step names what is spliced and what is regenerated",
@@ -2957,6 +3022,7 @@ async function main() {
     var box = document.querySelector('.bc-wizard');
     return { step: box && box.getAttribute('data-step'),
              rows: box ? box.querySelectorAll('.bc-wiz__rows li').length : 0,
+             geo: box ? WIZ_GEO(box) : null,
              now: box ? [...box.querySelectorAll('.bc-wiz__rows li')].filter(function (l) { return l.className === 'is-now'; }).length : 0 };
   })()`);
   check("wizard: the progress step lists the work in seven rows and paces itself",
@@ -3011,6 +3077,14 @@ async function main() {
         btns: [...box.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }),
         url: (box.querySelector('.bc-wiz__body a') || {}).textContent || '',
         focused: document.activeElement && document.activeElement.textContent,
+        geo: WIZ_GEO(box),
+        arrow: (function (a) {
+          return a ? { label: a.querySelector('.ced-point__label').textContent,
+                       px: parseFloat(getComputedStyle(a.querySelector('.ced-point__label')).fontSize),
+                       onScreen: (function (r) {
+                         return r.left >= 0 && r.right <= window.innerWidth;
+                       })(a.querySelector('.ced-point__label').getBoundingClientRect()) } : null;
+        })(document.querySelector('.ced-point')),
         publishDisabled: [...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled,
       };
     })()`);
@@ -3031,6 +3105,28 @@ async function main() {
     JSON.stringify(doneStep).slice(0, 300));
   check("wizard: the seven rows each held for the minimum, so the steps could be read",
     doneStep.elapsed >= 7 * 350 - 100, "elapsed " + doneStep.elapsed + "ms");
+  // WB1. ONE BOX. The three steps are one box at one height, so the head,
+  // the body and the buttons are in the same place from Confirm to Done
+  // and the reader knows the job is over because the box is gone.
+  const geos = [confirmStep.geo, progressStep.geo, doneStep.geo];
+  check("wizard: every step is one box, at one height, with the buttons in one place",
+    geos.every((g) => g && g.h === geos[0].h && g.top === geos[0].top &&
+                      g.btnBottom === geos[0].btnBottom),
+    JSON.stringify({ confirm: confirmStep.geo, progress: progressStep.geo,
+                     done: doneStep.geo }));
+  // and a step longer than the box scrolls its own body rather than
+  // pushing the box open, which is what keeps that promise at any height
+  // of screen. Done is the step long enough to reach it.
+  check("wizard: a step that overruns scrolls its body and leaves the box alone",
+    doneStep.geo.over === true && confirmStep.geo.over === false,
+    JSON.stringify({ done: doneStep.geo.over, confirm: confirmStep.geo.over }));
+  // WB2. The note beside OK! Done! carries the two things still to do
+  // after the box is gone. It is long, so it shrinks to the room beside
+  // the arrow rather than being clamped away from it.
+  check("wizard: the last step points at OK! Done! and the note stays on screen",
+    !!doneStep.arrow && doneStep.arrow.label === "Done! Remember to commit/CTRL+F5!" &&
+    doneStep.arrow.onScreen && doneStep.arrow.px >= 13 && doneStep.arrow.px <= 22,
+    JSON.stringify(doneStep.arrow));
   // WD0. The heartbeat proves the build is alive, which the ticking rows
   // cannot: they would look the same if the work had stopped between two
   // of them. It shows the step the publish is on, taken from the same

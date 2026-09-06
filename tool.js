@@ -2824,8 +2824,13 @@
   /* The one label the arrow gives the folder button, wherever the button
      is. One pick answers every ask, and the root of the repo is the folder
      to pick, which the button alone does not say. */
+  /* The folder button's note reads the state it is in. With no folder
+     remembered it is an instruction; once one is chosen and the step is
+     still open, the same button is the way on, so the note stops telling
+     the reader to do what they have already done. */
   var REPO_LABEL = "Click and choose root of repo folder!";
-  function pointRepo(btn) { pointAt(btn, REPO_LABEL); }
+  var REPO_SET_LABEL = "You're all set!";
+  function pointRepo(btn) { pointAt(btn, repoDir ? REPO_SET_LABEL : REPO_LABEL); }
 
   /* The dialog itself: drop, choose, or pick the repo folder. */
   function handOffDialog(path, want, mayBeAbsent, netErr) {
@@ -3797,8 +3802,13 @@
      the target on scroll and resize, and it leaves when the target is
      clicked or gone.
 
+     The label shrinks to the room beside the tail, down to a floor, so a
+     long one stays with the arrow instead of being clamped away from it.
+
      opts.size    scale of the drawing, 1 by default, .8 on a narrow screen
-     opts.stay    true keeps it after the target is clicked */
+     opts.stay    true keeps it after the target is clicked
+     opts.onHover true takes it away when the cursor reaches the target,
+                  for a note whose job is done once the button is found */
   var PT_W = 170, PT_H = 90;   /* the drawing box, in CSS px at scale 1 */
   var PT_GAP = 6;              /* tip to target edge */
   var PT_LBL_GAP = 10;         /* tail end to the label's near edge */
@@ -3868,9 +3878,35 @@
      that side is always clear of the stroke. When the side has no room the
      label goes over or under the tail instead, and a last clamp keeps it on
      screen. Everything is measured, so no offset is a guess. */
+  /* The label shrinks to the room beside the tail rather than being
+     dragged away from it. A long one at the full size ran past the edge
+     of the screen, and the clamp below then pulled it back until it sat
+     apart from the arrow that was pointing for it.
+
+     The room is the gap between the tail and the near edge of the screen,
+     on the side the label hangs. One measurement answers it: the width at
+     the full size gives the ratio, so nothing loops looking for a fit.
+
+     It shrinks and never grows past the base, and it stops at a floor,
+     because a label too small to read points at nothing. */
+  var PT_LBL_PX = 22;      /* the label's own size, at scale 1 */
+  var PT_LBL_MIN = 13;     /* it shrinks to fit, and no further */
+
+  function ptFit(lbl, name, box, s) {
+    var sh = PT_SHAPES[name];
+    var tx = box[0] + sh.d[0][0] * s;
+    var room = sh.end ? tx - PT_LBL_GAP - 8 : window.innerWidth - 8 - tx - PT_LBL_GAP;
+    var base = PT_LBL_PX * s;
+    lbl.style.fontSize = base + "px";
+    var w = lbl.getBoundingClientRect().width;
+    if (room <= 0 || w <= 0 || w <= room) return;
+    lbl.style.fontSize = Math.max(PT_LBL_MIN, Math.floor(base * (room / w))) + "px";
+  }
+
   function ptLabel(name, box, s) {
     var sh = PT_SHAPES[name];
     var lbl = ptEl.querySelector(".ced-point__label");
+    ptFit(lbl, name, box, s);
     var lr = lbl.getBoundingClientRect();
     var lw = lr.width, lh = lr.height;
     var tx = box[0] + sh.d[0][0] * s, ty = box[1] + sh.d[0][1] * s;
@@ -3955,13 +3991,20 @@
     window.addEventListener("scroll", ptTick, true);
     window.addEventListener("resize", ptTick);
     target.addEventListener("click", ptClicked);
+    /* opts.onHover: the reader has found the button, so the note has done
+       its job before the press. It leaves on the way in, not on the way
+       out, so it is gone by the time the button is under the cursor. */
+    if (ptOpts.onHover) target.addEventListener("mouseenter", ptClicked);
   }
   function unpoint(now) {
     if (!ptEl) return;
     var el = ptEl, target = ptTarget;
     window.removeEventListener("scroll", ptTick, true);
     window.removeEventListener("resize", ptTick);
-    if (target) target.removeEventListener("click", ptClicked);
+    if (target) {
+      target.removeEventListener("click", ptClicked);
+      target.removeEventListener("mouseenter", ptClicked);
+    }
     ptEl = null; ptTarget = null; ptOpts = null; ptShape = "";
     var drop = function () {
       if (el.parentNode) el.parentNode.removeChild(el);
