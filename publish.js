@@ -472,27 +472,38 @@
     /* the body takes what the head and the buttons leave. min-height:0 is
        what lets a flex child scroll rather than push the box open. */
     ".bc-wizard .bc-wiz__body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;}" +
-    /* The head stacks: the job it is doing, then the stage it is on.
-       The second line costs height the Confirm step did not have on a
-       short screen, where the box is 86vh and not 560px, so the head's
-       own padding and line height pay it back. */
-    ".bc-wizard .ced-modal__head{position:relative;display:block;" +
-    "padding-top:.4rem;padding-bottom:.2rem;}" +
+    /* THE HEAD IS THREE ROWS: the job, the hairline, the stage.
+
+       The rule under it is what makes the box read as three bands rather
+       than one column of text. It is the cheapest part of the look and
+       the largest part of the difference.
+
+       The right padding drops to match the left, because nothing sits in
+       the top right of THIS box: the 3rem in the shared rule clears a
+       control the wizard does not have, and it was cutting the hairline
+       short and squeezing the job line. */
+    ".bc-wizard .ced-modal__head{display:block;padding:.5rem 1.1rem .45rem;" +
+    "border-bottom:1px solid var(--line);}" +
     ".bc-wiz__job,.bc-wiz__stage{display:flex;align-items:baseline;gap:.6rem;min-width:0;" +
     "line-height:1.25;}" +
+    /* the job row goes away when no job is named, and it has to be told
+       to: the display above beats the browser's own rule for [hidden] */
+    ".bc-wiz__job[hidden]{display:none;}" +
     ".bc-wiz__stage .ced-b{color:var(--muted);}" +
     /* one line, clipped rather than wrapped: a job name that wrapped would
        change the height of the head and move the buttons under it */
-    ".bc-wiz__jobline{font-size:.7rem;color:var(--dim);white-space:nowrap;overflow:hidden;" +
-    "text-overflow:ellipsis;}" +
+    /* The job is a title in its own right, not a footnote to the stage.
+       Both rows carry weight, so the head reads as two lines of equal
+       standing: what the job is, and where it has got to. */
+    ".bc-wiz__jobline{font-size:.82rem;font-weight:700;color:var(--text);" +
+    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
     /* How far the job has come. The width is a stage fraction, so it steps
        rather than creeps, and it never goes backward.
 
-       It is placed on the head's lower edge rather than laid out under it,
-       so it costs the body no height at all. The body is what runs out of
-       room on a short screen, and a 2px line is not worth a scrollbar. */
-    ".bc-wiz__bar{position:absolute;left:1.1rem;right:1.1rem;bottom:0;height:2px;" +
-    "background:var(--line);border-radius:1px;overflow:hidden;}" +
+       It sits between the job and the stage, so the line that holds still
+       and the line that changes are told apart by it. */
+    ".bc-wiz__bar{height:2px;margin:.3rem 0 .35rem;background:var(--line-soft);" +
+    "border-radius:2px;overflow:hidden;}" +
     ".bc-wiz__bar i{display:block;height:100%;width:0;background:var(--accent);" +
     "transition:width .35s var(--ease);}" +
     "@media (prefers-reduced-motion:reduce){.bc-wiz__bar i{transition:none;}}" +
@@ -528,7 +539,17 @@
        guest's head is one line and needs the row back, or the badge and
        the name run together with no gap between them. */
     ".bc-wizard .bc-wiz__guest .ced-modal__head{display:flex;align-items:baseline;" +
-    "gap:.6rem;padding-top:.7rem;padding-bottom:.5rem;}" +
+    "gap:.6rem;padding:.75rem 1.1rem .7rem;}" +
+    /* and the rule above the buttons, which closes the third band. Both
+       rules are on the wizard only: the region modal has its own shape. */
+    ".bc-wizard .ced-modal__btns{border-top:1px solid var(--line);}" +
+    /* The one move on the step is filled, not outlined, which is what
+       anchors the bottom band. This is the treatment the editor's own
+       panel foot already uses; the wizard had never been given it. */
+    ".bc-wizard .ced-btn--accent{background:var(--accent);color:var(--bg-deep);" +
+    "transition:background .2s,border-color .2s;}" +
+    ".bc-wizard .ced-btn--accent:hover{border-color:var(--accent-bright);" +
+    "background:var(--accent-bright);color:var(--bg-deep);}" +
     /* The guest's body already pads its sides, so the parts inside it must
        not add their own or the inset is counted twice. */
     ".bc-wiz__guest .ced-handoff__zone{margin-left:0;margin-right:0;}" +
@@ -541,11 +562,11 @@
        exactly as it was left. */
     ".bc-wiz__body{padding:.15rem 1.1rem .3rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
-    ".bc-wiz__body p{margin:.35rem 0;}" +
+    ".bc-wiz__body p{margin:.28rem 0;}" +
     ".bc-wiz__body strong{color:var(--text);}" +
     ".bc-wiz__body code{color:var(--accent-bright);font-family:Consolas,monospace;font-size:.78rem;}" +
     ".bc-wiz__body a{color:var(--accent-bright);}" +
-    ".bc-wiz__files{display:flex;flex-wrap:wrap;gap:.3rem;margin:.3rem 0 .5rem;}" +
+    ".bc-wiz__files{display:flex;flex-wrap:wrap;gap:.3rem;margin:.25rem 0 .4rem;}" +
     ".bc-wiz__file{font:700 9.5px/1 Consolas,monospace;letter-spacing:.05em;border-radius:4px;" +
     "padding:3px 6px;border:1px solid var(--line);color:var(--muted);}" +
     ".bc-wiz__file[data-how=spliced]{border-color:var(--accent);color:var(--accent-bright);}" +
@@ -568,8 +589,11 @@
     ".bc-wiz__opt{display:flex;gap:.5rem;align-items:center;margin:.6rem 0 .2rem;font-size:.75rem;cursor:pointer;}" +
     ".bc-wiz__legend{font-size:.68rem;color:var(--dim);}" +
     /* the delivery choice, and the line that appears when it could not be kept */
-    ".bc-wiz__route{margin:.7rem 0;padding:.6rem .7rem;border:1px solid var(--line);" +
-      "border-radius:var(--radius-sm);background:var(--bg-deep);font-size:.78rem;}" +
+    /* A paragraph, not a box. Its border competed with the two rules that
+       divide the head, the body and the buttons, and the box cost about
+       20px that the step did not have on a short screen. The words carry
+       the meaning; the frame was only decoration. */
+    ".bc-wiz__route{margin:.5rem 0;font-size:.78rem;}" +
     ".bc-wiz__fell{margin:0 0 .7rem;padding:.6rem .7rem;border:1px solid var(--warn,#b4761f);" +
       "border-radius:var(--radius-sm);font-size:.8rem;}" +
     ".bc-wiz__reads{padding:0;margin:.3rem 0 .2rem;}" +
@@ -1385,15 +1409,21 @@
       box.setAttribute("aria-modal", "true");
       var head = doc.createElement("div");
       head.className = "ced-modal__head";
-      /* The head's words are rebuilt at every step, so they live in their
-         own element: the hairline is a child of the head, and an innerHTML
-         on the head itself would throw the hairline away with them. */
-      var headText = doc.createElement("div");
+      /* Three rows: the job, the hairline, the stage. Each row is its own
+         element because the words are rebuilt at every step, and an
+         innerHTML on the head itself would throw the hairline away with
+         them. The hairline sits BETWEEN the two lines, which is what
+         separates the job that holds still from the stage that changes. */
+      var jobEl = doc.createElement("div");
+      jobEl.className = "bc-wiz__job";
       var bar = doc.createElement("div");
       bar.className = "bc-wiz__bar";
       bar.appendChild(doc.createElement("i"));
-      head.appendChild(headText);
+      var stageEl = doc.createElement("div");
+      stageEl.className = "bc-wiz__stage";
+      head.appendChild(jobEl);
       head.appendChild(bar);
+      head.appendChild(stageEl);
       var body = doc.createElement("div");
       body.className = "bc-wiz__body";
       var btns = doc.createElement("div");
@@ -1411,8 +1441,8 @@
       doc.body.appendChild(box);
       doc.addEventListener("keydown", bcWizKeys, true);
       bcBarAt = 0;
-      bcWiz = { box: box, stepEl: stepEl, head: head, headText: headText, bar: bar,
-                body: body, btns: btns, onEscape: null, guests: [] };
+      bcWiz = { box: box, stepEl: stepEl, head: head, jobEl: jobEl, stageEl: stageEl,
+                bar: bar, body: body, btns: btns, onEscape: null, guests: [] };
     }
     /* A guest left over from an answer that did not close it would sit on
        top of the step being shown. Nothing should reach here with one up,
@@ -1420,7 +1450,7 @@
     while (bcWiz.guests.length) bcWizGuestClose();
     bcStep(step, title);
     bcWiz.box.setAttribute("data-step", step);
-    bcWiz.headText.innerHTML = bcWizHead(step, title);
+    bcWizHead(step, title);
     bcWizBar(BC_STAGE_PCT[step] || bcBarAt);
     bcWiz.body.innerHTML = "";
     bcWiz.btns.innerHTML = "";
@@ -1437,18 +1467,18 @@
     route: "ROUTE", confirm: "CHECK", notice: "NOTICE", files: "FILES",
     progress: "BUILD", done: "DONE", failed: "FAILED"
   };
-  /* Two lines: the job, then the stage. With no job set the head is the
-     one line it has always been, so a caller that opens the wizard
-     without naming a job loses nothing. */
+  /* Fill the two rows of the head. With no job named the job row is put
+     away and the stage line carries the PUBLISH badge, which is the one
+     line the box has always had. */
   function bcWizHead(step, title) {
-    /* With no job named, the stage line carries the PUBLISH badge and is
-       the whole head, which is the one line the box has always had. */
     var badge = bcJob ? (BC_STAGE_NAME[step] || "STEP") : "PUBLISH";
-    var stage = '<div class="bc-wiz__stage"><span class="ced-b">' + badge +
-      '</span><span class="ced-slug">' + TOOL.escAttr(title) + "</span></div>";
-    if (!bcJob) return stage;
-    return '<div class="bc-wiz__job"><span class="ced-b">' + TOOL.escAttr(bcJob.badge) +
-      '</span><span class="bc-wiz__jobline">' + TOOL.escAttr(bcJob.line) + "</span></div>" + stage;
+    bcWiz.jobEl.innerHTML = bcJob
+      ? '<span class="ced-b">' + TOOL.escAttr(bcJob.badge) + "</span>" +
+        '<span class="bc-wiz__jobline">' + TOOL.escAttr(bcJob.line) + "</span>"
+      : "";
+    bcWiz.jobEl.hidden = !bcJob;
+    bcWiz.stageEl.innerHTML = '<span class="ced-b">' + badge + "</span>" +
+      '<span class="ced-slug">' + TOOL.escAttr(title) + "</span>";
   }
   /* ---------------- the shell holds another file's dialogs ----------------
 
