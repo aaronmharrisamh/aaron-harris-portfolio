@@ -152,6 +152,40 @@
 
   var NOTICE_MS = 1600;
   var bcWiz = null;             /* the wizard while it is on screen */
+
+  /* ---------------- the job, and how far it has come ----------------
+
+     The head carries two lines. The top line names the JOB and holds
+     still for as long as the job runs. The bottom line names the STAGE
+     and changes with it. A reader who is answering a question several
+     steps in can still see what they started.
+
+     The stage is named, not numbered. The Files step only appears for a
+     publish from disk, so a number would call the same stage 2 one time
+     and 3 the next. */
+  var bcJob = null;
+  function bcWizJob(badge, line) { bcJob = { badge: badge, line: line }; }
+
+  /* The fraction the hairline draws. It comes from the stage, so it is
+     coarse and it is honest. Never derive it from elapsed time: the
+     wizard cannot know how long a build takes, and a bar that guesses is
+     a bar that lies. */
+  var BC_STAGE_PCT = {
+    route: 8, confirm: 12, notice: 12, files: 18,
+    progress: 40, done: 100, failed: 100
+  };
+  var BC_BUILD_TOP = 95;        /* what the rows climb toward, short of Done */
+  var bcBarAt = 0;
+  /* It only grows. A step that comes back after a question must not send
+     the bar backward, because that reads as work being undone. */
+  function bcWizBar(pct) {
+    if (!bcWiz) return;
+    var want = Math.max(0, Math.min(100, pct));
+    if (want < bcBarAt) return;
+    bcBarAt = want;
+    bcWiz.bar.firstChild.style.width = want + "%";
+    bcWiz.box.setAttribute("data-at", String(want));
+  }
   var bcProg = null;            /* the progress step, while a bundle is built */
   var bcPublishBtn = null;
 
@@ -438,7 +472,31 @@
     /* the body takes what the head and the buttons leave. min-height:0 is
        what lets a flex child scroll rather than push the box open. */
     ".bc-wizard .bc-wiz__body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;}" +
-    ".bc-wiz__body{padding:.2rem 1.1rem .4rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
+    /* The head stacks: the job it is doing, then the stage it is on.
+       The second line costs height the Confirm step did not have on a
+       short screen, where the box is 86vh and not 560px, so the head's
+       own padding and line height pay it back. */
+    ".bc-wizard .ced-modal__head{position:relative;display:block;" +
+    "padding-top:.4rem;padding-bottom:.2rem;}" +
+    ".bc-wiz__job,.bc-wiz__stage{display:flex;align-items:baseline;gap:.6rem;min-width:0;" +
+    "line-height:1.25;}" +
+    ".bc-wiz__stage .ced-b{color:var(--muted);}" +
+    /* one line, clipped rather than wrapped: a job name that wrapped would
+       change the height of the head and move the buttons under it */
+    ".bc-wiz__jobline{font-size:.7rem;color:var(--dim);white-space:nowrap;overflow:hidden;" +
+    "text-overflow:ellipsis;}" +
+    /* How far the job has come. The width is a stage fraction, so it steps
+       rather than creeps, and it never goes backward.
+
+       It is placed on the head's lower edge rather than laid out under it,
+       so it costs the body no height at all. The body is what runs out of
+       room on a short screen, and a 2px line is not worth a scrollbar. */
+    ".bc-wiz__bar{position:absolute;left:1.1rem;right:1.1rem;bottom:0;height:2px;" +
+    "background:var(--line);border-radius:1px;overflow:hidden;}" +
+    ".bc-wiz__bar i{display:block;height:100%;width:0;background:var(--accent);" +
+    "transition:width .35s var(--ease);}" +
+    "@media (prefers-reduced-motion:reduce){.bc-wiz__bar i{transition:none;}}" +
+    ".bc-wiz__body{padding:.15rem 1.1rem .3rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
     ".bc-wiz__body p{margin:.35rem 0;}" +
     ".bc-wiz__body strong{color:var(--text);}" +
@@ -1277,6 +1335,15 @@
       box.setAttribute("aria-modal", "true");
       var head = doc.createElement("div");
       head.className = "ced-modal__head";
+      /* The head's words are rebuilt at every step, so they live in their
+         own element: the hairline is a child of the head, and an innerHTML
+         on the head itself would throw the hairline away with them. */
+      var headText = doc.createElement("div");
+      var bar = doc.createElement("div");
+      bar.className = "bc-wiz__bar";
+      bar.appendChild(doc.createElement("i"));
+      head.appendChild(headText);
+      head.appendChild(bar);
       var body = doc.createElement("div");
       body.className = "bc-wiz__body";
       var btns = doc.createElement("div");
@@ -1287,12 +1354,14 @@
       doc.body.appendChild(scrim);
       doc.body.appendChild(box);
       doc.addEventListener("keydown", bcWizKeys, true);
-      bcWiz = { scrim: scrim, box: box, head: head, body: body, btns: btns, onEscape: null };
+      bcBarAt = 0;
+      bcWiz = { scrim: scrim, box: box, head: head, headText: headText, bar: bar,
+                body: body, btns: btns, onEscape: null };
     }
     bcStep(step, title);
     bcWiz.box.setAttribute("data-step", step);
-    bcWiz.head.innerHTML = '<span class="ced-b">PUBLISH</span><span class="ced-slug">' +
-      TOOL.escAttr(title) + "</span>";
+    bcWiz.headText.innerHTML = bcWizHead(step, title);
+    bcWizBar(BC_STAGE_PCT[step] || bcBarAt);
     bcWiz.body.innerHTML = "";
     bcWiz.btns.innerHTML = "";
     bcWiz.onEscape = null;
@@ -1301,6 +1370,25 @@
        with that step. The one this step wants is drawn as it is built. */
     TOOL.unpoint();
     return bcWiz;
+  }
+  /* The stage badge. A name rather than a number, for the reason given
+     where bcWizJob is declared. */
+  var BC_STAGE_NAME = {
+    route: "ROUTE", confirm: "CHECK", notice: "NOTICE", files: "FILES",
+    progress: "BUILD", done: "DONE", failed: "FAILED"
+  };
+  /* Two lines: the job, then the stage. With no job set the head is the
+     one line it has always been, so a caller that opens the wizard
+     without naming a job loses nothing. */
+  function bcWizHead(step, title) {
+    /* With no job named, the stage line carries the PUBLISH badge and is
+       the whole head, which is the one line the box has always had. */
+    var badge = bcJob ? (BC_STAGE_NAME[step] || "STEP") : "PUBLISH";
+    var stage = '<div class="bc-wiz__stage"><span class="ced-b">' + badge +
+      '</span><span class="ced-slug">' + TOOL.escAttr(title) + "</span></div>";
+    if (!bcJob) return stage;
+    return '<div class="bc-wiz__job"><span class="ced-b">' + TOOL.escAttr(bcJob.badge) +
+      '</span><span class="bc-wiz__jobline">' + TOOL.escAttr(bcJob.line) + "</span></div>" + stage;
   }
   /* the progress step listens for the hand-off; the next step, or the
      close, stops it */
@@ -1316,6 +1404,9 @@
     TOOL.unpoint();
     bcWizUnhand();
     doc.removeEventListener("keydown", bcWizKeys, true);
+    /* the job named this box, so it goes with it */
+    bcJob = null;
+    bcBarAt = 0;
     if (bcWiz.scrim.parentNode) bcWiz.scrim.parentNode.removeChild(bcWiz.scrim);
     if (bcWiz.box.parentNode) bcWiz.box.parentNode.removeChild(bcWiz.box);
     bcWiz = null;
@@ -1642,6 +1733,10 @@
           if (lis[i]) lis[i].className = "is-done";
           if (lis[i + 1]) lis[i + 1].className = "is-now";
           paint();
+          /* the hairline over the build is the rows already ticking, not a
+             second guess at the same thing */
+          bcWizBar(BC_STAGE_PCT.progress +
+            (BC_BUILD_TOP - BC_STAGE_PCT.progress) * ((i + 1) / (rows.length || 1)));
           return wait(STEP_MS);
         });
       },
@@ -3345,6 +3440,8 @@
     });
     var reads = bcPublishReads(date, willWrite, neighbours);
     var route = null;
+    bcWizJob("PUBLISH", bcEditing ? "This post again, and every page it touches"
+                                  : "A new post, and every page it touches");
     bcWizConfirm(willWrite, willReplace)
       .then(function (chosen) { route = chosen; return chosen && bcWizFiles(reads); })
       .then(function (go) {
@@ -3623,6 +3720,7 @@
         "\n\nThis builds a publish bundle. The post stays live until you upload the bundle.")) {
       return;
     }
+    bcWizJob("DELETE", "This post, and the files it leaves behind");
     bcWizRoutePick("Where should the deletion bundle land?",
       "The post stays live until this reaches the repo and you commit it.")
       .then(function (route) { if (route) bcDeleteBuild(route, imgOrphans); });
@@ -3717,6 +3815,7 @@
   /* ---------------- rebuild: every month file, current chrome ---------------- */
   function bcRebuild() {
     TOOL.injectStyles();
+    bcWizJob("REBUILD", "Every month file, current design");
     bcWizRoutePick("Where should the rebuild bundle land?",
       "Every month file is written again with the current design.")
       .then(function (route) { if (route) bcRebuildBuild(route); });

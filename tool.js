@@ -955,6 +955,16 @@
     ".ced-handoff__zone.is-wrong{border-color:var(--c-red,#e5534b);}" +
     ".ced-handoff__zone.is-warn{border-color:#f0883e;}" +
     ".ced-handoff__zone:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    /* the remembered folder, offered in the box that is already open */
+    ".ced-handoff__offer{margin:.8rem 1.1rem 0;padding:.7rem .85rem;border-radius:10px;" +
+    "border:1px solid var(--accent);background:rgba(74,165,232,.08);display:flex;" +
+    "flex-direction:column;gap:.35rem;}" +
+    ".ced-handoff__offer strong{color:var(--text);font-size:.85rem;}" +
+    ".ced-handoff__why{color:var(--muted);font-size:.72rem;line-height:1.5;}" +
+    ".ced-handoff__offerbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.15rem;}" +
+    /* the display above beats the browser's own rule for [hidden], so the
+       offer has to be told to go away in the same breath */
+    ".ced-handoff__offer[hidden]{display:none;}" +
     ".ced-handoff__list{display:flex;flex-wrap:wrap;gap:.3rem;padding:0 1.1rem .2rem;}" +
     ".ced-handoff__item{font:700 9.5px/1 Consolas,monospace;letter-spacing:.06em;border-radius:4px;padding:3px 6px;border:1px solid var(--line);color:var(--dim);}" +
     ".ced-handoff__item.is-now{border-color:var(--accent);color:var(--accent-bright);}" +
@@ -2553,6 +2563,13 @@
   /* Read the folder and say what it is. Needs permission, so it runs after
      the grant. Resolves a verdict the step can show as one sentence. */
   function repoVerify(handle) {
+    /* A handle can come back from storage without its methods, because a
+       structured clone keeps the data and not the object. Answer, do not
+       throw: the rule in this file is that a browser which lost the API
+       costs the reader a pick, not an error. */
+    if (!handle || typeof handle.getFileHandle !== "function") {
+      return Promise.resolve({ ok: false, why: "That folder could not be read." });
+    }
     return repoHasRootMarks(handle).then(function (root) {
       if (!root) return { ok: false, why: "That folder is not the root of this site. " +
         "The root holds index.html and blog.html." };
@@ -2670,10 +2687,58 @@
       function (err) { err.written = written; throw err; });
   }
   function repoWriteReady() { return !!repoWriteDir; }
+  /* THE FOLDER DECISION, WRITTEN ONCE.
+
+     The same question is asked in two places: a box of its own, and
+     inline in a file dialog that is already on screen. They differ only
+     in what holds the two buttons, so the caller gives the surface and
+     this gives the answer.
+
+     settle(handle) means take this folder. settle(null) means the reader
+     wants a different one. Neither is called until the checks pass, so a
+     stale or wrong folder never resolves as good. */
+  function repoConfirmWire(handle, mode, use, other, setNote, settle) {
+    /* the browser may still hold permission, and then the folder can be
+       read before the click and the verdict shown with the question */
+    repoWritableNow(handle, mode).then(function (granted) {
+      if (!granted) return;
+      return repoVerify(handle).then(function (v) {
+        setNote(v.why);
+        if (!v.ok) { use.disabled = true; other.className = "ced-btn ced-btn--accent"; }
+      });
+    });
+
+    other.addEventListener("click", function () { settle(null); });
+    use.addEventListener("click", function () {
+      use.disabled = true;
+      setNote("Checking the folder...");
+      repoWritable(handle, mode).then(function (granted) {
+        if (!granted) {
+          setNote(errText("BLG-E12", ""));
+          other.className = "ced-btn ced-btn--accent";
+          return;
+        }
+        return repoVerify(handle).then(function (v) {
+          if (v.ok) { settle(handle); return; }
+          setNote(v.why);
+          other.className = "ced-btn ced-btn--accent";
+        });
+      }, function () {
+        setNote(errText("BLG-E12", ""));
+        other.className = "ced-btn ced-btn--accent";
+      });
+    });
+  }
+
   /* The step that offers the folder this browser remembers. Resolves the
      handle to use, or null to open the picker instead. It never resolves a
      folder that failed its checks: a stale or wrong folder sends the
-     reader to the picker with the reason on screen. */
+     reader to the picker with the reason on screen.
+
+     This is the box. A file dialog that is already on screen asks the
+     same question inline instead, through repoConfirmWire, and never
+     reaches here. The write route does reach here: it asks during the
+     write, where there is no file dialog to hold an offer. */
   function repoConfirmStep(handle, mode) {
     return new Promise(function (resolve) {
       injectStyles();
@@ -2707,36 +2772,8 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(answer);
       }
-      /* the browser may still hold permission, and then the folder can be
-         read before the click and the verdict shown with the question */
-      repoWritableNow(handle, mode).then(function (granted) {
-        if (!granted) return;
-        return repoVerify(handle).then(function (v) {
-          note.textContent = v.why;
-          if (!v.ok) { use.disabled = true; other.className = "ced-btn ced-btn--accent"; }
-        });
-      });
-
-      other.addEventListener("click", function () { done(null); });
-      use.addEventListener("click", function () {
-        use.disabled = true;
-        note.textContent = "Checking the folder...";
-        repoWritable(handle, mode).then(function (granted) {
-          if (!granted) {
-            note.textContent = errText("BLG-E12", "");
-            other.className = "ced-btn ced-btn--accent";
-            return;
-          }
-          return repoVerify(handle).then(function (v) {
-            if (v.ok) { done(handle); return; }
-            note.textContent = v.why;
-            other.className = "ced-btn ced-btn--accent";
-          });
-        }, function () {
-          note.textContent = errText("BLG-E12", "");
-          other.className = "ced-btn ced-btn--accent";
-        });
-      });
+      repoConfirmWire(handle, mode, use, other,
+        function (t) { note.textContent = t; }, done);
 
       btns.appendChild(other); btns.appendChild(spacer); btns.appendChild(use);
       box.appendChild(head); box.appendChild(note); box.appendChild(btns);
@@ -2859,6 +2896,13 @@
       zone.setAttribute("role", "button");
       zone.innerHTML = "<strong>Drop <code>" + escAttr(want) + "</code> here</strong>" +
         "<span>or click to choose it</span>";
+
+      /* The remembered folder is offered here, above the drop zone, because
+         it is the faster answer and the zone is the fallback. It is empty
+         and hidden until the recall answers. */
+      var offer = doc.createElement("div");
+      offer.className = "ced-handoff__offer";
+      offer.hidden = true;
 
       var note = doc.createElement("div");
       note.className = "ced-modal__status";
@@ -3020,6 +3064,7 @@
       btns.appendChild(spacer);
       btns.appendChild(cancel);
       box.appendChild(title);
+      box.appendChild(offer);
       box.appendChild(zone);
       box.appendChild(note);
       if (list.innerHTML) box.appendChild(list);
@@ -3034,6 +3079,75 @@
          answers every ask, and that is the thing a person cannot know from
          the dialog alone. */
       if (!Object.keys(handed).length && !repoDir) pointRepo(all);
+      offerRemembered();
+
+      /* THE FOLDER QUESTION, ANSWERED IN THIS BOX.
+
+         A remembered folder used to be confirmed in a box of its own, on
+         top of this one: a whole layer for a yes or no about a folder the
+         reader is already looking at. It is the same question, so it is
+         asked here.
+
+         Only the read route can do this. The write route asks during the
+         write, where no file dialog is on screen to hold an offer, so it
+         keeps the box. See repoConfirmStep.
+
+         Showing the offer spends it. A reader who ignores it and presses
+         "Use my repo folder" wants a different folder, and repoChoose
+         then goes straight to the picker. */
+      function offerRemembered() {
+        if (!hasPicker() || repoDir || repoOffered.read) return;
+        repoRecall().then(function (handle) {
+          if (!handle || !box.parentNode) return;
+          repoOffered.read = true;
+          drawOffer(handle);
+        });
+      }
+
+      function drawOffer(handle) {
+        var ask = doc.createElement("strong");
+        ask.textContent = "Use " + (handle.name || "the remembered folder") + "?";
+        var why = doc.createElement("span");
+        why.className = "ced-handoff__why";
+        why.textContent = "This browser remembers this folder from a previous visit. " +
+          "It is checked before it is used.";
+        var row = doc.createElement("div");
+        row.className = "ced-handoff__offerbtns";
+        var use = doc.createElement("button");
+        use.type = "button";
+        use.className = "ced-btn ced-btn--accent";
+        use.textContent = "Use this folder";
+        var other = doc.createElement("button");
+        other.type = "button";
+        other.className = "ced-btn";
+        other.textContent = "Choose a different folder";
+        row.appendChild(use); row.appendChild(other);
+        offer.appendChild(ask); offer.appendChild(why); offer.appendChild(row);
+        offer.hidden = false;
+
+        repoConfirmWire(handle, "read", use, other,
+          function (t) { why.textContent = t; },
+          function (answer) {
+            offer.hidden = true;
+            unpoint();
+            if (!answer) { pickFolder(); return; }
+            /* the checks passed inside the wire, so this is the folder */
+            repoRemember(answer);
+            takeDirectory(answer, wanted).then(folderDone, function (err) {
+              note.textContent = err && err.message ? err.message : String(err);
+              zone.classList.add("is-wrong");
+            });
+          });
+
+        /* The arrow moves to the faster answer. The folder is set, it is
+           only not loaded, so REPO_SET_LABEL is the true thing to say.
+           It points from the left, because the drop zone and its own words
+           are directly below this button and the label would land on top
+           of them. */
+        if (!Object.keys(handed).length) {
+          pointAt(use, REPO_SET_LABEL, { prefer: "left" });
+        }
+      }
     });
   }
 
@@ -3843,11 +3957,19 @@
     doc.head.appendChild(l);
   }
   /* Which shape fits: below by preference, then a side, then above. The
-     mirror of a shape is chosen when the tail would leave the screen. */
-  function ptPick(r, s) {
+     mirror of a shape is chosen when the tail would leave the screen.
+
+     The arrow is drawn over the page and knows nothing of what is under
+     it, so a caller that does can name a side with opts.prefer. It is
+     honored only when it fits on screen: a preference must not push the
+     arrow out of the view. */
+  function ptPick(r, s, prefer) {
     var vw = window.innerWidth, vh = window.innerHeight;
     var cx = r.left + r.width / 2;
     var needH = PT_H * s + PT_GAP + 8, needW = PT_W * s + PT_GAP + 8;
+    if (prefer === "left" && r.left > needW) return "left";
+    if (prefer === "right" && vw - r.right > needW) return "right";
+    if (prefer === "above" && r.top > needH) return (cx - 150 * s > 8) ? "above" : "aboveR";
     if (vh - r.bottom > needH) return (cx + 140 * s + 8 < vw) ? "below" : "belowL";
     if (vw - r.right > needW) return "right";
     if (r.left > needW) return "left";
@@ -3931,7 +4053,7 @@
     var r = ptTarget.getBoundingClientRect();
     if (!r.width && !r.height) { unpoint(); return; }
     var s = ptOpts.size;
-    var name = ptPick(r, s);
+    var name = ptPick(r, s, ptOpts.prefer);
     if (name !== ptShape) {
       /* a new shape mid-flight would restart the draw; show it settled */
       if (ptShape) ptEl.classList.add("is-still");

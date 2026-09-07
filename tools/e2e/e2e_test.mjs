@@ -100,7 +100,14 @@ const WIZ_GEO = `
              btnTop: bt ? Math.round(bt.getBoundingClientRect().top) : null,
              /* the body scrolls rather than pushing the box open, which is
                 what keeps the buttons in place on a step that overruns */
-             over: body ? body.scrollHeight > body.clientHeight + 1 : null };
+             over: body ? body.scrollHeight > body.clientHeight + 1 : null,
+             /* by how much. "over" alone says a step outgrew the box but
+                not whether it did so by a line or by a paragraph, and the
+                answer decides whether the head or the step is at fault. */
+             slack: body ? body.clientHeight - body.scrollHeight : null,
+             headH: box.querySelector('.ced-modal__head')
+               ? Math.round(box.querySelector('.ced-modal__head').getBoundingClientRect().height)
+               : 0 };
   };`;
 
 // The search index, read out of the file a publish wrote. Since V057 the
@@ -2981,6 +2988,27 @@ async function main() {
   // reminder, the checkbox, and no window.confirm at all
   await evaluate(WIZ_GEO);
   const dcBefore = dialogCount;
+  // PW2a. THE JOB LINE AND THE HAIRLINE.
+  // Both are promises about the whole run, so neither can be read at one
+  // step. This records every step the box passes through, with the job
+  // line and the bar reading at each, and the checks below read the trace.
+  await evaluate(`(function () {
+    window.__wizTrace = [];
+    function sample() {
+      var box = document.querySelector('.bc-wizard');
+      if (!box) return;
+      var job = box.querySelector('.bc-wiz__jobline');
+      var last = window.__wizTrace[window.__wizTrace.length - 1];
+      var row = { step: box.getAttribute('data-step'),
+                  at: parseInt(box.getAttribute('data-at') || '0', 10),
+                  job: job ? job.textContent : '',
+                  badge: (box.querySelector('.bc-wiz__job .ced-b') || {}).textContent || '' };
+      if (last && last.step === row.step && last.at === row.at && last.job === row.job) return;
+      window.__wizTrace.push(row);
+    }
+    window.__wizStop = function () { clearInterval(window.__wizTick); };
+    window.__wizTick = setInterval(sample, 60);
+  })()`);
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
   await sleep(400);
   const confirmStep = await evaluate(`(function () {
@@ -3119,7 +3147,9 @@ async function main() {
   // of screen. Done is the step long enough to reach it.
   check("wizard: a step that overruns scrolls its body and leaves the box alone",
     doneStep.geo.over === true && confirmStep.geo.over === false,
-    JSON.stringify({ done: doneStep.geo.over, confirm: confirmStep.geo.over }));
+    JSON.stringify({ done: doneStep.geo.over, confirm: confirmStep.geo.over,
+                     confirmSlack: confirmStep.geo.slack, doneSlack: doneStep.geo.slack,
+                     headH: confirmStep.geo.headH }));
   // WB2. The note beside OK! Done! carries the two things still to do
   // after the box is gone. It is long, so it shrinks to the room beside
   // the arrow rather than being clamped away from it.
@@ -3185,6 +3215,36 @@ async function main() {
   check("wizard: OK! Done! closes the box and the composer behind it",
     finished.wizard === false && finished.composer === false,
     JSON.stringify(finished));
+
+  // PW4c. The job line holds, and the hairline only grows.
+  // The job names the whole run, so every step of one run must report the
+  // same words. The bar is a stage fraction, so it may repeat a value but
+  // must never report a lower one than it already has: a step that comes
+  // back after a question would otherwise read as work being undone.
+  const trace = await evaluate(`(function () {
+    window.__wizStop();
+    var t = window.__wizTrace || [];
+    var jobs = {}, badges = {}, back = null, top = 0;
+    t.forEach(function (r) {
+      jobs[r.job] = 1; badges[r.badge] = 1;
+      if (r.at < top && back === null) back = r.step + " " + top + " -> " + r.at;
+      if (r.at > top) top = r.at;
+    });
+    return { rows: t.length, steps: t.map(function (r) { return r.step; })
+               .filter(function (v, i, a) { return a.indexOf(v) === i; }),
+             jobs: Object.keys(jobs), badges: Object.keys(badges),
+             wentBack: back, top: top };
+  })()`);
+  check("wizard: the job line names one job and holds it through every step",
+    trace.rows > 2 && trace.jobs.length === 1 &&
+    trace.jobs[0] === "A new post, and every page it touches" &&
+    trace.badges.length === 1 && trace.badges[0] === "PUBLISH",
+    JSON.stringify(trace));
+  check("wizard: the hairline only grows, and reaches 100 at Done",
+    trace.wentBack === null && trace.top === 100 &&
+    trace.steps.indexOf("confirm") !== -1 && trace.steps.indexOf("progress") !== -1 &&
+    trace.steps.indexOf("done") !== -1,
+    JSON.stringify(trace));
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,
@@ -6276,6 +6336,127 @@ async function main() {
       remembered.recalled === "aaron-harris-portfolio" &&
       /^[0-9a-z]{6}$/.test(remembered.pageStamp),
       JSON.stringify(remembered));
+
+    // THE FOLDER QUESTION IS ASKED IN THE BOX THAT IS OPEN.
+    // It used to open a second box on top of the hand-off dialog: a whole
+    // layer for a yes or no about a folder the reader was already looking
+    // at. The read route now offers it inline and never reaches
+    // repoConfirmStep, so the count of boxes is the check.
+    //
+    // The handle seeded above is a plain object, because a structured
+    // clone keeps the data and not the methods. That is a folder that
+    // cannot be read, so the offer appears with the reason on it and the
+    // accept disabled, which is the right answer to a folder that failed
+    // its checks.
+    const inlineOffer = await evaluate(`(function () {
+      window.__picked2 = 0;
+      window.showDirectoryPicker = function () {
+        window.__picked2++;
+        return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' }));
+      };
+      window.__f5 = AMH.tool.handOff("gallery.html", new Error("fetch refused"));
+      return new Promise(function (res) { setTimeout(function () {
+        var offer = document.querySelector('.ced-handoff__offer');
+        res({ shown: !!(offer && !offer.hidden),
+              names: offer ? /aaron-harris-portfolio/.test(offer.textContent) : false,
+              why: offer ? (offer.querySelector('.ced-handoff__why') || {}).textContent : '',
+              accept: offer ? (offer.querySelector('.ced-btn--accent') || {}).disabled : null,
+              boxes: document.querySelectorAll('.ced-modal').length,
+              scrims: document.querySelectorAll('.ced-scrim').length });
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("repo memory: a remembered folder is offered inside the dialog, not in a box on top of it",
+      inlineOffer.shown === true && inlineOffer.names === true &&
+      inlineOffer.boxes === 1 && inlineOffer.scrims === 1,
+      JSON.stringify(inlineOffer));
+    check("repo memory: a folder that cannot be read is offered with the reason, and cannot be accepted",
+      /could not be read/.test(inlineOffer.why) && inlineOffer.accept === true,
+      JSON.stringify(inlineOffer));
+
+    // "Choose a different folder" is what the confirm resolving false does:
+    // it opens the picker, and it still opens no second box.
+    const offerNo = await evaluate(`(function () {
+      var offer = document.querySelector('.ced-handoff__offer');
+      var no = [...offer.querySelectorAll('button')]
+        .find(function (b) { return /different folder/.test(b.textContent); });
+      no.click();
+      return new Promise(function (res) { setTimeout(function () {
+        var o = document.querySelector('.ced-handoff__offer');
+        res({ picked: window.__picked2,
+              /* the computed display, not the property: the offer sets
+                 display:flex, which beats the browser's own [hidden] rule
+                 unless the styles say otherwise */
+              offerGone: getComputedStyle(o).display === 'none',
+              boxes: document.querySelectorAll('.ced-modal').length });
+      }, 300); });
+    })()`, { awaitPromise: true });
+    check("repo memory: choosing a different folder opens the picker and still no second box",
+      offerNo.picked === 1 && offerNo.offerGone === true && offerNo.boxes === 1,
+      JSON.stringify(offerNo));
+
+    // The offer is spent by being shown. A reader who ignores it and
+    // presses the row's button wants a different folder, so that goes
+    // straight to the picker with no confirm box either.
+    const spent = await evaluate(`(function () {
+      var btn = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+        .find(function (b) { return /repo folder/.test(b.textContent); });
+      btn.click();
+      return new Promise(function (res) { setTimeout(function () {
+        res({ picked: window.__picked2,
+              boxes: document.querySelectorAll('.ced-modal').length });
+      }, 300); });
+    })()`, { awaitPromise: true });
+    check("repo memory: the offer is spent once shown, so the row's button goes to the picker",
+      spent.picked === 2 && spent.boxes === 1, JSON.stringify(spent));
+
+    await evaluate(`(function () {
+      var x = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+        .find(function (b) { return b.textContent === 'Cancel'; });
+      if (x) x.click();
+      return window.__f5.then(function () { return 1; }, function () { return 0; });
+    })()`, { awaitPromise: true });
+
+    // THE WRITE ROUTE KEEPS ITS BOX, AND MUST.
+    // It asks during the write, when no hand-off dialog is on screen to
+    // hold an offer, so there is nothing for it to be inline in. The read
+    // route above spent its own offer; the write route has its own flag,
+    // so this reaches repoConfirmStep, which is the box.
+    const writeBox = await evaluate(`(function () {
+      window.__picked3 = 0;
+      window.showDirectoryPicker = function () {
+        window.__picked3++;
+        return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' }));
+      };
+      window.__w = AMH.tool.pickRepoWrite();
+      return new Promise(function (res) { setTimeout(function () {
+        var box = document.querySelector('.ced-handoff');
+        res({ box: !!box,
+              head: box ? (box.querySelector('.ced-modal__head') || {}).textContent : '',
+              inline: !!document.querySelector('.ced-handoff__offer'),
+              btns: box ? [...box.querySelectorAll('.ced-modal__btns button')]
+                .map(function (b) { return b.textContent; }) : [] });
+      }, 500); });
+    })()`, { awaitPromise: true });
+    check("repo memory: the write route still asks in a box of its own, having no dialog to sit in",
+      writeBox.box === true && /FOLDER/.test(writeBox.head) && writeBox.inline === false &&
+      JSON.stringify(writeBox.btns) === '["Choose a different folder","Use this folder"]',
+      JSON.stringify(writeBox));
+
+    const writeNo = await evaluate(`(function () {
+      var b = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+        .find(function (x) { return /different folder/.test(x.textContent); });
+      if (b) b.click();
+      return window.__w.then(function (h) {
+        return { got: h, picked: window.__picked3,
+                 gone: !document.querySelector('.ced-handoff') };
+      }, function () {
+        return { got: 'threw', picked: window.__picked3,
+                 gone: !document.querySelector('.ced-handoff') };
+      });
+    })()`, { awaitPromise: true });
+    check("repo memory: the write route's box closes on a different folder and opens the picker",
+      writeNo.got === null && writeNo.picked === 1 && writeNo.gone === true,
+      JSON.stringify(writeNo));
 
     // the check that replaces the path you cannot see: the folder's own
     // blog.html stamp, against the page asking for it
