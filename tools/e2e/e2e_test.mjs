@@ -6676,7 +6676,14 @@ async function main() {
         res({ shown: !!(offer && !offer.hidden),
               names: offer ? /aaron-harris-portfolio/.test(offer.textContent) : false,
               why: offer ? (offer.querySelector('.ced-handoff__why') || {}).textContent : '',
-              accept: offer ? (offer.querySelector('.ced-btn--accent') || {}).disabled : null,
+              /* By its label, and not by the accent class. A folder that
+                 fails its checks hands the accent to "choose a different
+                 folder", so the accent no longer marks the accept button
+                 in this state. accentOn records where it went. */
+              accept: offer ? [].slice.call(offer.querySelectorAll('.ced-btn'))
+                .filter(function (b) { return b.textContent === 'Use this folder'; })
+                .map(function (b) { return b.disabled; })[0] : null,
+              accentOn: offer ? (offer.querySelector('.ced-btn--accent') || {}).textContent : '',
               boxes: document.querySelectorAll('.ced-modal').length,
               scrims: document.querySelectorAll('.ced-scrim').length });
       }, 400); });
@@ -6686,7 +6693,8 @@ async function main() {
       inlineOffer.boxes === 1 && inlineOffer.scrims === 1,
       JSON.stringify(inlineOffer));
     check("repo memory: a folder that cannot be read is offered with the reason, and cannot be accepted",
-      /could not be read/.test(inlineOffer.why) && inlineOffer.accept === true,
+      /could not be read/.test(inlineOffer.why) && inlineOffer.accept === true &&
+      inlineOffer.accentOn === "Choose a different folder",
       JSON.stringify(inlineOffer));
 
     // "Choose a different folder" is what the confirm resolving false does:
@@ -6757,6 +6765,36 @@ async function main() {
       writeBox.box === true && /FOLDER/.test(writeBox.head) && writeBox.inline === false &&
       JSON.stringify(writeBox.btns) === '["Choose a different folder","Use this folder"]',
       JSON.stringify(writeBox));
+
+    // THE FIFTH SURFACE WEARS THE FRAME TOO, AND FILLS ONE CONTROL.
+    // The accent MOVES here: a remembered folder that fails its checks makes
+    // "choose a different folder" the one move. It moved from four branches
+    // and was taken back by none, so this box drew two filled controls once
+    // the fill became shared. One filled control is the invariant, whichever
+    // of the two currently holds it.
+    const confirmFrame = await evaluate(`(function () {
+      var box = document.querySelector('.ced-handoff');
+      if (!box) return { there: false };
+      var head = box.querySelector('.ced-modal__head'), btns = box.querySelector('.ced-modal__btns');
+      var probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden';
+      probe.style.color = getComputedStyle(document.documentElement)
+        .getPropertyValue('--accent').trim();
+      document.body.appendChild(probe);
+      var accent = getComputedStyle(probe).color;
+      probe.parentNode.removeChild(probe);
+      var row = [].slice.call(btns.querySelectorAll('.ced-btn'));
+      return { there: true,
+               headRule: parseFloat(getComputedStyle(head).borderBottomWidth),
+               btnRule: parseFloat(getComputedStyle(btns).borderTopWidth),
+               filled: row.filter(function (b) {
+                 return getComputedStyle(b).backgroundColor === accent;
+               }).map(function (b) { return b.textContent; }) };
+    })()`);
+    check("frame: the folder confirm wears the frame and fills exactly one control",
+      confirmFrame.there === true && confirmFrame.headRule >= 1 &&
+      confirmFrame.btnRule >= 1 && confirmFrame.filled.length === 1,
+      JSON.stringify(confirmFrame));
 
     const writeNo = await evaluate(`(function () {
       var b = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
@@ -7265,6 +7303,151 @@ async function main() {
     JSON.stringify(unknownId));
   await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; })?.click()`);
   await sleep(300);
+
+  // ============ ONE FRAME FOR EVERY BOX ============
+  // Five surfaces wear the same paint: a rule under the head, a rule above
+  // the buttons, one filled control, and a capped column for running text.
+  // Before this, the wizard had the frame to itself, which is why the file
+  // ask reached from Publish and the same ask reached from Edit looked like
+  // two products.
+  //
+  // These read computed style and not the stylesheet, because a rule can be
+  // written and still not arrive: the last round drew a divider that was
+  // measured correctly and was invisible on this panel.
+  const FRAME = `
+    window.__FRAME = function (sel, headSel, btnSel) {
+      var box = document.querySelector(sel);
+      if (!box) return { there: false };
+      var r = box.getBoundingClientRect();
+      var head = box.querySelector(headSel), btns = box.querySelector(btnSel);
+      var probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+      document.body.appendChild(probe);
+      /* --accent as the browser resolves it, so a button's background can be
+         compared to it. The variable is authored as a hex and read back as
+         rgb(), which is why it is put through an element first. */
+      probe.style.color = getComputedStyle(document.documentElement)
+        .getPropertyValue('--accent').trim();
+      var accent = getComputedStyle(probe).color;
+      /* the widest run of running text, in characters. The measure is the
+         element's own "0" at its own font, which is what a ch unit is. */
+      probe.textContent = '0';
+      var widest = 0;
+      var text = box.querySelectorAll('p, .ced-modal__status, .ced-handoff__why');
+      for (var i = 0; i < text.length; i++) {
+        var el = text[i], cs = getComputedStyle(el);
+        if (cs.display === 'none' || !el.textContent.trim()) continue;
+        probe.style.font = cs.font || (cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily);
+        var ch = probe.getBoundingClientRect().width || 7;
+        var w = el.getBoundingClientRect().width -
+          parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        widest = Math.max(widest, Math.round(w / ch));
+      }
+      probe.parentNode.removeChild(probe);
+      /* Filled means the control is painted in the accent. An outlined
+         button keeps --bg-deep, which is neither the box's ground nor
+         transparent, so the accent itself is the only honest test. */
+      var row = [].slice.call(btns ? btns.querySelectorAll('.ced-btn') : []);
+      function filled(b) { return getComputedStyle(b).backgroundColor === accent; }
+      return {
+        there: true, w: Math.round(r.width), h: Math.round(r.height),
+        headRule: head ? parseFloat(getComputedStyle(head).borderBottomWidth) : null,
+        btnRule: btns ? parseFloat(getComputedStyle(btns).borderTopWidth) : null,
+        buttons: row.length,
+        accentFilled: row.filter(function (b) {
+          return b.classList.contains('ced-btn--accent') && filled(b); }).length,
+        plainFilled: row.filter(function (b) {
+          return !b.classList.contains('ced-btn--accent') && filled(b); }).length,
+        prose: widest, vw: innerWidth, vh: innerHeight
+      };
+    };`;
+  await evaluate(FRAME);
+
+  // F1. the region editor
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'blog-eyebrow')?.click()`);
+  await sleep(400);
+  const frRegion = await evaluate(`window.__FRAME('.ced-modal', '.ced-modal__head', '.ced-modal__btns')`);
+  const frRegionParts = await evaluate(`(function () {
+    var m = document.querySelector('.ced-modal');
+    if (!m) return {};
+    function w(s) { var e = m.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : null; }
+    return { tools: m.querySelectorAll('.ced-tool').length, toolsW: w('.ced-modal__tools'),
+             ta: w('textarea'), alt: !!m.querySelector('.ced-modal__alt'),
+             src: !!m.querySelector('.ced-modal__src') };
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel')?.click()`);
+  await sleep(300);
+
+  // F2. the composer, and the wizard it opens
+  await evaluate(`window.edit.blog()`);
+  await sleep(700);
+  const frComposer = await evaluate(`window.__FRAME('.bc-panel', '.bc-fields', '.bc-btns')`);
+  await evaluate(`document.querySelector('.bc-title').value = 'Frame check'`);
+  await evaluate(`document.querySelector('.bc-write textarea').value = 'A body for the frame check.'`);
+  await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
+  await sleep(700);
+  const frWizard = await evaluate(`window.__FRAME('.bc-wizard', '.ced-modal__head', '.ced-modal__btns')`);
+  await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Cancel')?.click()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Close')?.click()`);
+  await sleep(500);
+
+  // F3. the file hand-off. ced-handoff is the class the folder confirm also
+  // carries, so a rule that reaches this one reaches both.
+  await evaluate(`window.__fr = AMH.tool.handOff("blog/2605.html", new Error("frame check"));`);
+  await sleep(500);
+  const frHandoff = await evaluate(`window.__FRAME('.ced-handoff', '.ced-modal__head', '.ced-modal__btns')`);
+  await evaluate(`(function () {
+    var b = [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (x) { return x.textContent === 'Cancel'; });
+    if (b) b.click();
+  })()`);
+  await sleep(300);
+
+  const surfaces = { region: frRegion, composer: frComposer, wizard: frWizard, handoff: frHandoff };
+  const sName = Object.keys(surfaces);
+  const missing = sName.filter((k) => !surfaces[k].there);
+  const noRule = sName.filter((k) => surfaces[k].there &&
+    !(surfaces[k].headRule >= 1 && surfaces[k].btnRule >= 1));
+  check("frame: every surface has a rule under its head and a rule above its buttons",
+    missing.length === 0 && noRule.length === 0,
+    "missing=[" + missing + "] noRule=[" + noRule + "] " +
+    sName.map((k) => k + "=" + surfaces[k].headRule + "/" + surfaces[k].btnRule).join(" "));
+
+  const badFill = sName.filter((k) => surfaces[k].there &&
+    !(surfaces[k].accentFilled === 1 && surfaces[k].plainFilled === 0));
+  check("frame: each surface fills one control, and it is the accent one",
+    badFill.length === 0,
+    sName.map((k) => k + "=" + surfaces[k].accentFilled + "/" + surfaces[k].buttons +
+      (surfaces[k].plainFilled ? " +" + surfaces[k].plainFilled + " plain" : "")).join(" "));
+
+  // Running text stops short of the frame. 72ch is the rule; the check
+  // measures ch from a rendered glyph, so two characters of slack is allowed.
+  const overRun = sName.filter((k) => surfaces[k].prose > 74);
+  check("frame: no run of prose is wider than the 72ch reading column",
+    overRun.length === 0, sName.map((k) => k + "=" + surfaces[k].prose + "ch").join(" "));
+
+  // NOTHING MOVED. The two fixed-height boxes are the ones that must not
+  // change, and the rule is recorded rather than a pixel count: the gate runs
+  // at whatever size headless Chrome gives it. Part 2 replaces both of these
+  // rules with one ratio, so a part that changes a size edits this on purpose.
+  const wizWant = [Math.min(560, Math.round(frWizard.vw * 0.92)),
+                   Math.min(560, Math.round(frWizard.vh * 0.86))];
+  const panWant = [Math.min(960, Math.round(frComposer.vw * 0.96)),
+                   Math.min(860, Math.round(frComposer.vh * 0.94))];
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  check("frame: the paint moved no box - the wizard holds 560/86vh and the composer 960/94vh",
+    near(frWizard.w, wizWant[0]) && near(frWizard.h, wizWant[1]) &&
+    near(frComposer.w, panWant[0]) && near(frComposer.h, panWant[1]),
+    JSON.stringify({ wizard: [frWizard.w, frWizard.h], wizWant,
+                     composer: [frComposer.w, frComposer.h], panWant }));
+
+  // The cap is on the text and not on the body, so the region editor's own
+  // parts keep the full width of the frame.
+  check("frame: the region editor keeps its tools row, its textarea width, its alt row and its source line",
+    frRegionParts.tools === 10 && frRegionParts.alt === true && frRegionParts.src === true &&
+    frRegionParts.toolsW > frRegionParts.ta && frRegionParts.ta > 0,
+    JSON.stringify(frRegionParts));
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

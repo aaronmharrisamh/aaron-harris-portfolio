@@ -960,7 +960,7 @@
     "border:1px solid var(--accent);background:rgba(74,165,232,.08);display:flex;" +
     "flex-direction:column;gap:.35rem;}" +
     ".ced-handoff__offer strong{color:var(--text);font-size:.85rem;}" +
-    ".ced-handoff__why{color:var(--muted);font-size:.72rem;line-height:1.5;}" +
+    ".ced-handoff__why{color:var(--muted);font-size:.72rem;line-height:1.5;max-width:var(--ced-read);}" +
     ".ced-handoff__offerbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.15rem;}" +
     /* the display above beats the browser's own rule for [hidden], so the
        offer has to be told to go away in the same breath */
@@ -983,6 +983,12 @@
     ".ced-btn{padding:.34rem .66rem;border-radius:999px;border:1px solid var(--line);background:var(--bg-deep);" +
     "color:var(--text-soft);font:600 .7rem var(--font);cursor:pointer;transition:border-color .2s,color .2s;}" +
     ".ced-btn:hover{border-color:var(--accent);color:var(--text);}" +
+    /* A control that cannot be pressed should not look like one that can,
+       and must not light up under the pointer. The hover reset skips a
+       filled control, whose ground would otherwise fight the reset. */
+    ".ced-btn:disabled{opacity:.45;cursor:default;}" +
+    ".ced-btn:disabled:not(.ced-btn--accent):hover{border-color:var(--line);" +
+    "color:var(--text-soft);}" +
     ".ced-btn--accent{border-color:var(--accent);color:var(--accent-bright);}" +
     /* The panel's own buttons are filled. They are the four moves the
        editor offers, and outlined they read as labels on a dark panel.
@@ -991,6 +997,16 @@
     ".ced-panel__foot .ced-btn{border-color:var(--accent);background:var(--accent);" +
     "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
     ".ced-panel__foot .ced-btn:hover{border-color:var(--accent-bright);" +
+    "background:var(--accent-bright);color:var(--bg-deep);}" +
+    /* THE ONE MOVE OF A DIALOG, FILLED.
+       The scope is the button row and not the class. The accent class also
+       marks the primary control of a repeated image card in the composer,
+       and filling each of those would give one surface a dozen filled
+       controls competing with its Publish button. A dialog's one move
+       lives in its button row, so that is what is filled. */
+    ".ced-modal__btns .ced-btn--accent{border-color:var(--accent);background:var(--accent);" +
+    "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
+    ".ced-modal__btns .ced-btn--accent:hover{border-color:var(--accent-bright);" +
     "background:var(--accent-bright);color:var(--bg-deep);}" +
     ".ced-scrim{position:fixed;inset:0;z-index:3200;background:rgba(4,6,10,.72);}" +
     /* the tutorial arrow: above every dialog, below the launcher */
@@ -1022,7 +1038,16 @@
     ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
     "width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--panel);" +
     "border:1px solid var(--line);border-radius:14px;box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
-    ".ced-modal__head{padding:.8rem 3rem .6rem 1.1rem;display:flex;align-items:baseline;gap:.6rem;}" +
+    /* THE THREE BANDS.
+       A rule under the head and a rule above the buttons. Between them
+       every surface reads the same way: what this is, what it holds, and
+       what you can do about it. The wizard had these two rules to itself,
+       which is why the file ask reached from Publish and the same ask
+       reached from Edit looked like two products.
+       --line, at 8 percent, and not --line-soft: 5 percent on this panel
+       lands about 11 levels above its ground and does not register. */
+    ".ced-modal__head{padding:.8rem 3rem .6rem 1.1rem;display:flex;align-items:baseline;gap:.6rem;" +
+    "border-bottom:1px solid var(--line);}" +
     ".ced-modal__head .ced-b{color:var(--accent-bright);font:700 12px/1 Consolas,monospace;}" +
     ".ced-modal__head .ced-slug{font-weight:800;color:var(--text);}" +
     ".ced-modal__x{position:absolute;top:.6rem;right:.7rem;width:30px;height:30px;padding:0;" +
@@ -1039,8 +1064,18 @@
     "background:var(--bg-deep);color:var(--text);border:1px solid var(--line);border-radius:8px;" +
     "padding:.7rem .8rem;font:12.5px/1.55 Consolas,'Courier New',monospace;white-space:pre-wrap;}" +
     ".ced-modal textarea:focus-visible{outline:2px solid var(--accent);}" +
-    ".ced-modal__status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
-    ".ced-modal__btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;}" +
+    /* THE READING COLUMN.
+       The hand-off note measured 96 characters a line in a 720px box,
+       well past the 60 to 75 that reads without effort. The cap is on the
+       text and not on the body: a drop zone, a chip list, a field row and
+       a textarea keep the full width of the frame.
+       72ch is a no-op on the wizard today, whose widest line measured 66.
+       It is declared here so the rule already holds when a box gets wider. */
+    ".ced-modal{--ced-read:72ch;}" +
+    ".ced-modal__status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;" +
+    "max-width:var(--ced-read);}" +
+    ".ced-modal__btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;" +
+    "border-top:1px solid var(--line);}" +
     ".ced-modal__btns .ced-spacer{flex:1 1 auto;}" +
     /* image / gallery editing */
     ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
@@ -2785,13 +2820,24 @@
      wants a different one. Neither is called until the checks pass, so a
      stale or wrong folder never resolves as good. */
   function repoConfirmWire(handle, mode, use, other, setNote, settle) {
+    /* THE ACCENT MOVES; IT DOES NOT MULTIPLY.
+       A remembered folder that fails its checks makes "choose a different
+       folder" the one move of this surface. Each surface fills exactly one
+       control, so the accent is taken off the button it leaves, and that
+       button is disabled because it has nothing left to do.
+       Four branches reach this state, which is why it is written once. */
+    function handOver() {
+      use.disabled = true;
+      use.className = "ced-btn";
+      other.className = "ced-btn ced-btn--accent";
+    }
     /* the browser may still hold permission, and then the folder can be
        read before the click and the verdict shown with the question */
     repoWritableNow(handle, mode).then(function (granted) {
       if (!granted) return;
       return repoVerify(handle).then(function (v) {
         setNote(v.why);
-        if (!v.ok) { use.disabled = true; other.className = "ced-btn ced-btn--accent"; }
+        if (!v.ok) handOver();
       });
     });
 
@@ -2802,17 +2848,17 @@
       repoWritable(handle, mode).then(function (granted) {
         if (!granted) {
           setNote(errText("BLG-E12", ""));
-          other.className = "ced-btn ced-btn--accent";
+          handOver();
           return;
         }
         return repoVerify(handle).then(function (v) {
           if (v.ok) { settle(handle); return; }
           setNote(v.why);
-          other.className = "ced-btn ced-btn--accent";
+          handOver();
         });
       }, function () {
         setNote(errText("BLG-E12", ""));
-        other.className = "ced-btn ced-btn--accent";
+        handOver();
       });
     });
   }

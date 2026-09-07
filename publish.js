@@ -389,7 +389,12 @@
     ".bc-head{display:flex;align-items:baseline;gap:.7rem;padding:.85rem 3rem .5rem 1.1rem;}" +
     ".bc-head .ced-slug{font-weight:800;color:var(--text);}" +
     ".bc-head .ced-hint{font-size:.7rem;color:var(--dim);}" +
-    ".bc-fields{display:flex;flex-wrap:wrap;gap:.5rem .8rem;align-items:flex-end;padding:0 1.1rem .55rem;}" +
+    /* The composer's head band is two rows: what this surface is, and what
+       the post is. The rule closes both, because a rule between the title
+       of the surface and the title of the post would cut the name from the
+       thing it names. Below it is the post itself. */
+    ".bc-fields{display:flex;flex-wrap:wrap;gap:.5rem .8rem;align-items:flex-end;padding:0 1.1rem .55rem;" +
+    "border-bottom:1px solid var(--line);}" +
     ".bc-fields input{background:var(--bg-deep);color:var(--text);border:1px solid var(--line);" +
     "border-radius:8px;padding:.45rem .7rem;font:12.5px Consolas,'Courier New',monospace;}" +
     ".bc-fields input:focus-visible{outline:2px solid var(--accent);}" +
@@ -448,7 +453,15 @@
     ".bc-panel[data-tab=preview] .bc-preview{display:block;}" +
     ".bc-status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
     ".bc-imgnote{padding:.4rem 0;font-size:.7rem;color:var(--muted);}" +
-    ".bc-btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;}" +
+    ".bc-btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;" +
+    "border-top:1px solid var(--line);}" +
+    /* Publish is the one move, and it is filled. The scope is this row, so
+       the Insert tag button on each image card stays outlined: a card is a
+       repeated row inside the body, not the surface's one move. */
+    ".bc-btns .ced-btn--accent{border-color:var(--accent);background:var(--accent);" +
+    "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
+    ".bc-btns .ced-btn--accent:hover{border-color:var(--accent-bright);" +
+    "background:var(--accent-bright);color:var(--bg-deep);}" +
     ".bc-btns .ced-spacer{flex:1 1 auto;}";
   /* THE WIZARD: ONE BOX, EVERY STEP.
 
@@ -481,9 +494,13 @@
        The right padding drops to match the left, because nothing sits in
        the top right of THIS box: the 3rem in the shared rule clears a
        control the wizard does not have, and it was cutting the hairline
-       short and squeezing the job line. */
-    ".bc-wizard .ced-modal__head{display:block;padding:.5rem 1.1rem .45rem;" +
-    "border-bottom:1px solid var(--line);}" +
+       short and squeezing the job line.
+
+       The frame itself is shared now: the rule under the head, the rule
+       above the buttons and the filled move all live on the .ced-modal
+       classes in tool.js. Only the two rows and the padding below are the
+       wizard's own. */
+    ".bc-wizard .ced-modal__head{display:block;padding:.5rem 1.1rem .45rem;}" +
     ".bc-wiz__job,.bc-wiz__stage{display:flex;align-items:baseline;gap:.6rem;min-width:0;" +
     "line-height:1.25;}" +
     /* the job row goes away when no job is named, and it has to be told
@@ -540,16 +557,6 @@
        the name run together with no gap between them. */
     ".bc-wizard .bc-wiz__guest .ced-modal__head{display:flex;align-items:baseline;" +
     "gap:.6rem;padding:.75rem 1.1rem .7rem;}" +
-    /* and the rule above the buttons, which closes the third band. Both
-       rules are on the wizard only: the region modal has its own shape. */
-    ".bc-wizard .ced-modal__btns{border-top:1px solid var(--line);}" +
-    /* The one move on the step is filled, not outlined, which is what
-       anchors the bottom band. This is the treatment the editor's own
-       panel foot already uses; the wizard had never been given it. */
-    ".bc-wizard .ced-btn--accent{background:var(--accent);color:var(--bg-deep);" +
-    "transition:background .2s,border-color .2s;}" +
-    ".bc-wizard .ced-btn--accent:hover{border-color:var(--accent-bright);" +
-    "background:var(--accent-bright);color:var(--bg-deep);}" +
     /* The guest's body already pads its sides, so the parts inside it must
        not add their own or the inset is counted twice. */
     ".bc-wiz__guest .ced-handoff__zone{margin-left:0;margin-right:0;}" +
@@ -563,6 +570,10 @@
     ".bc-wiz__body{padding:.15rem 1.1rem .3rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
     ".bc-wiz__body p{margin:.28rem 0;}" +
+    /* running text only. The file chips, the step rows and the check list
+       are not prose and keep the full width. --ced-read comes from
+       .ced-modal, which the wizard box also is. */
+    ".bc-wiz__body p,.bc-wiz__route,.bc-wiz__legend,.bc-wiz__note{max-width:var(--ced-read);}" +
     ".bc-wiz__body strong{color:var(--text);}" +
     ".bc-wiz__body code{color:var(--accent-bright);font-family:Consolas,monospace;font-size:.78rem;}" +
     ".bc-wiz__body a{color:var(--accent-bright);}" +
