@@ -3234,6 +3234,7 @@ async function main() {
     JSON.stringify(doneStep).slice(0, 300));
   check("wizard: the seven rows each held for the minimum, so the steps could be read",
     doneStep.elapsed >= 7 * 350 - 100, "elapsed " + doneStep.elapsed + "ms");
+
   // WB1. ONE BOX. The three steps are one box at one height, so the head,
   // the body and the buttons are in the same place from Confirm to Done
   // and the reader knows the job is over because the box is gone.
@@ -3515,6 +3516,51 @@ async function main() {
     escAlone2.wizard === false && escAlone2.scrims === 0, JSON.stringify(escAlone2));
   await evaluate(`window.__q3.then(function () { return 1; }, function () { return 0; })`,
     { awaitPromise: true });
+
+  // PW4g. THE REDRAW AND THE DECORATION ARE ONE CALL.
+  //
+  // Finishing a bundle puts it on the page, and layerApply does that by
+  // replacing each region's inner HTML. Everything drawn INTO a region
+  // goes with it: the Edit button on every post, the cut that folds a
+  // long one, and the staged chip. Three callers did the redraw and the
+  // decoration as separate steps and one did the redraw alone, so after a
+  // publish the buttons were gone until the editor was turned off and on.
+  //
+  // This is checked at the source, because the promise is structural: the
+  // fault was a caller doing half the job, and the guard is that there is
+  // only one caller and it does all of it.
+  const pubSrc = readFileSync(join(REPO, "publish.js"), "utf-8");
+  const applyCalls = (pubSrc.match(/TOOL\.layerApply\(/g) || []).length;
+  const ontoAt = pubSrc.indexOf("function bcLayerOnto(force) {");
+  const ontoBody = ontoAt < 0 ? "" : pubSrc.slice(ontoAt, ontoAt + 400);
+  check("layer: only one caller redraws the page, so none can skip the decoration",
+    applyCalls === 1 && /TOOL\.layerApply\(force\)/.test(ontoBody),
+    "layerApply callers: " + applyCalls);
+  check("layer: that one caller puts back the buttons, the cuts and the chips",
+    /editButtons\(\)/.test(ontoBody) && /cut\(\)/.test(ontoBody) &&
+    /bcStagedChips\(\)/.test(ontoBody),
+    ontoBody.slice(0, 200));
+
+  // and it works: with the editor on, a redraw that strips the buttons is
+  // followed by a decoration that puts them back
+  const redrew = await evaluate(`(function () {
+    if (!AMH.tool.editorOn()) window.edit();
+    var stream = document.getElementById('blogStream');
+    if (!stream) return { none: true };
+    var before = stream.querySelectorAll('.bs-post .bs-retry').length;
+    /* what layerApply does to a region, done by hand */
+    [...stream.querySelectorAll('.bs-retry')].forEach(function (b) { b.remove(); });
+    var stripped = stream.querySelectorAll('.bs-post .bs-retry').length;
+    AMH.publish.staged();
+    return { editorOn: AMH.tool.editorOn(),
+             posts: stream.querySelectorAll('.bs-post').length,
+             before: before, stripped: stripped,
+             after: stream.querySelectorAll('.bs-post .bs-retry').length };
+  })()`);
+  check("layer: a redraw that strips the Edit buttons is followed by putting them back",
+    redrew.none !== true && redrew.editorOn === true && redrew.posts > 0 &&
+    redrew.before === redrew.posts && redrew.stripped === 0 &&
+    redrew.after === redrew.posts, JSON.stringify(redrew));
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,

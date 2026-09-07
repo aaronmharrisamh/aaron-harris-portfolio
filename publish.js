@@ -3469,8 +3469,7 @@
     });
     TOOL.layerKeep(record, staged, images);
     /* and onto the page, so a second post is composed against the first */
-    TOOL.layerApply(true);
-    bcStagedChips();
+    bcLayerOnto(true);
     var prog = bcProg;
     bcProg = null;
     if (prog) prog.mark(6);
@@ -4296,20 +4295,38 @@
     man.entries.forEach(function (e) { bcDeployedIds[e.id] = true; });
     if (bcCheckLive()) return;
     /* the work that is built and not yet uploaded, onto the page */
-    if (TOOL.editorOn() && TOOL.layerApply()) {
-      if (AMH.blog) { AMH.blog.cut(); AMH.blog.editButtons(); }
-      bcStagedChips();
+    if (TOOL.editorOn() && bcLayerOnto()) {
       console.info("[blog] this page shows a bundle you have not uploaded yet.");
     }
   }
-  /* The editor turning on is the other moment the layer may be shown:
-     tool.js calls this when it does. */
-  AMH.publish.staged = function () {
-    if (!TOOL.layerApply()) return 0;
+  /* PUT THE LAYER ON THE PAGE, AND PUT BACK WHAT THAT TAKES OFF.
+
+     layerApply replaces each region's inner HTML, so everything drawn
+     INTO a region goes with it: the Edit button on every post, the cut
+     that folds a long one, and the chip that says a post is staged.
+
+     Three callers did the redraw and the decoration as separate steps,
+     and one of them did the redraw alone. After a publish the Edit
+     buttons were gone and long posts were unfolded, until the editor was
+     turned off and on again. The two steps belong together, so they are
+     one call and there is no order left to get wrong.
+
+     force is the moment a bundle is built: the decorations go back even
+     when no region on THIS page changed, because the chips read the
+     record rather than the regions. */
+  function bcLayerOnto(force) {
+    var n = TOOL.layerApply(force);
+    if (!n && !force) return 0;
+    /* both of these answer for themselves when the editor is off, so a
+       forced pass is safe whatever the editor's state */
     if (AMH.blog) { AMH.blog.cut(); AMH.blog.editButtons(); }
     bcStagedChips();
     return 1;
-  };
+  }
+
+  /* The editor turning on is the other moment the layer may be shown:
+     tool.js calls this when it does. */
+  AMH.publish.staged = function () { return bcLayerOnto(); };
   /* A month page cannot publish, so its Edit button sends the reader here
      with the post named in the address. Answer it once, then take it out of
      the address, so a reload is a plain blog page and Back is not a loop. */
