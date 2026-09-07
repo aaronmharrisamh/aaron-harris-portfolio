@@ -1309,6 +1309,11 @@
   function bcWizKeys(e) {
     if (!bcWiz) return;
     if (e.key === "Escape") {
+      /* A dialog the editor owns is in front of this box, so the key is
+         its answer and not ours. This handler is captured, so without
+         this it ran first and cancelled the step underneath. Tab is left
+         alone here: the focus trap moves when the shell owns focus. */
+      if (TOOL.modalOpen()) return;
       e.preventDefault();
       if (bcWiz.onEscape) bcWiz.onEscape();
       return;
@@ -1327,8 +1332,6 @@
   function bcWizShow(step, title) {
     TOOL.injectStyles();
     if (!bcWiz) {
-      var scrim = doc.createElement("div");
-      scrim.className = "ced-scrim";
       var box = doc.createElement("div");
       box.className = "ced-modal bc-wizard";
       box.setAttribute("role", "dialog");
@@ -1351,11 +1354,11 @@
       box.appendChild(head);
       box.appendChild(body);
       box.appendChild(btns);
-      doc.body.appendChild(scrim);
+      TOOL.scrimUp();
       doc.body.appendChild(box);
       doc.addEventListener("keydown", bcWizKeys, true);
       bcBarAt = 0;
-      bcWiz = { scrim: scrim, box: box, head: head, headText: headText, bar: bar,
+      bcWiz = { box: box, head: head, headText: headText, bar: bar,
                 body: body, btns: btns, onEscape: null };
     }
     bcStep(step, title);
@@ -1407,7 +1410,7 @@
     /* the job named this box, so it goes with it */
     bcJob = null;
     bcBarAt = 0;
-    if (bcWiz.scrim.parentNode) bcWiz.scrim.parentNode.removeChild(bcWiz.scrim);
+    TOOL.scrimDown();
     if (bcWiz.box.parentNode) bcWiz.box.parentNode.removeChild(bcWiz.box);
     bcWiz = null;
     if (bcPanel && bcPanel.parentNode && bcTitle) bcTitle.focus();

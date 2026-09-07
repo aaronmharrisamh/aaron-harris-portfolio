@@ -1079,6 +1079,37 @@
     doc.head.appendChild(styleEl);
   }
 
+  /* ---------------- one ground, counted ----------------
+
+     Every box used to lay its own ground. They are all the same colour,
+     rgba(4,6,10,.72), so two composed to about 0.92 and three to about
+     0.98: a stack of boxes turned the page behind almost black, and the
+     reader lost the site they were editing.
+
+     One element serves them all. The count is what makes that safe. A box
+     that closes while another is still open must not take the ground away
+     from the box still there, and a count is the only way to know. */
+  var scrimEl = null, scrimCount = 0;
+  function scrimUp() {
+    scrimCount++;
+    if (scrimEl) return;
+    injectStyles();
+    scrimEl = doc.createElement("div");
+    scrimEl.className = "ced-scrim";
+    doc.body.appendChild(scrimEl);
+  }
+  function scrimDown() {
+    if (!scrimCount) return;
+    scrimCount--;
+    if (scrimCount) return;
+    if (scrimEl && scrimEl.parentNode) scrimEl.parentNode.removeChild(scrimEl);
+    scrimEl = null;
+  }
+
+  /* The editor's own dialogs, while they are on screen. modalOpen reports
+     this, so a consumer with its own Escape rule knows to yield. */
+  var dialogsUp = 0;
+
   /* ---------------- badges + panel ---------------- */
   /* THE CHIP FLOOR.
 
@@ -2371,12 +2402,41 @@
        file, and the second never closed. The second ask now waits on the
        first dialog. */
     if (asking[path]) return asking[path];
-    asking[path] = askOnce(path, netErr).then(
+    /* And two reads of DIFFERENT files are in flight at once too: a publish
+       reads every changed page in parallel, so two paths opened two dialogs
+       at the same moment, each with its own ground. The guard above holds
+       one path and cannot see the other.
+
+       One line of asks holds them apart. The reads stay parallel: it is
+       the asking that cannot overlap. */
+    var mine = askWaiting ? askQueue.then(askNow) : askNow();
+    askWaiting++;
+    /* The line must outlive a refusal. A cancelled ask fails its own
+       caller, and the ask behind it still has to run. */
+    askQueue = mine.then(askOff, askOff);
+    asking[path] = mine.then(
       function (v) { delete asking[path]; return v; },
       function (e) { delete asking[path]; throw e; });
     return asking[path];
+
+    function askNow() {
+      /* The wait may have answered it. One folder given to an earlier ask
+         answers every file it holds, and then this ask has nothing to do. */
+      if (handed[path]) return Promise.resolve(handed[path]);
+      if (skipped[path]) return Promise.resolve(null);
+      return askOnce(path, netErr);
+    }
   }
   var asking = {};
+  /* The line, for the page load, beside handed and skipped.
+
+     askWaiting is how many asks are in it. An ask that arrives at an empty
+     line runs NOW rather than after a turn of the microtask queue, because
+     a dialog that opened a beat late would be a change nobody asked for:
+     one ask on its own must behave exactly as it did. */
+  var askQueue = Promise.resolve();
+  var askWaiting = 0;
+  function askOff() { askWaiting--; }
   function askOnce(path, netErr) {
     var want = path.replace(/^.*\//, "");
     var mayBeAbsent = isOptional(path);
@@ -2742,8 +2802,6 @@
   function repoConfirmStep(handle, mode) {
     return new Promise(function (resolve) {
       injectStyles();
-      var scrim = doc.createElement("div");
-      scrim.className = "ced-scrim";
       var box = doc.createElement("div");
       box.className = "ced-modal ced-handoff";
       var head = doc.createElement("div");
@@ -2767,17 +2825,37 @@
       use.className = "ced-btn ced-btn--accent";
       use.textContent = "Use this folder";
 
+      /* Once only, for the reason given on the hand-off dialog's own done:
+         a check still in flight must not take the ground twice. */
+      var shut = false;
       function done(answer) {
-        if (scrim.parentNode) scrim.parentNode.removeChild(scrim);
+        if (shut) return;
+        shut = true;
+        doc.removeEventListener("keydown", keys);
+        dialogsUp--;
+        scrimDown();
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(answer);
+      }
+      /* Escape answers this box, and this box is in front. Without it the
+         wizard's own handler took the key and cancelled the step behind
+         this one. Escape means the same as "Choose a different folder":
+         not this folder, so open the picker. */
+      function keys(e) {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        done(null);
       }
       repoConfirmWire(handle, mode, use, other,
         function (t) { note.textContent = t; }, done);
 
       btns.appendChild(other); btns.appendChild(spacer); btns.appendChild(use);
       box.appendChild(head); box.appendChild(note); box.appendChild(btns);
-      doc.body.appendChild(scrim); doc.body.appendChild(box);
+      scrimUp();
+      doc.body.appendChild(box);
+      dialogsUp++;
+      doc.addEventListener("keydown", keys);
       use.focus();
     });
   }
@@ -2877,8 +2955,6 @@
       injectStyles();
       guardDocumentDrops();
 
-      var scrim2 = doc.createElement("div");
-      scrim2.className = "ced-scrim";
       var box = doc.createElement("div");
       box.className = "ced-modal ced-handoff";
 
@@ -2967,11 +3043,31 @@
       function announce(open) {
         doc.dispatchEvent(new CustomEvent("ced:handoff", { detail: { path: path, open: open } }));
       }
+      /* Once only. A file read still in flight when Escape closes the box
+         calls this again when it lands, and a second pass would take the
+         ground away from a box that is still open and leave modalOpen
+         stuck true, which costs Escape for the rest of the page load. */
+      var shut = false;
       function done() {
+        if (shut) return;
+        shut = true;
         unpoint();
-        if (scrim2.parentNode) scrim2.parentNode.removeChild(scrim2);
+        doc.removeEventListener("keydown", keys);
+        dialogsUp--;
+        scrimDown();
         if (box.parentNode) box.parentNode.removeChild(box);
         announce(false);
+      }
+      /* Escape answers this box, and this box is in front. Without it the
+         wizard's own handler took the key and cancelled the step behind
+         this one. Escape means the same as Cancel: the publish is given up,
+         and it says so with the same code. */
+      function keys(e) {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        done();
+        reject(errObj("BLG-E07", "Wanted: " + want + "."));
       }
       function fail(code, extra) {
         note.textContent = errText(code, extra);
@@ -3071,8 +3167,10 @@
       box.appendChild(input);
       box.appendChild(folder);
       box.appendChild(btns);
-      doc.body.appendChild(scrim2);
+      scrimUp();
       doc.body.appendChild(box);
+      dialogsUp++;
+      doc.addEventListener("keydown", keys);
       zone.focus();
       announce(true);
       /* The first ask of a page load points at the folder button. One pick
@@ -4158,6 +4256,8 @@
      their definitions, where the reasons for them are written out. */
   AMH.tool.injectStyles = injectStyles;    /* put the editor's styles in <head> */
   AMH.tool.addStyles = addStyles;          /* add a trunk's own rules to them */
+  AMH.tool.scrimUp = scrimUp;              /* show the one ground, and count this box */
+  AMH.tool.scrimDown = scrimDown;          /* drop this box's claim on it */
   AMH.tool.armGuard = armGuard;            /* arm the unsaved-work unload guard */
   AMH.tool.currentPage = currentPage;      /* the managed path being viewed */
   /* The deployed bytes of a managed page. No argument means the page being
@@ -4183,9 +4283,10 @@
      outstanding edits inside its own bundle says so here. */
   AMH.tool.markExported = function () { exportedClean = true; };
 
-  /* True while the site editor owns the keyboard. A consumer with its own
+  /* True while the site editor owns the keyboard: a region being edited, an
+     image being edited, or one of its own dialogs. A consumer with its own
      Escape rule asks before it acts, so the two never fight over one key. */
-  AMH.tool.modalOpen = function () { return !!(openRegion || openImage); };
+  AMH.tool.modalOpen = function () { return !!(openRegion || openImage || dialogsUp); };
 
   /* Register the writing surface the toolbar should target while it is on
      screen. The function returns the element, or null when it is not. */

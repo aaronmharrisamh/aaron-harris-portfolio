@@ -2272,6 +2272,107 @@ async function main() {
     cancelled && cancelled.code === "BLG-E07" && /BLG-E07/.test(cancelled.msg),
     JSON.stringify(cancelled).slice(0, 90));
 
+  // ============ ONE LINE OF ASKS ============
+  // A publish reads every changed page in parallel, so two DIFFERENT paths
+  // used to reach handOff in the same tick and open two dialogs at once,
+  // each laying its own ground. The per-path guard could not see it: it
+  // holds one path, and these are two. The asks are now a line.
+  const twoAsks = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2691.html", "blog/2692.html"]);
+    /* both in one tick, which is what Promise.all over the changed pages
+       does. The first must open now; the second must wait. */
+    window.__q1 = AMH.tool.handOff("blog/2691.html", new Error("fetch refused"));
+    window.__q2 = AMH.tool.handOff("blog/2692.html", new Error("fetch refused"));
+    return { boxes: document.querySelectorAll('.ced-handoff').length,
+             scrims: document.querySelectorAll('.ced-scrim').length,
+             head: (document.querySelector('.ced-handoff .ced-modal__head') || {}).textContent || '' };
+  })()`);
+  check("asks: two files wanted in one tick open one dialog, not two",
+    twoAsks.boxes === 1 && /2691\.html/.test(twoAsks.head), JSON.stringify(twoAsks));
+  check("asks: one dialog lays one ground, so the page behind is not doubled",
+    twoAsks.scrims === 1, JSON.stringify(twoAsks));
+
+  // A refused ask fails its own caller and must not take the line with it:
+  // the ask behind it still has to run.
+  const afterCancel = await evaluate(`(function () {
+    [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return b.textContent === 'Cancel'; }).click();
+    return new Promise(function (res) { setTimeout(function () {
+      res({ boxes: document.querySelectorAll('.ced-handoff').length,
+            scrims: document.querySelectorAll('.ced-scrim').length,
+            head: (document.querySelector('.ced-handoff .ced-modal__head') || {}).textContent || '' });
+    }, 300); });
+  })()`, { awaitPromise: true });
+  check("asks: a refused ask does not stop the line, and the next one opens",
+    afterCancel.boxes === 1 && /2692\.html/.test(afterCancel.head) &&
+    afterCancel.scrims === 1, JSON.stringify(afterCancel));
+  const firstRefused = await evaluate(`window.__q1.then(
+    function () { return "resolved"; }, function (e) { return e.code; })`,
+    { awaitPromise: true });
+  check("asks: the refused ask still reports its own refusal to its caller",
+    firstRefused === "BLG-E07", String(firstRefused));
+
+  // Escape answers the box in front. This dialog is on its own here, so
+  // Escape is its own; the wizard case is checked where a wizard is up.
+  const escAlone = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      res({ boxes: document.querySelectorAll('.ced-handoff').length,
+            scrims: document.querySelectorAll('.ced-scrim').length });
+    }, 250); });
+  })()`, { awaitPromise: true });
+  check("asks: Escape answers the dialog, and the last box takes the ground with it",
+    escAlone.boxes === 0 && escAlone.scrims === 0, JSON.stringify(escAlone));
+  const secondRefused = await evaluate(`window.__q2.then(
+    function () { return "resolved"; }, function (e) { return e.code; })`,
+    { awaitPromise: true });
+  check("asks: Escape refuses the same way Cancel does",
+    secondRefused === "BLG-E07", String(secondRefused));
+
+  // The ground is counted, so a box that closes twice must not count twice.
+  // A file read is still in flight when Escape shuts the box, and it calls
+  // the same close again when it lands. A second pass would leave the count
+  // below zero: the ground would go while a box was still open, and
+  // modalOpen would stick, which costs Escape for the rest of the load.
+  const doubleClose = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2694.html"]);
+    window.__q4 = AMH.tool.handOff("blog/2694.html", new Error("fetch refused"));
+    var zone = document.querySelector('.ced-handoff__zone');
+    var dt = new DataTransfer();
+    dt.items.add(new File(["<p>late</p>"], "2694.html", { type: "text/html" }));
+    zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    /* the read is a FileReader, so it has not landed yet */
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      res({ boxes: document.querySelectorAll('.ced-handoff').length,
+            scrims: document.querySelectorAll('.ced-scrim').length,
+            owns: AMH.tool.modalOpen() });
+    }, 500); });
+  })()`, { awaitPromise: true });
+  check("asks: a close that happens twice only counts once, so the key is not lost",
+    doubleClose.boxes === 0 && doubleClose.scrims === 0 && doubleClose.owns === false,
+    JSON.stringify(doubleClose));
+  // and the ground still comes back for the next ask
+  const groundAgain = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2695.html"]);
+    window.__q5 = AMH.tool.handOff("blog/2695.html", new Error("fetch refused"));
+    var r = { scrims: document.querySelectorAll('.ced-scrim').length,
+              owns: AMH.tool.modalOpen() };
+    [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+      .find(function (b) { return b.textContent === 'Cancel'; }).click();
+    r.after = document.querySelectorAll('.ced-scrim').length;
+    r.ownsAfter = AMH.tool.modalOpen();
+    return r;
+  })()`);
+  check("asks: the ground comes back for the next ask, and goes again with it",
+    groundAgain.scrims === 1 && groundAgain.owns === true &&
+    groundAgain.after === 0 && groundAgain.ownsAfter === false,
+    JSON.stringify(groundAgain));
+  await evaluate(`Promise.all([
+    window.__q4.then(function () { return 1; }, function () { return 0; }),
+    window.__q5.then(function () { return 1; }, function () { return 0; })])`,
+    { awaitPromise: true });
+
   // F1. the fallback folder input matches on the full path under the picked
   // folder. The tree holds tools/e2e/fixtures/2607.html, and a match on the
   // bare name let whichever file came last win over blog/2607.html.
@@ -3245,6 +3346,52 @@ async function main() {
     trace.steps.indexOf("confirm") !== -1 && trace.steps.indexOf("progress") !== -1 &&
     trace.steps.indexOf("done") !== -1,
     JSON.stringify(trace));
+
+  // PW4d. ESCAPE ANSWERS THE BOX IN FRONT.
+  // The wizard's key handler is captured on the document, so it used to run
+  // first whatever was on top and cancel the step underneath a dialog. A
+  // rebuild is the cheapest way to get a wizard up with nothing else going
+  // on, and a direct ask puts a dialog in front of it.
+  await evaluate(`window.edit.blog.rebuild()`);
+  await sleep(500);
+  const stacked = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2693.html"]);
+    window.__q3 = AMH.tool.handOff("blog/2693.html", new Error("fetch refused"));
+    return { step: (document.querySelector('.bc-wizard') || {}).getAttribute
+               ? document.querySelector('.bc-wizard').getAttribute('data-step') : 'none',
+             dialog: !!document.querySelector('.ced-handoff__zone'),
+             boxes: document.querySelectorAll('.ced-modal').length,
+             scrims: document.querySelectorAll('.ced-scrim').length };
+  })()`);
+  check("wizard: a dialog over the wizard is two boxes on one ground, not two grounds",
+    stacked.step === "route" && stacked.dialog === true &&
+    stacked.boxes === 2 && stacked.scrims === 1, JSON.stringify(stacked));
+
+  const escFront = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      res({ dialog: !!document.querySelector('.ced-handoff__zone'),
+            wizard: !!document.querySelector('.bc-wizard'),
+            step: (document.querySelector('.bc-wizard') || {}).getAttribute
+              ? document.querySelector('.bc-wizard').getAttribute('data-step') : 'none',
+            scrims: document.querySelectorAll('.ced-scrim').length });
+    }, 300); });
+  })()`, { awaitPromise: true });
+  check("wizard: Escape closes the dialog in front and leaves the step behind it",
+    escFront.dialog === false && escFront.wizard === true &&
+    escFront.step === "route" && escFront.scrims === 1, JSON.stringify(escFront));
+
+  const escAlone2 = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      res({ wizard: !!document.querySelector('.bc-wizard'),
+            scrims: document.querySelectorAll('.ced-scrim').length });
+    }, 300); });
+  })()`, { awaitPromise: true });
+  check("wizard: Escape still answers the wizard when it is the only box",
+    escAlone2.wizard === false && escAlone2.scrims === 0, JSON.stringify(escAlone2));
+  await evaluate(`window.__q3.then(function () { return 1; }, function () { return 0; })`,
+    { awaitPromise: true });
 
   // PW5. the record clears itself when the page carries the bundle's stamp.
   // The served page's manifest is empty, so the stamp is put on it by hand,
