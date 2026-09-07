@@ -3357,29 +3357,59 @@ async function main() {
   const stacked = await evaluate(`(function () {
     AMH.tool.expectFiles(["blog/2693.html"]);
     window.__q3 = AMH.tool.handOff("blog/2693.html", new Error("fetch refused"));
-    return { step: (document.querySelector('.bc-wizard') || {}).getAttribute
-               ? document.querySelector('.bc-wizard').getAttribute('data-step') : 'none',
+    var box = document.querySelector('.bc-wizard');
+    var own = box.querySelector(':scope > .bc-wiz__body');
+    return { step: box.getAttribute('data-step'),
+             guest: box.getAttribute('data-guest'),
              dialog: !!document.querySelector('.ced-handoff__zone'),
              boxes: document.querySelectorAll('.ced-modal').length,
+             guests: document.querySelectorAll('.bc-wiz__guest').length,
+             /* the step waits under the guest rather than being drawn
+                again, so it is still here and it is hidden */
+             stepThere: !!own, stepHidden: own ? own.hidden : null,
+             stepShown: own ? getComputedStyle(own).display !== 'none' : null,
+             /* the names the suite reads still name the same things */
+             head: (document.querySelector('.ced-handoff .ced-modal__head') || {}).textContent || '',
+             btns: [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
+               .map(function (b) { return b.textContent; }),
              scrims: document.querySelectorAll('.ced-scrim').length };
   })()`);
-  check("wizard: a dialog over the wizard is two boxes on one ground, not two grounds",
-    stacked.step === "route" && stacked.dialog === true &&
-    stacked.boxes === 2 && stacked.scrims === 1, JSON.stringify(stacked));
+  check("wizard: a dialog over the wizard is one box, asked as a stage inside it",
+    stacked.step === "route" && stacked.guest === "file" && stacked.dialog === true &&
+    stacked.boxes === 1 && stacked.guests === 1 && stacked.scrims === 1,
+    JSON.stringify(stacked));
+  check("wizard: the step waits under the guest rather than being drawn again",
+    stacked.stepThere === true && stacked.stepHidden === true &&
+    stacked.stepShown === false, JSON.stringify(stacked));
+  check("wizard: the stage carries the same names a box of its own carries",
+    /FILE/.test(stacked.head) && /2693\.html/.test(stacked.head) &&
+    JSON.stringify(stacked.btns) === '["Choose file","Use my repo folder","Cancel"]',
+    JSON.stringify(stacked));
 
   const escFront = await evaluate(`(function () {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return new Promise(function (res) { setTimeout(function () {
+      var box = document.querySelector('.bc-wizard');
+      var own = box && box.querySelector(':scope > .bc-wiz__body');
       res({ dialog: !!document.querySelector('.ced-handoff__zone'),
-            wizard: !!document.querySelector('.bc-wizard'),
-            step: (document.querySelector('.bc-wizard') || {}).getAttribute
-              ? document.querySelector('.bc-wizard').getAttribute('data-step') : 'none',
+            wizard: !!box,
+            guests: document.querySelectorAll('.bc-wiz__guest').length,
+            guestAttr: box ? box.getAttribute('data-guest') : 'no box',
+            step: box ? box.getAttribute('data-step') : 'none',
+            /* the step comes back as it was left, and is visible again */
+            stepShown: own ? getComputedStyle(own).display !== 'none' : null,
+            btns: box ? [...box.querySelectorAll(':scope > .ced-modal__btns button')]
+              .map(function (b) { return b.textContent; }) : [],
             scrims: document.querySelectorAll('.ced-scrim').length });
     }, 300); });
   })()`, { awaitPromise: true });
-  check("wizard: Escape closes the dialog in front and leaves the step behind it",
+  check("wizard: Escape closes the stage in front and leaves the step behind it",
     escFront.dialog === false && escFront.wizard === true &&
-    escFront.step === "route" && escFront.scrims === 1, JSON.stringify(escFront));
+    escFront.step === "route" && escFront.scrims === 1 &&
+    escFront.guests === 0 && escFront.guestAttr === null, JSON.stringify(escFront));
+  check("wizard: the step comes back visible, with its own buttons",
+    escFront.stepShown === true && escFront.btns.length > 0 &&
+    escFront.btns.indexOf("Cancel") !== -1, JSON.stringify(escFront));
 
   const escAlone2 = await evaluate(`(function () {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -6584,7 +6614,7 @@ async function main() {
                 .map(function (b) { return b.textContent; }) : [] });
       }, 500); });
     })()`, { awaitPromise: true });
-    check("repo memory: the write route still asks in a box of its own, having no dialog to sit in",
+    check("repo memory: with no shell on screen the write route builds its own box",
       writeBox.box === true && /FOLDER/.test(writeBox.head) && writeBox.inline === false &&
       JSON.stringify(writeBox.btns) === '["Choose a different folder","Use this folder"]',
       JSON.stringify(writeBox));
@@ -6604,6 +6634,105 @@ async function main() {
     check("repo memory: the write route's box closes on a different folder and opens the picker",
       writeNo.got === null && writeNo.picked === 1 && writeNo.gone === true,
       JSON.stringify(writeNo));
+
+    // ============ TWO GUESTS, ONE BOX ============
+    // A folder confirm can be asked from inside a file ask, so the shell
+    // holds a STACK of stages and not one. A fresh load is needed: the
+    // offers above are spent, and the folder in hand would answer without
+    // asking anything.
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(`(function () {
+      var stand = { name: 'aaron-harris-portfolio' };
+      return AMH.tool.repoForget().then(function () {
+        return new Promise(function (res) {
+          var q = indexedDB.open('amh-editor', 1);
+          q.onupgradeneeded = function () { q.result.createObjectStore('repo'); };
+          q.onsuccess = function () {
+            var tx = q.result.transaction('repo', 'readwrite');
+            tx.objectStore('repo').put({ handle: stand, name: stand.name }, 'folder');
+            tx.oncomplete = function () { res('seeded'); };
+          };
+        });
+      });
+    })()`, { awaitPromise: true });
+    await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+    await sleep(700);
+    await evaluate(`window.edit.blog.rebuild()`);
+    await sleep(500);
+    const twoGuests = await evaluate(`(function () {
+      window.showDirectoryPicker = function () {
+        return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' }));
+      };
+      AMH.tool.expectFiles(["blog/2697.html"]);
+      window.__g1 = AMH.tool.handOff("blog/2697.html", new Error("fetch refused"));
+      /* the write route has its own offer flag, so this reaches the folder
+         confirm while the file stage is still up */
+      window.__g2 = AMH.tool.pickRepoWrite();
+      return new Promise(function (res) { setTimeout(function () {
+        var gs = [...document.querySelectorAll('.bc-wiz__guest')];
+        res({ boxes: document.querySelectorAll('.ced-modal').length,
+              scrims: document.querySelectorAll('.ced-scrim').length,
+              guests: gs.length,
+              guestAttr: document.querySelector('.bc-wizard').getAttribute('data-guest'),
+              /* the one underneath waits, hidden, exactly as the step does */
+              shown: gs.map(function (g) { return getComputedStyle(g).display !== 'none'; }),
+              heads: gs.map(function (g) {
+                return (g.querySelector('.ced-modal__head') || {}).textContent || ''; }) });
+      }, 600); });
+    })()`, { awaitPromise: true });
+    check("stages: a folder confirm inside a file ask is a second stage, not a second box",
+      twoGuests.boxes === 1 && twoGuests.scrims === 1 && twoGuests.guests === 2 &&
+      twoGuests.guestAttr === "folder" &&
+      JSON.stringify(twoGuests.shown) === "[false,true]" &&
+      /FILE/.test(twoGuests.heads[0]) && /FOLDER/.test(twoGuests.heads[1]),
+      JSON.stringify(twoGuests));
+
+    // and they come back one at a time, in the order they were laid down
+    const popOne = await evaluate(`(function () {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return new Promise(function (res) { setTimeout(function () {
+        var gs = [...document.querySelectorAll('.bc-wiz__guest')];
+        res({ guests: gs.length,
+              guestAttr: document.querySelector('.bc-wizard').getAttribute('data-guest'),
+              shown: gs.map(function (g) { return getComputedStyle(g).display !== 'none'; }),
+              zone: !!document.querySelector('.ced-handoff__zone') });
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("stages: Escape gives back the top stage and the file ask comes back",
+      popOne.guests === 1 && popOne.guestAttr === "file" &&
+      JSON.stringify(popOne.shown) === "[true]" && popOne.zone === true,
+      JSON.stringify(popOne));
+
+    const popTwo = await evaluate(`(function () {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return new Promise(function (res) { setTimeout(function () {
+        var box = document.querySelector('.bc-wizard');
+        var own = box && box.querySelector(':scope > .bc-wiz__body');
+        res({ guests: document.querySelectorAll('.bc-wiz__guest').length,
+              guestAttr: box ? box.getAttribute('data-guest') : 'no box',
+              step: box ? box.getAttribute('data-step') : 'none',
+              stepShown: own ? getComputedStyle(own).display !== 'none' : null,
+              scrims: document.querySelectorAll('.ced-scrim').length });
+      }, 400); });
+    })()`, { awaitPromise: true });
+    check("stages: the last stage given back reveals the step, on the one ground",
+      popTwo.guests === 0 && popTwo.guestAttr === null && popTwo.step === "route" &&
+      popTwo.stepShown === true && popTwo.scrims === 1, JSON.stringify(popTwo));
+
+    await evaluate(`(function () {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return Promise.all([
+        window.__g1.then(function () { return 1; }, function () { return 0; }),
+        window.__g2.then(function () { return 1; }, function () { return 0; })]);
+    })()`, { awaitPromise: true });
+    const allGone = await evaluate(`({
+      boxes: document.querySelectorAll('.ced-modal').length,
+      scrims: document.querySelectorAll('.ced-scrim').length,
+      owns: AMH.tool.modalOpen() })`);
+    check("stages: with every stage and the box gone, the ground goes too",
+      allGone.boxes === 0 && allGone.scrims === 0 && allGone.owns === false,
+      JSON.stringify(allGone));
 
     // the check that replaces the path you cannot see: the folder's own
     // blog.html stamp, against the page asking for it

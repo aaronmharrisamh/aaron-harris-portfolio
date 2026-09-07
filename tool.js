@@ -1106,9 +1106,36 @@
     scrimEl = null;
   }
 
-  /* The editor's own dialogs, while they are on screen. modalOpen reports
-     this, so a consumer with its own Escape rule knows to yield. */
-  var dialogsUp = 0;
+  /* The editor's own dialogs, innermost last.
+
+     A stack, not a count, because Escape has to answer the one in FRONT.
+     Each dialog listening on the document for itself does not work: two
+     listeners on one node both fire for one key, and stopPropagation does
+     not stop a sibling on the same node. So there is one listener here,
+     and it asks the top of the stack.
+
+     modalOpen reports the depth, so a consumer with its own Escape rule
+     knows to yield the key to whatever is in front of it. */
+  var dialogStack = [];
+  function dialogUp(esc) {
+    dialogStack.push(esc);
+    if (dialogStack.length === 1) doc.addEventListener("keydown", dialogKeys);
+  }
+  function dialogDown(esc) {
+    var at = dialogStack.lastIndexOf(esc);
+    if (at !== -1) dialogStack.splice(at, 1);
+    if (!dialogStack.length) doc.removeEventListener("keydown", dialogKeys);
+  }
+  function dialogKeys(e) {
+    if (e.key !== "Escape" || !dialogStack.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dialogStack[dialogStack.length - 1]();
+  }
+
+  /* The shell that holds this file's dialogs, when one is on screen.
+     Registered through AMH.tool.stageHost. */
+  var hostFn = null;
 
   /* ---------------- badges + panel ---------------- */
   /* THE CHIP FLOOR.
@@ -2802,18 +2829,28 @@
   function repoConfirmStep(handle, mode) {
     return new Promise(function (resolve) {
       injectStyles();
-      var box = doc.createElement("div");
-      box.className = "ced-modal ced-handoff";
-      var head = doc.createElement("div");
-      head.className = "ced-modal__head";
+      /* the same offer as the hand-off dialog: a stage in the shell when
+         one is on screen, a box of its own when there is not */
+      var host = hostFn && hostFn();
+      var stage = host ? host.open("folder", handle.name || "(unnamed)") : null;
+      var box = null, head, body, btns;
+      if (stage) {
+        head = stage.head; body = stage.body; btns = stage.btns;
+      } else {
+        box = doc.createElement("div");
+        box.className = "ced-modal ced-handoff";
+        head = doc.createElement("div");
+        head.className = "ced-modal__head";
+        body = box;
+        btns = doc.createElement("div");
+        btns.className = "ced-modal__btns";
+      }
       head.innerHTML = '<span class="ced-b">FOLDER</span><span class="ced-slug">' +
         escAttr(handle.name || "(unnamed)") + "</span>";
       var note = doc.createElement("div");
       note.className = "ced-modal__status";
       note.textContent = "This browser remembers this folder from a previous visit. " +
         "It is checked before it is used.";
-      var btns = doc.createElement("div");
-      btns.className = "ced-modal__btns";
       var other = doc.createElement("button");
       other.type = "button";
       other.className = "ced-btn";
@@ -2831,31 +2868,29 @@
       function done(answer) {
         if (shut) return;
         shut = true;
-        doc.removeEventListener("keydown", keys);
-        dialogsUp--;
-        scrimDown();
-        if (box.parentNode) box.parentNode.removeChild(box);
+        dialogDown(escMe);
+        if (host) { host.close(); }
+        else {
+          scrimDown();
+          if (box.parentNode) box.parentNode.removeChild(box);
+        }
         resolve(answer);
       }
-      /* Escape answers this box, and this box is in front. Without it the
-         wizard's own handler took the key and cancelled the step behind
-         this one. Escape means the same as "Choose a different folder":
-         not this folder, so open the picker. */
-      function keys(e) {
-        if (e.key !== "Escape") return;
-        e.preventDefault();
-        e.stopPropagation();
-        done(null);
-      }
+      /* Escape means the same as "Choose a different folder": not this
+         folder, so open the picker. */
+      function escMe() { done(null); }
       repoConfirmWire(handle, mode, use, other,
         function (t) { note.textContent = t; }, done);
 
       btns.appendChild(other); btns.appendChild(spacer); btns.appendChild(use);
-      box.appendChild(head); box.appendChild(note); box.appendChild(btns);
-      scrimUp();
-      doc.body.appendChild(box);
-      dialogsUp++;
-      doc.addEventListener("keydown", keys);
+      if (box) box.appendChild(head);
+      body.appendChild(note);
+      if (box) {
+        box.appendChild(btns);
+        scrimUp();
+        doc.body.appendChild(box);
+      }
+      dialogUp(escMe);
       use.focus();
     });
   }
@@ -2955,14 +2990,29 @@
       injectStyles();
       guardDocumentDrops();
 
-      var box = doc.createElement("div");
-      box.className = "ced-modal ced-handoff";
-
-      /* ced-modal__head, not ced-modal__title: the second has no rules
-         anywhere in this file, which is why the badge and the name used to
-         run together with no padding. */
-      var title = doc.createElement("div");
-      title.className = "ced-modal__head";
+      /* A shell on screen holds this dialog as a stage of its own, so the
+         reader answers it inside the box they are already looking at. With
+         no shell there is a box, which is what a page opened from disk
+         gets when edit.export() asks for a file. */
+      var host = hostFn && hostFn();
+      var stage = host ? host.open("file", want) : null;
+      var box = null, title, body, btns;
+      if (stage) {
+        title = stage.head; body = stage.body; btns = stage.btns;
+      } else {
+        box = doc.createElement("div");
+        box.className = "ced-modal ced-handoff";
+        /* ced-modal__head, not ced-modal__title: the second has no rules
+           anywhere in this file, which is why the badge and the name used
+           to run together with no padding. */
+        title = doc.createElement("div");
+        title.className = "ced-modal__head";
+        /* the box IS the body when it stands alone, so the same appends
+           below serve both shapes */
+        body = box;
+        btns = doc.createElement("div");
+        btns.className = "ced-modal__btns";
+      }
       title.innerHTML = '<span class="ced-b">FILE</span><span class="ced-slug">' +
         escAttr(want) + "</span>" + stepLabel(path);
 
@@ -3007,8 +3057,6 @@
       folder.setAttribute("directory", "");
       folder.style.display = "none";
 
-      var btns = doc.createElement("div");
-      btns.className = "ced-modal__btns";
       var pick = doc.createElement("button");
       pick.type = "button";
       pick.className = "ced-btn ced-btn--accent";
@@ -3052,20 +3100,20 @@
         if (shut) return;
         shut = true;
         unpoint();
-        doc.removeEventListener("keydown", keys);
-        dialogsUp--;
-        scrimDown();
-        if (box.parentNode) box.parentNode.removeChild(box);
+        dialogDown(escMe);
+        /* the shell owns its own ground, so only a box of our own claimed
+           one and only a box of our own gives it back */
+        if (host) { host.close(); }
+        else {
+          scrimDown();
+          if (box.parentNode) box.parentNode.removeChild(box);
+        }
         announce(false);
       }
-      /* Escape answers this box, and this box is in front. Without it the
-         wizard's own handler took the key and cancelled the step behind
-         this one. Escape means the same as Cancel: the publish is given up,
-         and it says so with the same code. */
-      function keys(e) {
-        if (e.key !== "Escape") return;
-        e.preventDefault();
-        e.stopPropagation();
+      /* Escape means the same as Cancel: the publish is given up, and it
+         says so with the same code. The stack decides whether this dialog
+         is the one in front. */
+      function escMe() {
         done();
         reject(errObj("BLG-E07", "Wanted: " + want + "."));
       }
@@ -3159,18 +3207,21 @@
       if (absent) btns.appendChild(absent);
       btns.appendChild(spacer);
       btns.appendChild(cancel);
-      box.appendChild(title);
-      box.appendChild(offer);
-      box.appendChild(zone);
-      box.appendChild(note);
-      if (list.innerHTML) box.appendChild(list);
-      box.appendChild(input);
-      box.appendChild(folder);
-      box.appendChild(btns);
-      scrimUp();
-      doc.body.appendChild(box);
-      dialogsUp++;
-      doc.addEventListener("keydown", keys);
+      /* head first, buttons last, and the rest between: in a box of our own
+         the body IS the box, so this one order serves both shapes */
+      if (box) box.appendChild(title);
+      body.appendChild(offer);
+      body.appendChild(zone);
+      body.appendChild(note);
+      if (list.innerHTML) body.appendChild(list);
+      body.appendChild(input);
+      body.appendChild(folder);
+      if (box) {
+        box.appendChild(btns);
+        scrimUp();
+        doc.body.appendChild(box);
+      }
+      dialogUp(escMe);
       zone.focus();
       announce(true);
       /* The first ask of a page load points at the folder button. One pick
@@ -3196,7 +3247,9 @@
       function offerRemembered() {
         if (!hasPicker() || repoDir || repoOffered.read) return;
         repoRecall().then(function (handle) {
-          if (!handle || !box.parentNode) return;
+          /* the recall is asynchronous, so the dialog may already be
+             answered. shut says so whether it was a box or a stage. */
+          if (!handle || shut) return;
           repoOffered.read = true;
           drawOffer(handle);
         });
@@ -4286,11 +4339,22 @@
   /* True while the site editor owns the keyboard: a region being edited, an
      image being edited, or one of its own dialogs. A consumer with its own
      Escape rule asks before it acts, so the two never fight over one key. */
-  AMH.tool.modalOpen = function () { return !!(openRegion || openImage || dialogsUp); };
+  AMH.tool.modalOpen = function () { return !!(openRegion || openImage || dialogStack.length); };
 
   /* Register the writing surface the toolbar should target while it is on
      screen. The function returns the element, or null when it is not. */
   AMH.tool.editSurface = function (fn) { altSurface = fn; };
+
+  /* Register the shell that should hold this file's dialogs while it is on
+     screen. The function returns a host, or null when there is none.
+
+     A host is a small object, not an element:
+       open(kind, title)  take a stage. Returns { head, body, btns }.
+       close()            give the stage back.
+     kind is "file" or "folder". A host is an offer and never a
+     requirement: with no shell, a dialog builds its own box, which is what
+     edit.export() from a page opened from disk still does. */
+  AMH.tool.stageHost = function (fn) { hostFn = fn; };
 
   /* Work waiting from another page in this sitting is re-applied before anyone
      looks at the page.

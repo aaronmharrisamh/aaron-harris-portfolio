@@ -496,6 +496,26 @@
     ".bc-wiz__bar i{display:block;height:100%;width:0;background:var(--accent);" +
     "transition:width .35s var(--ease);}" +
     "@media (prefers-reduced-motion:reduce){.bc-wiz__bar i{transition:none;}}" +
+    /* A stage another file fills. It takes the whole box, so the head sits
+       where the head sits and the buttons sit where the buttons sit. */
+    ".bc-wiz__guest{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}" +
+    ".bc-wizard .bc-wiz__guest .bc-wiz__body{flex:1 1 auto;min-height:0;overflow:auto;}" +
+    /* The wizard's own head stacks two lines, so it is display:block. A
+       guest's head is one line and needs the row back, or the badge and
+       the name run together with no gap between them. */
+    ".bc-wizard .bc-wiz__guest .ced-modal__head{display:flex;align-items:baseline;" +
+    "gap:.6rem;padding-top:.7rem;padding-bottom:.5rem;}" +
+    /* The guest's body already pads its sides, so the parts inside it must
+       not add their own or the inset is counted twice. */
+    ".bc-wiz__guest .ced-handoff__zone{margin-left:0;margin-right:0;}" +
+    ".bc-wiz__guest .ced-handoff__offer{margin-left:0;margin-right:0;}" +
+    ".bc-wiz__guest .ced-handoff__list{padding-left:0;padding-right:0;}" +
+    ".bc-wiz__guest .ced-modal__status{padding-left:0;padding-right:0;}" +
+    /* The step waits under a guest rather than being drawn again, because
+       Progress holds rows already ticked and a heartbeat that must keep
+       its element. It has to hide for real: .ced-modal__head sets its own
+       display, which beats the browser's rule for [hidden]. */
+    ".bc-wizard > [hidden]{display:none;}" +
     ".bc-wiz__body{padding:.15rem 1.1rem .3rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
     ".bc-wiz__body p{margin:.35rem 0;}" +
@@ -1359,8 +1379,12 @@
       doc.addEventListener("keydown", bcWizKeys, true);
       bcBarAt = 0;
       bcWiz = { box: box, head: head, headText: headText, bar: bar,
-                body: body, btns: btns, onEscape: null };
+                body: body, btns: btns, onEscape: null, guests: [] };
     }
+    /* A guest left over from an answer that did not close it would sit on
+       top of the step being shown. Nothing should reach here with one up,
+       so this is a guard rather than a routine. */
+    while (bcWiz.guests.length) bcWizGuestClose();
     bcStep(step, title);
     bcWiz.box.setAttribute("data-step", step);
     bcWiz.headText.innerHTML = bcWizHead(step, title);
@@ -1393,6 +1417,71 @@
     return '<div class="bc-wiz__job"><span class="ced-b">' + TOOL.escAttr(bcJob.badge) +
       '</span><span class="bc-wiz__jobline">' + TOOL.escAttr(bcJob.line) + "</span></div>" + stage;
   }
+  /* ---------------- the shell holds another file's dialogs ----------------
+
+     tool.js owns the hand-off dialog and the folder confirm, and it does
+     not know what a wizard is. It asks for a host instead, and this is the
+     answer while the box is on screen. A dialog then arrives as a STAGE in
+     this box rather than as a box on top of it.
+
+     The step underneath is HIDDEN, not thrown away. The Progress step
+     carries live state: rows already ticked, the heartbeat, and the
+     listener that makes a row say it is waiting. Drawing it again would
+     reset all three, so it stays in the document and comes back as it
+     was.
+
+     The guests are a stack, because a folder confirm can be asked from
+     inside a file ask. */
+  function bcWizHost() {
+    return { open: bcWizGuestOpen, close: bcWizGuestClose };
+  }
+  function bcWizStepHidden(hide) {
+    if (!bcWiz) return;
+    bcWiz.head.hidden = hide;
+    bcWiz.body.hidden = hide;
+    bcWiz.btns.hidden = hide;
+  }
+  function bcWizGuestTop() {
+    return bcWiz && bcWiz.guests.length ? bcWiz.guests[bcWiz.guests.length - 1] : null;
+  }
+  /* Take a stage. Returns the three elements the dialog fills, which carry
+     the same class names they carry in a box of their own. */
+  function bcWizGuestOpen(kind, title) {
+    if (!bcWiz) return null;
+    var under = bcWizGuestTop();
+    if (under) under.el.hidden = true; else bcWizStepHidden(true);
+
+    var el = doc.createElement("div");
+    /* ced-handoff names the dialog's content, in a box of its own or in
+       this stage. Every check that reads it keeps reading the same thing. */
+    el.className = "bc-wiz__guest ced-handoff";
+    var head = doc.createElement("div");
+    head.className = "ced-modal__head";
+    var body = doc.createElement("div");
+    body.className = "bc-wiz__body";
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    el.appendChild(head); el.appendChild(body); el.appendChild(btns);
+    bcWiz.box.appendChild(el);
+    bcWiz.box.setAttribute("data-guest", kind);
+    bcWiz.guests.push({ el: el, kind: kind, title: title });
+    return { head: head, body: body, btns: btns };
+  }
+  /* Give the stage back. What was under it comes back as it was left. */
+  function bcWizGuestClose() {
+    var top = bcWiz && bcWiz.guests.pop();
+    if (!top) return;
+    if (top.el.parentNode) top.el.parentNode.removeChild(top.el);
+    var under = bcWizGuestTop();
+    if (under) {
+      under.el.hidden = false;
+      bcWiz.box.setAttribute("data-guest", under.kind);
+    } else {
+      bcWizStepHidden(false);
+      bcWiz.box.removeAttribute("data-guest");
+    }
+  }
+
   /* the progress step listens for the hand-off; the next step, or the
      close, stops it */
   function bcWizUnhand() {
@@ -4035,6 +4124,14 @@
      composer is on screen that is the post body, not the region modal. */
   TOOL.editSurface(function () {
     return (bcPanel && bcPanel.parentNode && bcBody) ? bcBody : null;
+  });
+
+  /* The wizard holds tool.js's dialogs while its box is on screen, so a
+     publish is one box from the click to Done however many questions it
+     has to ask. With no box there is no host, and tool.js builds its own,
+     which is what edit.export() from a page opened from disk gets. */
+  TOOL.stageHost(function () {
+    return (bcWiz && bcWiz.box.parentNode) ? bcWizHost() : null;
   });
 
   /* AMH.publish
