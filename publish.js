@@ -496,9 +496,33 @@
     ".bc-wiz__bar i{display:block;height:100%;width:0;background:var(--accent);" +
     "transition:width .35s var(--ease);}" +
     "@media (prefers-reduced-motion:reduce){.bc-wiz__bar i{transition:none;}}" +
-    /* A stage another file fills. It takes the whole box, so the head sits
-       where the head sits and the buttons sit where the buttons sit. */
-    ".bc-wiz__guest{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}" +
+    /* THE TRACK.
+
+       Every stage fills the box and is laid over it, so two can be on
+       screen while one is leaving. The box clips them, which is what lets
+       a stage sit off to the side without widening anything.
+
+       The distance is short on purpose. The box is 560px wide, so 28px
+       and a fade reads as travel; a full slide would read as a page
+       change, which is too much for one question inside one job. */
+    /* Only the clip. .ced-modal is already position:fixed, which is the
+       containing block a stage is laid out against; saying position here
+       would win on source order and take the box's centering away. */
+    ".bc-wizard{overflow:hidden;}" +
+    ".bc-wiz__step,.bc-wiz__guest{position:absolute;inset:0;display:flex;" +
+    "flex-direction:column;transition:transform .26s var(--ease),opacity .26s var(--ease);}" +
+    ".bc-wiz__step.is-here,.bc-wiz__guest.is-here{transform:none;opacity:1;}" +
+    ".bc-wiz__step.is-next,.bc-wiz__guest.is-next{transform:translateX(28px);opacity:0;}" +
+    ".bc-wiz__step.is-past,.bc-wiz__guest.is-past{transform:translateX(-28px);opacity:0;}" +
+    /* A stage on its way out must not answer a click on the way. */
+    ".bc-wiz__step.is-next,.bc-wiz__guest.is-next," +
+    ".bc-wiz__step.is-past,.bc-wiz__guest.is-past{pointer-events:none;}" +
+    /* Reduced motion keeps the fade and drops the travel. Every stage
+       still arrives and still leaves; it does not move to do it. */
+    "@media (prefers-reduced-motion:reduce){" +
+    ".bc-wiz__step,.bc-wiz__guest{transition:opacity .2s var(--ease);}" +
+    ".bc-wiz__step.is-next,.bc-wiz__guest.is-next," +
+    ".bc-wiz__step.is-past,.bc-wiz__guest.is-past{transform:none;}}" +
     ".bc-wizard .bc-wiz__guest .bc-wiz__body{flex:1 1 auto;min-height:0;overflow:auto;}" +
     /* The wizard's own head stacks two lines, so it is display:block. A
        guest's head is one line and needs the row back, or the badge and
@@ -511,11 +535,10 @@
     ".bc-wiz__guest .ced-handoff__offer{margin-left:0;margin-right:0;}" +
     ".bc-wiz__guest .ced-handoff__list{padding-left:0;padding-right:0;}" +
     ".bc-wiz__guest .ced-modal__status{padding-left:0;padding-right:0;}" +
-    /* The step waits under a guest rather than being drawn again, because
+    /* The step waits behind a guest rather than being drawn again, because
        Progress holds rows already ticked and a heartbeat that must keep
-       its element. It has to hide for real: .ced-modal__head sets its own
-       display, which beats the browser's rule for [hidden]. */
-    ".bc-wizard > [hidden]{display:none;}" +
+       its element. It is moved and faded, not hidden, so it can come back
+       exactly as it was left. */
     ".bc-wiz__body{padding:.15rem 1.1rem .3rem;font-size:.8rem;color:var(--muted);line-height:1.55;" +
     "max-height:70vh;overflow:auto;}" +
     ".bc-wiz__body p{margin:.35rem 0;}" +
@@ -1316,10 +1339,14 @@
      Four steps, one box: confirm, progress, done, failed. Each step replaces
      the body; the box, its focus trap and its Escape stay. */
 
+  /* The stage in FRONT, and nothing behind it. Two stages are in the box
+     while one is leaving, and a trap that read the whole box would walk
+     Tab onto the buttons of the stage on its way out. */
   function bcWizFocusables() {
-    if (!bcWiz) return [];
+    var front = bcWizFront();
+    if (!front) return [];
     return Array.prototype.filter.call(
-      bcWiz.box.querySelectorAll("input, button, [href]"),
+      front.querySelectorAll("input, button, [href]"),
       function (el) {
         return el.tabIndex !== -1 && !el.disabled && (el.offsetWidth > 0 || el.offsetHeight > 0);
       });
@@ -1371,14 +1398,20 @@
       body.className = "bc-wiz__body";
       var btns = doc.createElement("div");
       btns.className = "ced-modal__btns";
-      box.appendChild(head);
-      box.appendChild(body);
-      box.appendChild(btns);
+      /* The wizard's own stage. It is wrapped so that it and a guest are
+         the same kind of thing: one element that carries a head, a body
+         and a button row, and that can be moved as one. */
+      var stepEl = doc.createElement("div");
+      stepEl.className = "bc-wiz__step is-here";
+      stepEl.appendChild(head);
+      stepEl.appendChild(body);
+      stepEl.appendChild(btns);
+      box.appendChild(stepEl);
       TOOL.scrimUp();
       doc.body.appendChild(box);
       doc.addEventListener("keydown", bcWizKeys, true);
       bcBarAt = 0;
-      bcWiz = { box: box, head: head, headText: headText, bar: bar,
+      bcWiz = { box: box, stepEl: stepEl, head: head, headText: headText, bar: bar,
                 body: body, btns: btns, onEscape: null, guests: [] };
     }
     /* A guest left over from an answer that did not close it would sit on
@@ -1435,26 +1468,69 @@
   function bcWizHost() {
     return { open: bcWizGuestOpen, close: bcWizGuestClose };
   }
-  function bcWizStepHidden(hide) {
-    if (!bcWiz) return;
-    bcWiz.head.hidden = hide;
-    bcWiz.body.hidden = hide;
-    bcWiz.btns.hidden = hide;
-  }
   function bcWizGuestTop() {
     return bcWiz && bcWiz.guests.length ? bcWiz.guests[bcWiz.guests.length - 1] : null;
+  }
+  /* The stage in front: the top guest, or the wizard's own step. Focus and
+     the Tab key belong to this one and to nothing behind it. */
+  function bcWizFront() {
+    var top = bcWizGuestTop();
+    return top ? top.el : (bcWiz ? bcWiz.stepEl : null);
+  }
+  /* A stage that is leaving stops answering the keyboard AT ONCE, before
+     it has finished moving, so Tab can never reach a control on its way
+     out. inert is the whole answer where it exists; where it does not,
+     the focus list is still scoped to the stage in front. */
+  function bcWizInert(el, off) {
+    if (!el) return;
+    if ("inert" in el) el.inert = off;
+    if (off) el.setAttribute("aria-hidden", "true");
+    else el.removeAttribute("aria-hidden");
+  }
+  /* Send a stage away and take it off the keyboard. "past" is the way out
+     to the left, which is where a stage goes when something arrives over
+     it; "next" is the way out to the right, which is where a guest goes
+     when it is answered. */
+  function bcWizAway(el, where) {
+    if (!el) return;
+    bcWizInert(el, true);
+    el.classList.remove("is-here");
+    el.classList.add(where);
+  }
+  function bcWizHere(el) {
+    if (!el) return;
+    bcWizInert(el, false);
+    el.classList.remove("is-next", "is-past");
+    el.classList.add("is-here");
+  }
+  /* Drop a stage once it has finished leaving. A transition on a hidden
+     tab never fires transitionend, so the timer is not a belt on top of
+     braces: it is the only thing that runs in a background tab. */
+  var STAGE_MS = 260;
+  function bcWizDrop(el) {
+    var gone = false;
+    function go() {
+      if (gone) return;
+      gone = true;
+      el.removeEventListener("transitionend", go);
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
+    el.addEventListener("transitionend", go);
+    window.setTimeout(go, STAGE_MS + 120);
   }
   /* Take a stage. Returns the three elements the dialog fills, which carry
      the same class names they carry in a box of their own. */
   function bcWizGuestOpen(kind, title) {
     if (!bcWiz) return null;
-    var under = bcWizGuestTop();
-    if (under) under.el.hidden = true; else bcWizStepHidden(true);
+    var under = bcWizFront();
+    /* what was focused before this arrived, so it can be given back */
+    var was = doc.activeElement;
+    bcWizAway(under, "is-past");
 
     var el = doc.createElement("div");
     /* ced-handoff names the dialog's content, in a box of its own or in
        this stage. Every check that reads it keeps reading the same thing. */
-    el.className = "bc-wiz__guest ced-handoff";
+    el.className = "bc-wiz__guest ced-handoff is-next";
     var head = doc.createElement("div");
     head.className = "ced-modal__head";
     var body = doc.createElement("div");
@@ -1464,21 +1540,42 @@
     el.appendChild(head); el.appendChild(body); el.appendChild(btns);
     bcWiz.box.appendChild(el);
     bcWiz.box.setAttribute("data-guest", kind);
-    bcWiz.guests.push({ el: el, kind: kind, title: title });
+    bcWiz.guests.push({ el: el, kind: kind, title: title, was: was });
+    /* one frame at is-next, so the move to is-here is a transition and not
+       the element's first paint */
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        /* Something can arrive over this stage before its own frame comes
+           round: a folder confirm asked from inside a file ask opens in
+           the same tick. Taking the place then would undo the step back
+           that the newer stage has made it take. */
+        var top = bcWizGuestTop();
+        if (!top || top.el !== el) return;
+        bcWizHere(el);
+        /* The dialog drew its arrow while this stage was still off to the
+           side, so the arrow is off by the distance the stage travelled.
+           Say so once the stage has stopped. */
+        window.setTimeout(function () { TOOL.repoint(); }, STAGE_MS + 40);
+      });
+    });
     return { head: head, body: body, btns: btns };
   }
-  /* Give the stage back. What was under it comes back as it was left. */
+  /* Give the stage back. What was under it comes back as it was left, with
+     the focus it had when this arrived. */
   function bcWizGuestClose() {
     var top = bcWiz && bcWiz.guests.pop();
     if (!top) return;
-    if (top.el.parentNode) top.el.parentNode.removeChild(top.el);
-    var under = bcWizGuestTop();
-    if (under) {
-      under.el.hidden = false;
-      bcWiz.box.setAttribute("data-guest", under.kind);
-    } else {
-      bcWizStepHidden(false);
-      bcWiz.box.removeAttribute("data-guest");
+    bcWizAway(top.el, "is-next");
+    bcWizDrop(top.el);
+    var under = bcWizFront();
+    bcWizHere(under);
+    var guest = bcWizGuestTop();
+    if (guest) bcWiz.box.setAttribute("data-guest", guest.kind);
+    else bcWiz.box.removeAttribute("data-guest");
+    /* the element that was focused before this stage arrived, if it is
+       still on the page and still the kind of thing that takes focus */
+    if (top.was && doc.body.contains(top.was) && top.was.focus) {
+      try { top.was.focus(); } catch (err) { /* a gone element refuses */ }
     }
   }
 

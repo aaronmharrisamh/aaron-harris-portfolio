@@ -4356,6 +4356,14 @@
      edit.export() from a page opened from disk still does. */
   AMH.tool.stageHost = function (fn) { hostFn = fn; };
 
+  /* Place the arrow again, because something under it moved.
+
+     The pointer follows a scroll and a resize on its own. A CSS transform
+     is neither, so a caller that moves a target has to say so. This is
+     about the pointer and not about the stage seam above: the shell hands
+     nothing over here, it only reports that the ground shifted. */
+  AMH.tool.repoint = function () { ptPlace(); };
+
   /* Work waiting from another page in this sitting is re-applied before anyone
      looks at the page.
 

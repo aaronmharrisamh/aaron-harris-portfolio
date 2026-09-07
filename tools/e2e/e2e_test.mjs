@@ -3358,16 +3358,16 @@ async function main() {
     AMH.tool.expectFiles(["blog/2693.html"]);
     window.__q3 = AMH.tool.handOff("blog/2693.html", new Error("fetch refused"));
     var box = document.querySelector('.bc-wizard');
-    var own = box.querySelector(':scope > .bc-wiz__body');
+    var own = box.querySelector(':scope > .bc-wiz__step');
     return { step: box.getAttribute('data-step'),
              guest: box.getAttribute('data-guest'),
              dialog: !!document.querySelector('.ced-handoff__zone'),
              boxes: document.querySelectorAll('.ced-modal').length,
              guests: document.querySelectorAll('.bc-wiz__guest').length,
-             /* the step waits under the guest rather than being drawn
-                again, so it is still here and it is hidden */
-             stepThere: !!own, stepHidden: own ? own.hidden : null,
-             stepShown: own ? getComputedStyle(own).display !== 'none' : null,
+             /* the step waits behind the guest rather than being drawn
+                again, so it is still here, moved away and off the keyboard */
+             stepThere: !!own, stepAway: own ? own.className : '',
+             stepInert: own ? (own.inert === true || own.getAttribute('aria-hidden') === 'true') : null,
              /* the names the suite reads still name the same things */
              head: (document.querySelector('.ced-handoff .ced-modal__head') || {}).textContent || '',
              btns: [...document.querySelectorAll('.ced-handoff .ced-modal__btns button')]
@@ -3378,9 +3378,10 @@ async function main() {
     stacked.step === "route" && stacked.guest === "file" && stacked.dialog === true &&
     stacked.boxes === 1 && stacked.guests === 1 && stacked.scrims === 1,
     JSON.stringify(stacked));
-  check("wizard: the step waits under the guest rather than being drawn again",
-    stacked.stepThere === true && stacked.stepHidden === true &&
-    stacked.stepShown === false, JSON.stringify(stacked));
+  check("wizard: the step waits behind the guest rather than being drawn again",
+    stacked.stepThere === true && /is-past/.test(stacked.stepAway) &&
+    !/is-here/.test(stacked.stepAway) && stacked.stepInert === true,
+    JSON.stringify(stacked));
   check("wizard: the stage carries the same names a box of its own carries",
     /FILE/.test(stacked.head) && /2693\.html/.test(stacked.head) &&
     JSON.stringify(stacked.btns) === '["Choose file","Use my repo folder","Cancel"]',
@@ -3390,26 +3391,118 @@ async function main() {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return new Promise(function (res) { setTimeout(function () {
       var box = document.querySelector('.bc-wizard');
-      var own = box && box.querySelector(':scope > .bc-wiz__body');
+      var own = box && box.querySelector(':scope > .bc-wiz__step');
       res({ dialog: !!document.querySelector('.ced-handoff__zone'),
             wizard: !!box,
             guests: document.querySelectorAll('.bc-wiz__guest').length,
             guestAttr: box ? box.getAttribute('data-guest') : 'no box',
             step: box ? box.getAttribute('data-step') : 'none',
-            /* the step comes back as it was left, and is visible again */
-            stepShown: own ? getComputedStyle(own).display !== 'none' : null,
-            btns: box ? [...box.querySelectorAll(':scope > .ced-modal__btns button')]
+            /* the step comes back as it was left, in place and answering
+               the keyboard again */
+            stepShown: own ? /is-here/.test(own.className) : null,
+            stepInert: own ? (own.inert === true) : null,
+            btns: own ? [...own.querySelectorAll('.ced-modal__btns button')]
               .map(function (b) { return b.textContent; }) : [],
             scrims: document.querySelectorAll('.ced-scrim').length });
-    }, 300); });
+    }, 600); });
   })()`, { awaitPromise: true });
   check("wizard: Escape closes the stage in front and leaves the step behind it",
     escFront.dialog === false && escFront.wizard === true &&
     escFront.step === "route" && escFront.scrims === 1 &&
     escFront.guests === 0 && escFront.guestAttr === null, JSON.stringify(escFront));
-  check("wizard: the step comes back visible, with its own buttons",
-    escFront.stepShown === true && escFront.btns.length > 0 &&
-    escFront.btns.indexOf("Cancel") !== -1, JSON.stringify(escFront));
+  check("wizard: the step comes back in place, answering the keyboard again",
+    escFront.stepShown === true && escFront.stepInert === false &&
+    escFront.btns.length > 0 && escFront.btns.indexOf("Cancel") !== -1,
+    JSON.stringify(escFront));
+
+  // PW4e. FOCUS AND TAB GO WITH THE STAGE IN FRONT.
+  // Two stages are in the box while one is leaving, so a trap that read
+  // the whole box would walk Tab onto the buttons of the stage on its way
+  // out. The stage that stepped back is inert, and the focus list is
+  // scoped to the one in front.
+  const focusIn = await evaluate(`(function () {
+    var box = document.querySelector('.bc-wizard');
+    var own = box.querySelector(':scope > .bc-wiz__step');
+    var mark = own.querySelector('.ced-modal__btns button');
+    mark.focus();
+    window.__mark = mark.textContent;
+    window.__boxH = Math.round(box.getBoundingClientRect().height);
+    AMH.tool.expectFiles(["blog/2698.html"]);
+    window.__q6 = AMH.tool.handOff("blog/2698.html", new Error("fetch refused"));
+    return new Promise(function (res) { setTimeout(function () {
+      var guest = document.querySelector('.bc-wiz__guest');
+      /* four Tabs: focus must stay inside the stage in front on every one */
+      var strayed = false;
+      for (var i = 0; i < 4; i++) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+        if (own.contains(document.activeElement)) strayed = true;
+      }
+      res({ marked: window.__mark,
+            guestHasFocus: guest ? guest.contains(document.activeElement) : null,
+            strayed: strayed,
+            stepInert: own.inert === true,
+            boxH: Math.round(box.getBoundingClientRect().height),
+            wasH: window.__boxH });
+    }, 700); });
+  })()`, { awaitPromise: true });
+  check("wizard: Tab answers the stage in front and never the one behind it",
+    focusIn.guestHasFocus === true && focusIn.strayed === false &&
+    focusIn.stepInert === true, JSON.stringify(focusIn));
+  check("wizard: the box does not grow when a stage arrives in it",
+    focusIn.boxH === focusIn.wasH, JSON.stringify(focusIn));
+
+  const focusBack = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      var box = document.querySelector('.bc-wizard');
+      res({ focused: document.activeElement ? document.activeElement.textContent : '',
+            marked: window.__mark,
+            /* nothing is left in the box once a stage has gone */
+            left: document.querySelectorAll('.bc-wiz__guest').length,
+            boxH: box ? Math.round(box.getBoundingClientRect().height) : 0 });
+    }, 800); });
+  })()`, { awaitPromise: true });
+  check("wizard: focus goes back to what held it before the stage arrived",
+    focusBack.focused === focusBack.marked && focusBack.marked.length > 0,
+    JSON.stringify(focusBack));
+  check("wizard: a stage that has gone is not left in the box",
+    focusBack.left === 0 && focusBack.boxH === focusIn.wasH,
+    JSON.stringify(focusBack));
+
+  // PW4f. REDUCED MOTION. Every stage still arrives and still leaves; it
+  // does not travel to do it, and none is left behind.
+  await send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const calm = await evaluate(`(function () {
+    AMH.tool.expectFiles(["blog/2699.html"]);
+    window.__q7 = AMH.tool.handOff("blog/2699.html", new Error("fetch refused"));
+    return new Promise(function (res) { setTimeout(function () {
+      var g = document.querySelector('.bc-wiz__guest');
+      res({ arrived: !!g,
+            here: g ? /is-here/.test(g.className) : null,
+            /* the fade stays, the travel goes */
+            moved: g ? getComputedStyle(g).transform : 'none' });
+    }, 600); });
+  })()`, { awaitPromise: true });
+  check("wizard: with reduced motion a stage still arrives, and does not travel",
+    calm.arrived === true && calm.here === true &&
+    (calm.moved === "none" || /matrix\(1, 0, 0, 1, 0, 0\)/.test(calm.moved)),
+    JSON.stringify(calm));
+  const calmGone = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return new Promise(function (res) { setTimeout(function () {
+      res({ left: document.querySelectorAll('.bc-wiz__guest').length,
+            step: (document.querySelector('.bc-wizard') || {}).getAttribute
+              ? document.querySelector('.bc-wizard').getAttribute('data-step') : 'none' });
+    }, 800); });
+  })()`, { awaitPromise: true });
+  check("wizard: with reduced motion a stage still leaves, and is not left behind",
+    calmGone.left === 0 && calmGone.step === "route", JSON.stringify(calmGone));
+  await send("Emulation.setEmulatedMedia", { features: [] });
+  await evaluate(`Promise.all([
+    window.__q6.then(function () { return 1; }, function () { return 0; }),
+    window.__q7.then(function () { return 1; }, function () { return 0; })])`,
+    { awaitPromise: true });
 
   const escAlone2 = await evaluate(`(function () {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -6675,8 +6768,8 @@ async function main() {
               scrims: document.querySelectorAll('.ced-scrim').length,
               guests: gs.length,
               guestAttr: document.querySelector('.bc-wizard').getAttribute('data-guest'),
-              /* the one underneath waits, hidden, exactly as the step does */
-              shown: gs.map(function (g) { return getComputedStyle(g).display !== 'none'; }),
+              /* the one underneath waits, moved away, exactly as the step does */
+              shown: gs.map(function (g) { return /is-here/.test(g.className); }),
               heads: gs.map(function (g) {
                 return (g.querySelector('.ced-modal__head') || {}).textContent || ''; }) });
       }, 600); });
@@ -6695,9 +6788,9 @@ async function main() {
         var gs = [...document.querySelectorAll('.bc-wiz__guest')];
         res({ guests: gs.length,
               guestAttr: document.querySelector('.bc-wizard').getAttribute('data-guest'),
-              shown: gs.map(function (g) { return getComputedStyle(g).display !== 'none'; }),
+              shown: gs.map(function (g) { return /is-here/.test(g.className); }),
               zone: !!document.querySelector('.ced-handoff__zone') });
-      }, 400); });
+      }, 700); });
     })()`, { awaitPromise: true });
     check("stages: Escape gives back the top stage and the file ask comes back",
       popOne.guests === 1 && popOne.guestAttr === "file" &&
@@ -6708,13 +6801,13 @@ async function main() {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       return new Promise(function (res) { setTimeout(function () {
         var box = document.querySelector('.bc-wizard');
-        var own = box && box.querySelector(':scope > .bc-wiz__body');
+        var own = box && box.querySelector(':scope > .bc-wiz__step');
         res({ guests: document.querySelectorAll('.bc-wiz__guest').length,
               guestAttr: box ? box.getAttribute('data-guest') : 'no box',
               step: box ? box.getAttribute('data-step') : 'none',
-              stepShown: own ? getComputedStyle(own).display !== 'none' : null,
+              stepShown: own ? /is-here/.test(own.className) : null,
               scrims: document.querySelectorAll('.ced-scrim').length });
-      }, 400); });
+      }, 700); });
     })()`, { awaitPromise: true });
     check("stages: the last stage given back reveals the step, on the one ground",
       popTwo.guests === 0 && popTwo.guestAttr === null && popTwo.step === "route" &&
