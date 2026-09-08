@@ -2757,12 +2757,15 @@ async function main() {
     composerUI.panel && composerUI.tabs === 3 && composerUI.position === "fixed" &&
     composerUI.write === "flex" && composerUI.images === "none",
     JSON.stringify(composerUI));
-  // The layout reads top to bottom: the title row with the posted group on
-  // the right, the toolbar and body, the tags, the view row below, the
-  // buttons. The eleven toolbar buttons are by click.
+  // The layout reads top to bottom: the views, the toolbar and body, the
+  // tags, the Advanced section, the buttons. A post needs a body and nothing
+  // else, so the title and the posted group are inside Advanced and shut.
+  // The check opens it, because what it measures is in there.
   const layout = await evaluate(`(() => {
     const panel = document.querySelector('.bc-panel');
     const order = [...panel.children].map(el => el.className.split(' ')[0]);
+    const advShut = panel.querySelector('.bc-adv__body').hidden;
+    panel.querySelector('.bc-adv__sum').click();
     const title = panel.querySelector('.bc-title'), posted = panel.querySelector('.bc-posted');
     const t = title.getBoundingClientRect(), p = posted.getBoundingClientRect();
     return {
@@ -2773,13 +2776,27 @@ async function main() {
       postedRight: p.left > t.right && Math.abs(p.bottom - t.bottom) < 4,
       widths: ['.bc-date', '.bc-time', '.bc-zone'].map(s => Math.round(panel.querySelector(s).getBoundingClientRect().width)),
       counts: !!panel.querySelector('.bc-counts'), tags: !!panel.querySelector('.bc-tags input'),
+      advShut: advShut,
+      advSays: panel.querySelector('.bc-adv__what').textContent,
+      chevron: !!panel.querySelector('svg.bc-adv__chev'),
+      tabRoles: panel.querySelector('.bc-tabs').getAttribute('role') + ':' +
+        [...panel.querySelectorAll('.bc-tab')].map(b => b.textContent).join(','),
     };
   })()`);
   // The grip is last, and has to be: it lies over the button row's lower
   // edge, inside that row's own bottom padding, so nothing may follow it.
-  check("composer: the layout is head, title row, write, images, preview, tags, view row, status, buttons, grip",
-    layout.order.join(" ") === "bc-head ced-modal__x bc-fields bc-write bc-images bc-preview bc-tags bc-tabs bc-status bc-btns ced-grip",
+  check("composer: the layout is head, views, write, images, preview, tags, advanced, status, buttons, grip",
+    layout.order.join(" ") === "bc-head ced-modal__x bc-tabs bc-write bc-images bc-preview bc-tags bc-adv bc-status bc-btns ced-grip",
     layout.order.join(" "));
+  // A quick note needs a body and nothing else, so the article furniture is
+  // shut. The row names what it holds, which is what tells a reader the
+  // first heading was taken as the name without a control to look at.
+  check("composer: the views are tabs at the top, and the article fields start shut",
+    layout.advShut === true && layout.chevron === true &&
+    layout.tabRoles === "tablist:Write,Preview,Images" &&
+    /No title/.test(layout.advSays),
+    JSON.stringify({ advShut: layout.advShut, chevron: layout.chevron,
+                     tabs: layout.tabRoles, says: layout.advSays }));
   check("composer: the title is optional, and the posted group sits to its right with room for three inputs",
     layout.placeholder === "Title (optional)" && layout.postedRight &&
     layout.widths.every((w, i) => w >= [70, 80, 55][i]) && layout.counts && layout.tags,
@@ -2800,22 +2817,46 @@ async function main() {
       return e.defaultPrevented;
     };
     const name = (el) => el.className.split(' ')[0] || el.tagName.toLowerCase();
+    /* Two rings, because the title is in the Advanced section. With that
+       shut the ring starts at the body, which is where a post starts; with
+       it open the title leads, as it always did.
+
+       The section is driven by its own control both times. Poking .hidden
+       would move the section without moving the tab order, and then the
+       ring and the tab order would disagree. */
+    const sum = panel.querySelector('.bc-adv__sum');
+    if (!panel.querySelector('.bc-adv__body').hidden) sum.click();
+    const shutRing = (function () {
+      panel.querySelector('.bc-write textarea').focus();
+      var out = [];
+      for (var i = 0; i < 4; i++) { press(false); out.push(name(document.activeElement)); }
+      return out;
+    })();
+    sum.click();
     panel.querySelector('.bc-title').focus();
     const fwd = [], views = [], prevented = [];
     for (let i = 0; i < 5; i++) { prevented.push(press(false)); fwd.push(name(document.activeElement)); views.push(panel.getAttribute('data-tab')); }
     const back = [];
     for (let i = 0; i < 5; i++) { press(true); back.push(name(document.activeElement)); }
     const stops = [...panel.querySelectorAll('input, textarea, button, [tabindex]')].filter(el => el.tabIndex !== -1);
-    return { fwd, views, back, prevented: prevented.every(Boolean), stops: stops.map(name), modal: panel.getAttribute('aria-modal') };
+    return { fwd, views, back, prevented: prevented.every(Boolean), stops: stops.map(name),
+             shutRing, modal: panel.getAttribute('aria-modal') };
   })()`);
+  check("composer: with the article fields shut, the ring starts at the body",
+    ring.shutRing.join(" ") === "bc-drop ced-btn ced-btn textarea",
+    JSON.stringify(ring.shutRing));
   check("composer: TAB walks title, body, images, Publish, Close and back to the title",
     ring.modal === "true" && ring.prevented &&
     ring.fwd.join(" ") === "textarea bc-drop ced-btn ced-btn bc-title" &&
     ring.views.join(" ") === "write images images images write",
     JSON.stringify(ring).slice(0, 220));
+  // stops is the panel in DOM order, not the ring in walking order. The
+  // title used to be the panel's first field; it is inside Advanced now,
+  // under the tags, so it reads after the images area and before the
+  // buttons. The ring itself is unchanged, which is what back proves.
   check("composer: shift and TAB walks the ring backwards, and nothing else in the panel is a stop",
     ring.back.join(" ") === "ced-btn ced-btn bc-drop textarea bc-title" &&
-    ring.stops.join(" ") === "bc-title textarea bc-drop ced-btn ced-btn",
+    ring.stops.join(" ") === "textarea bc-drop bc-title ced-btn ced-btn",
     JSON.stringify(ring).slice(0, 220));
 
   // The time field follows the clock until touched, holds what is typed,
@@ -2889,6 +2930,8 @@ async function main() {
   await sleep(300);
   const narrow = await evaluate(`(() => {
     const panel = document.querySelector('.bc-panel');
+    /* the row is inside Advanced now, so it is opened to be measured */
+    if (panel.querySelector('.bc-adv__body').hidden) panel.querySelector('.bc-adv__sum').click();
     const f = panel.querySelector('.bc-fields');
     return { w: innerWidth, overflow: f.scrollWidth > f.clientWidth + 1 || panel.scrollWidth > panel.clientWidth + 1,
              title: Math.round(panel.querySelector('.bc-title').getBoundingClientRect().width),
@@ -7423,7 +7466,10 @@ async function main() {
   // F2. the composer, and the wizard it opens
   await evaluate(`window.edit.blog()`);
   await sleep(700);
-  const frComposer = await evaluate(`window.__FRAME('.bc-panel', '.bc-fields', '.bc-btns')`);
+  /* .bc-head, not .bc-fields. The head band held the title and the posted
+     group too, and the rule closed both; those moved into Advanced, so the
+     band is the surface's own name and the rule closes that. */
+  const frComposer = await evaluate(`window.__FRAME('.bc-panel', '.bc-head', '.bc-btns')`);
   await evaluate(`document.querySelector('.bc-title').value = 'Frame check'`);
   await evaluate(`document.querySelector('.bc-write textarea').value = 'A body for the frame check.'`);
   await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish').click()`);
@@ -7885,6 +7931,55 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(500);
   await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+
+  // ============ THE FIRST HEADING IS THE TITLE ============
+  // A lone # on the first line of a Markdown post is that post's own
+  // heading, so it is that post's name. There is no checkbox: a heading you
+  // wrote and a name you meant are the same thing, and the title field in
+  // Advanced is the way to say otherwise.
+  //
+  // ONE hash. markdown.js already holds the rule: the post's own title is
+  // the article's h2, so a heading in the body starts one level down. # is
+  // the top level a body can use, and ## is a section inside a post.
+  /* the hand-over block above closes the composer, so this opens its own */
+  await evaluate(`window.edit.blog()`);
+  await sleep(700);
+  const heads = await evaluate(`(function () {
+    var nl = String.fromCharCode(10);
+    var panel = document.querySelector(".bc-panel");
+    if (!panel) return { none: "no composer" };
+    var body = panel.querySelector(".bc-write textarea");
+    var says = panel.querySelector(".bc-adv__what");
+    function put(v) {
+      body.value = v;
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+      return says.textContent;
+    }
+    var out = {};
+    out.none = put("Just a quick thought.");
+    out.h1 = put(["# The Quick Brown Fox Jumps Over", "", "Body."].join(nl));
+    out.h2 = put(["## Not the title", "", "Body."].join(nl));
+    /* a stray blank line at the top of a post is a habit, not a decision */
+    out.blank = put(["", "", "#   Spaced Out   ", "", "Body."].join(nl));
+    /* a typed title is the way to mean something other than the heading */
+    var title = panel.querySelector(".bc-title");
+    title.value = "A Typed Title";
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    out.typed = says.textContent;
+    title.value = "";
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    put("");
+    return out;
+  })()`);
+  check("heading: a lone # on the first line is the post's name, and ## is not",
+    /No title/.test(heads.none) &&
+    heads.h1 === "Title from the first heading: The Quick Brown Fox Jumps Over" &&
+    /No title/.test(heads.h2) &&
+    heads.blank === "Title from the first heading: Spaced Out" &&
+    heads.typed === "Title: A Typed Title",
+    JSON.stringify(heads));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
   const failed = results.filter((r) => !r.ok).length;

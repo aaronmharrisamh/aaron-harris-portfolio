@@ -83,6 +83,7 @@
   var HL_SLUG = "blog-highlights";
   var HL_COUNT = 4;
   var bcPanel = null, bcScrim = null, bcBody = null, bcDate = null, bcTitle = null;
+  var bcAdv = null, bcAdvSum = null, bcAdvBody = null;   /* the advanced section */
   var bcTime = null, bcZone = null, bcTags = null, bcCountsEl = null;
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
@@ -388,15 +389,16 @@
     "background:var(--panel);border:1px solid var(--line);border-radius:14px;" +
     "box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
     ".bc-panel[hidden]{display:none;}" +
-    ".bc-head{display:flex;align-items:baseline;gap:.7rem;padding:.85rem 3rem .5rem 1.1rem;}" +
+    ".bc-head{display:flex;align-items:baseline;gap:.7rem;padding:.85rem 3rem .6rem 1.1rem;" +
+    "border-bottom:1px solid var(--line);}" +
     ".bc-head .ced-slug{font-weight:800;color:var(--text);}" +
     ".bc-head .ced-hint{font-size:.7rem;color:var(--dim);}" +
-    /* The composer's head band is two rows: what this surface is, and what
-       the post is. The rule closes both, because a rule between the title
-       of the surface and the title of the post would cut the name from the
-       thing it names. Below it is the post itself. */
-    ".bc-fields{display:flex;flex-wrap:wrap;gap:.5rem .8rem;align-items:flex-end;padding:0 1.1rem .55rem;" +
-    "border-bottom:1px solid var(--line);}" +
+    /* The head band is one row again. It held the title and the posted
+       group too, and the rule closed both, because a rule between the title
+       of the surface and the title of the post would have cut the name from
+       the thing it names. Those two moved into Advanced, so the band is the
+       surface's own name and the rule closes that. */
+    ".bc-fields{display:flex;flex-wrap:wrap;gap:.5rem .8rem;align-items:flex-end;padding:.6rem 1.1rem .1rem;}" +
     ".bc-fields input{background:var(--bg-deep);color:var(--text);border:1px solid var(--line);" +
     "border-radius:8px;padding:.45rem .7rem;font:12.5px Consolas,'Courier New',monospace;}" +
     ".bc-fields input:focus-visible{outline:2px solid var(--accent);}" +
@@ -421,10 +423,32 @@
     ".bc-tags input:focus-visible{outline:2px solid var(--accent);}" +
     ".bc-counts{position:absolute;right:.9rem;bottom:.5rem;font:10.5px Consolas,monospace;" +
     "color:var(--dim);pointer-events:none;}" +
-    ".bc-tabs{display:flex;gap:.3rem;padding:.5rem 1.1rem 0;}" +
-    ".bc-tab{padding:.3rem .8rem;border-radius:999px;border:1px solid var(--line);" +
-    "background:var(--bg-deep);color:var(--muted);font:600 .72rem var(--font);cursor:pointer;}" +
-    ".bc-tab.on{border-color:var(--accent);color:var(--accent-bright);}" +
+    /* A tab strip, not a row of pills. The strip's own line is the baseline
+       the chosen tab sits on, and the chosen tab breaks it. */
+    ".bc-tabs{display:flex;gap:.1rem;padding:.45rem 1.1rem 0;" +
+    "border-bottom:1px solid var(--line);}" +
+    ".bc-tab{padding:.4rem .85rem .7rem;border:0;border-bottom:2px solid transparent;" +
+    "margin-bottom:-1px;background:none;color:var(--muted);" +
+    "font:600 .78rem var(--font);cursor:pointer;transition:color .2s,border-color .2s;}" +
+    ".bc-tab:hover{color:var(--text);}" +
+    ".bc-tab.on{color:var(--accent-bright);border-bottom-color:var(--accent);}" +
+    ".bc-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}" +
+    /* ADVANCED, shut by default. The chevron turns rather than swapping for
+       a second glyph, so there is one mark and one meaning. */
+    ".bc-adv{margin:.5rem 1.1rem 0;}" +
+    ".bc-adv__sum{display:flex;align-items:center;gap:.45rem;width:100%;padding:.35rem 0;" +
+    "border:0;background:none;color:var(--muted);font:600 .72rem var(--font);" +
+    "cursor:pointer;text-align:left;}" +
+    ".bc-adv__sum:hover{color:var(--text);}" +
+    ".bc-adv__sum:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}" +
+    ".bc-adv__chev{width:13px;height:13px;flex:none;transition:transform .2s var(--ease);}" +
+    ".bc-adv.is-open .bc-adv__chev{transform:rotate(90deg);}" +
+    ".bc-adv__word{flex:none;letter-spacing:.08em;text-transform:uppercase;}" +
+    /* what is inside it, when there is something to say */
+    ".bc-adv__what{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" +
+    "color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0;}" +
+    ".bc-adv__body[hidden]{display:none;}" +
+    "@media (prefers-reduced-motion:reduce){.bc-adv__chev{transition:none;}}" +
     ".bc-write,.bc-images,.bc-preview{flex:1;min-height:0;display:none;flex-direction:column;" +
     "margin:0 1.1rem;}" +
     ".bc-write{position:relative;}" +
@@ -453,9 +477,10 @@
     ".bc-preview{overflow-y:auto;display:none;background:var(--bg);border:1px solid var(--line);" +
     "border-radius:8px;padding:.4rem 1.2rem 1.2rem;}" +
     ".bc-panel[data-tab=preview] .bc-preview{display:block;}" +
-    ".bc-status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
+    /* the bottom of this is the room above the rule that closes the panel */
+    ".bc-status{padding:.35rem 1.1rem .55rem;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
     ".bc-imgnote{padding:.4rem 0;font-size:.7rem;color:var(--muted);}" +
-    ".bc-btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;" +
+    ".bc-btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.85rem 1.1rem .9rem;" +
     "border-top:1px solid var(--line);}" +
     /* Publish is the one move, and it is filled. The scope is this row, so
        the Insert tag button on each image card stays outlined: a card is a
@@ -724,10 +749,43 @@
   }
 
   var bcTabBtns = [];
+  /* ---------------- the advanced section ----------------
+     Shut by default, because a post needs a body and nothing else. It opens
+     itself for a post that carries a real title, which is the one case where
+     what it hides is a thing you came to change. It does NOT open for a date,
+     a time or a zone: every new post arrives with all three filled in, so
+     opening on those would mean it was never shut. */
+  function bcAdvIsOpen() { return !!(bcAdvBody && !bcAdvBody.hidden); }
+  function bcAdvOpen(open) {
+    if (!bcAdvBody) return;
+    bcAdvBody.hidden = !open;
+    bcAdv.classList.toggle("is-open", !!open);
+    bcAdvSum.setAttribute("aria-expanded", open ? "true" : "false");
+    /* bcNoTab took the title out of the tab order when the panel was built,
+       because the section was shut. The ring and the tab order have to say
+       the same thing, so opening puts it back. */
+    if (bcTitle) bcTitle.tabIndex = open ? 0 : -1;
+    bcAdvSync();
+  }
+  /* Say what is inside it. A typed title wins, then the first heading, and
+     with neither the name is the first words of the body. */
+  function bcAdvSync() {
+    if (!bcAdvSum) return;
+    var what = bcAdvSum.querySelector(".bc-adv__what");
+    var typed = bcTitle ? bcTitle.value.trim() : "";
+    var head = bcBody ? bcHeadingTitle(bcBody.value, bcMode) : "";
+    var say = typed ? "Title: " + typed
+      : head ? "Title from the first heading: " + head
+      : "No title. The name comes from the first words.";
+    if (say.length > 70) say = say.slice(0, 69) + "\u2026";
+    what.textContent = say;
+  }
   function bcTabsSync() {
     var cur = bcPanel.getAttribute("data-tab");
     bcTabBtns.forEach(function (b) {
-      b.classList.toggle("on", b.getAttribute("data-tab") === cur);
+      var on = b.getAttribute("data-tab") === cur;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
     });
     if (cur === "preview") bcRenderPreview();
   }
@@ -1032,6 +1090,7 @@
     bcDate.value = d.date || bcTodayYYMMDD();
     bcTitle.value = d.title || "";
     bcBody.value = d.body;
+    bcAdvOpen(!!bcTitle.value.trim());
     bcTags.value = d.tags || "";
     bcZone.value = d.zone || bcZoneDefault();
     if (d.time) { bcTimeTouched = true; bcStopTicker(); bcTime.value = d.time; }
@@ -1059,9 +1118,20 @@
      A stop that is disabled, which Publish is once a bundle is built, is
      skipped. */
   function bcRing() {
-    return [bcTitle, bcBody, bcDrop, bcPublishBtn, bcCloseBtn].filter(function (el) {
-      return el && !el.disabled;
-    });
+    /* The title lives in the Advanced section, so with that shut it is not a
+       stop and the ring starts at the body, which is where a post starts.
+
+       bcDrop is NOT the same case and stays in either way: it is hidden with
+       its own view, and landing on it is what shows that view.
+
+       This asks the section and never the layout. bcNoTab runs the ring at
+       build time, before the panel is on screen, when nothing has a size
+       yet: a ring measured then is empty, and every stop in the panel is
+       taken out of the tab order. */
+    var ring = bcAdvIsOpen()
+      ? [bcTitle, bcBody, bcDrop, bcPublishBtn, bcCloseBtn]
+      : [bcBody, bcDrop, bcPublishBtn, bcCloseBtn];
+    return ring.filter(function (el) { return el && !el.disabled; });
   }
   /* The images area lives in its own view, so landing on it shows that
      view, and landing back on the title or the body shows the write view. */
@@ -1153,7 +1223,37 @@
     x.addEventListener("click", bcRequestClose);
     bcPanel.appendChild(x);
 
-    /* the title row: the title, and on the right the posted group */
+    /* THE VIEWS, AT THE TOP.
+       Write first, because a post is written before it is looked at, then
+       Preview beside it, then Images. They were under the body, which is
+       where a foot control goes and not where a reader looks for a view.
+
+       role=tablist and aria-selected are what make them tabs to a screen
+       reader as well as to the eye. They stay out of the tab ring: the
+       ring is the order a post is written in, and a view is a click. */
+    var tabs = doc.createElement("div");
+    tabs.className = "bc-tabs";
+    tabs.setAttribute("role", "tablist");
+    bcTabBtns = [];
+    [["write", "Write"], ["preview", "Preview"], ["images", "Images"]].forEach(function (t) {
+      var b = doc.createElement("button");
+      b.type = "button"; b.className = "bc-tab";
+      b.setAttribute("role", "tab");
+      b.setAttribute("data-tab", t[0]);
+      b.tabIndex = -1;
+      b.textContent = t[1];
+      b.addEventListener("click", function () {
+        bcPanel.setAttribute("data-tab", t[0]);
+        bcTabsSync();
+      });
+      bcTabBtns.push(b);
+      tabs.appendChild(b);
+    });
+    bcPanel.appendChild(tabs);
+
+    /* What an ARTICLE needs and a note does not: the title, and the posted
+       group. It is built here and put inside the Advanced section below the
+       tags, because a post does not need any of it to be published. */
     var fields = doc.createElement("div");
     fields.className = "bc-fields";
     bcTitle = doc.createElement("input");
@@ -1164,6 +1264,7 @@
          pipes (entry delimiter) and no angle brackets (a script-closing
          sequence in a title would truncate the manifest for every visitor) */
       if (/[|<>]/.test(bcTitle.value)) bcTitle.value = bcTitle.value.replace(/[|<>]/g, "");
+      bcAdvSync();
     });
     fields.appendChild(bcTitle);
     var posted = doc.createElement("div");
@@ -1198,7 +1299,6 @@
     postedRow.appendChild(bcZone);
     posted.appendChild(postedRow);
     fields.appendChild(posted);
-    bcPanel.appendChild(fields);
 
     /* the write view: the Markdown toolbar, the body, the counts */
     var writeEl = doc.createElement("div");
@@ -1231,6 +1331,9 @@
         "Drop images on the Images view, then place them with [img####,caption|alt] tags on their own lines. " +
         "{expandformore} and {pagebreak} alone on a line tell the feed where to fold.";
     bcBody.addEventListener("input", bcRefreshCounts);
+    /* the first heading is the name, so the section that says so has to
+       keep up with the line that decides it */
+    bcBody.addEventListener("input", bcAdvSync);
     writeEl.appendChild(bcBody);
     bcCountsEl = doc.createElement("span");
     bcCountsEl.className = "bc-counts";
@@ -1324,23 +1427,38 @@
     bcTagsWire();
     bcPanel.appendChild(tagsEl);
 
-    /* the view row, below the body, so a switch never moves the buttons */
-    var tabs = doc.createElement("div");
-    tabs.className = "bc-tabs";
-    bcTabBtns = [];
-    [["write", "Write"], ["images", "Images"], ["preview", "Preview"]].forEach(function (t) {
-      var b = doc.createElement("button");
-      b.type = "button"; b.className = "bc-tab";
-      b.setAttribute("data-tab", t[0]);
-      b.textContent = t[1];
-      b.addEventListener("click", function () {
-        bcPanel.setAttribute("data-tab", t[0]);
-        bcTabsSync();
-      });
-      bcTabBtns.push(b);
-      tabs.appendChild(b);
-    });
-    bcPanel.appendChild(tabs);
+    /* ADVANCED: what an article needs, out of the way until it is wanted.
+       A post needs a body and nothing else. The title and the posted group
+       were the first thing on screen, which made every quick note start
+       with a field to skip.
+
+       It names what it holds when it holds something, which is what tells
+       a reader the first heading was taken as the title without a control
+       to look at, and what answers "why is this shut when it has a title
+       in it". */
+    bcAdv = doc.createElement("div");
+    bcAdv.className = "bc-adv";
+    bcAdvSum = doc.createElement("button");
+    bcAdvSum.type = "button";
+    bcAdvSum.className = "bc-adv__sum";
+    bcAdvSum.tabIndex = -1;
+    bcAdvSum.setAttribute("aria-expanded", "false");
+    bcAdvSum.innerHTML =
+      '<svg class="bc-adv__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<polyline points="9 5 16 12 9 19"/></svg>' +
+      '<span class="bc-adv__word">Advanced</span>' +
+      '<span class="bc-adv__what"></span>';
+    bcAdvSum.addEventListener("click", function () { bcAdvOpen(!bcAdvIsOpen()); });
+    bcAdv.appendChild(bcAdvSum);
+    bcAdvBody = doc.createElement("div");
+    bcAdvBody.className = "bc-adv__body";
+    bcAdvBody.hidden = true;
+    bcAdvBody.appendChild(fields);
+    bcAdv.appendChild(bcAdvBody);
+    bcPanel.appendChild(bcAdv);
+    /* shut, and already saying what is in it */
+    bcAdvOpen(false);
 
     bcStatus = doc.createElement("div");
     bcStatus.className = "bc-status";
@@ -2447,6 +2565,35 @@
     var t = words.slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "");
     return t + (words.length > 6 ? "..." : "");
   }
+  /* THE FIRST HEADING IS THE TITLE.
+
+     A lone # on the first line of a Markdown post is that post's own
+     heading, so it is that post's name. There is no checkbox: a heading you
+     wrote and a name you meant are the same thing, and the title field in
+     Advanced is the way to say otherwise.
+
+     ONE hash, and no more. markdown.js already holds the rule: "the post's
+     own title is the article's h2, so a heading in the body starts one
+     level down". # is therefore the top level a body can use, and ## is a
+     section inside a post rather than the name of it.
+
+     The heading STAYS in the body and renders once. It supplies the name
+     and not the markup: bcPostMarkup writes its own title heading from
+     post.title, so putting the text there as well would print it twice. */
+  var BC_H1_RE = /^[ \t]*#[ \t]+(.+?)[ \t]*$/;
+  function bcHeadingTitle(source, format) {
+    if (format !== "md") return "";
+    var lines = String(source || "").split(/\r?\n/);
+    var i = 0;
+    /* the first line with something on it: a stray blank line at the top of
+       a post is a habit, not a decision */
+    while (i < lines.length && !lines[i].trim()) i++;
+    if (i >= lines.length) return "";
+    var m = BC_H1_RE.exec(lines[i]);
+    if (!m) return "";
+    return m[1].replace(/[|<>]/g, "").trim();
+  }
+
   /* The tags as stored: no #, one space between, no repeats. */
   function bcTagsClean(text) {
     var seen = {}, out = [];
@@ -2780,6 +2927,9 @@
         bcDate.value = entry.date;
         bcTitle.value = post.title;
         bcBody.value = source;
+        /* it opens for a TITLE and for nothing else: every post arrives with
+           a date, a time and a zone, so opening on those would never shut */
+        bcAdvOpen(!!bcTitle.value.trim());
         bcRefreshCounts();
         bcLoadPublishedImages(source, entry.date);
         bcSetStatus(post.format === "html"
@@ -3599,7 +3749,7 @@
     var managed = TOOL.pages.map(function (pg) { return pg.path; });
     var record = {
       kind: rec.kind, edit: !!rec.edit, id: rec.id || "", zip: zipName, url: rec.url || "",
-      stamp: rec.stamp || "", route: route, wrote: [], fellBack: "",
+      stamp: rec.stamp || "", route: route, wrote: [], fellBack: bcTakeFellBack(),
       indexShort: bcIndexShort,
       spliced: names.filter(function (n) { return managed.indexOf(n) !== -1; }),
       regenerated: names.filter(function (n) {
@@ -3696,6 +3846,48 @@
     });
   }
 
+  /* Get the repo folder before the build, and say what happened if it was
+     not given. bcFellBack is read once, by the build that follows, and is
+     cleared here so a second publish never inherits the first one's word. */
+  /* Say it on the STEP, not on the composer. bcSetStatus writes to the
+     composer's status line, and the composer is hidden behind the wizard
+     from the moment Publish is pressed, so a word put there is a word the
+     reader cannot see. The step's own buttons go dead while it waits: the
+     choice is made, and a live-looking button over an open picker is a lie. */
+  function bcWizWaiting(say) {
+    if (!bcWiz) return;
+    Array.prototype.forEach.call(bcWiz.btns.querySelectorAll("button"),
+      function (b) { b.disabled = true; });
+    var p = bcWiz.body.querySelector(".bc-wiz__wait");
+    if (!p) {
+      p = doc.createElement("p");
+      p.className = "bc-wiz__note bc-wiz__wait";
+      bcWiz.body.appendChild(p);
+    }
+    p.textContent = say;
+  }
+  var bcFellBack = "";
+  /* Read once. bcFinishBundle serves a rebuild and a delete as well as a
+     publish, and neither of those asks for a folder, so a word left behind
+     would be told about a job that never fell back. bcDeliver may still
+     replace it: a write that fails after the pick is a later fact. */
+  function bcTakeFellBack() { var s = bcFellBack; bcFellBack = ""; return s; }
+  function bcFolderFirst(chosen) {
+    bcFellBack = "";
+    if (chosen !== BC_ROUTE_FOLDER || TOOL.repoWriteReady()) return Promise.resolve(chosen);
+    bcWizWaiting("Waiting for the repo folder. Choose it in the box your browser opened.");
+    return TOOL.pickRepoWrite().then(function (handle) {
+      if (handle) return chosen;
+      bcFellBack = "The folder was not chosen, so the bundle was downloaded instead.";
+      return BC_ROUTE_ZIP;
+    }, function (err) {
+      bcFellBack = (err && err.message ? err.message : String(err)) +
+        " The bundle was downloaded instead.";
+      console.warn("[blog] folder pick refused: " + bcFellBack);
+      return BC_ROUTE_ZIP;
+    });
+  }
+
   /* ---------------- publish: a new post, or an edited one again ---------------- */
   function bcPublish() {
     var date = bcDate.value.trim();
@@ -3717,7 +3909,11 @@
     var tags = bcTagsClean(bcTags.value);
     /* the title is optional; the manifest still needs a name for the post,
        and the article's empty data-title says the name was derived */
-    var entryTitle = title || bcDerivedTitle(source, format);
+    /* A typed title first, then the first heading, then the first words.
+       The heading is the better name of the two it can derive: the words
+       run out at six and take whatever follows the heading with them, so a
+       short heading used to come out with body text stuck to it. */
+    var entryTitle = title || bcHeadingTitle(source, format) || bcDerivedTitle(source, format);
     /* the tag check runs on the rendered HTML, so raw HTML inside Markdown
        is still balanced before it reaches a page */
     var rendered = format === "md" ? AMH.markdown.render(source) : source;
@@ -3788,7 +3984,24 @@
     bcPanelAway();
     bcWizJob("PUBLISH", bcEditing ? "This post again, and every page it touches"
                                   : "A new post, and every page it touches");
+    /* THE FOLDER IS ASKED FOR ON THE PRESS.
+
+       It used to be asked for at the END, inside bcDeliver, once the bundle
+       was already built. Measured, that left the box on the Progress step
+       with no row current and the heartbeat reading "Finishing up..." for
+       as long as the picker was open: rows ticked to 2181ms, and nothing
+       moved again until 4563ms. A wizard whose job is to narrate a publish
+       went quiet at the one moment the reader was waiting.
+
+       Asked here, the dialog opens while the reader still expects one,
+       and the build then runs to the end without stopping.
+
+       A refusal does NOT lose the bundle. The route falls back to the zip
+       and the build goes on, which is what the old order was protecting.
+       One pick answers both directions, so the Files step below finds the
+       folder already in hand and does not ask a second time. */
     bcWizConfirm(willWrite, willReplace)
+      .then(function (chosen) { return chosen && bcFolderFirst(chosen); })
       .then(function (chosen) { route = chosen; return chosen && bcWizFiles(reads); })
       .then(function (go) {
         if (!go) { bcSetStatus("Not published. Nothing was written."); return; }
