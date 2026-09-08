@@ -382,10 +382,12 @@
      and puts these after its own, so a shared class name resolves in favour
      of the composer while the composer is what is on screen. */
   var BC_CSS = "" +
-    ".bc-panel{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
+    ".bc-panel{position:fixed;z-index:3300;left:50%;top:50%;" +
+    "transform:translate(-50%,-50%) translateX(var(--travel,0px));" +
     "width:min(960px,96vw);height:min(860px,94vh);display:flex;flex-direction:column;" +
     "background:var(--panel);border:1px solid var(--line);border-radius:14px;" +
     "box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
+    ".bc-panel[hidden]{display:none;}" +
     ".bc-head{display:flex;align-items:baseline;gap:.7rem;padding:.85rem 3rem .5rem 1.1rem;}" +
     ".bc-head .ced-slug{font-weight:800;color:var(--text);}" +
     ".bc-head .ced-hint{font-size:.7rem;color:var(--dim);}" +
@@ -481,7 +483,16 @@
      buttons in place at any height of screen; Done is the only step long
      enough to reach that. */
   BC_CSS +=
-    ".bc-wizard{width:min(560px,92vw);height:min(560px,86vh);}" +
+    /* The wizard takes the shared width and the shared ratio. It held a
+       560px square of its own, which is the reason the file ask changed
+       shape when it moved from this box into a box of its own.
+
+       Portrait is an exception, and it has to be. Every stage is laid over
+       the box with position:absolute, so the box has no in-flow content to
+       take a height from: with the ratio dropped and no height given, it
+       measured 2px tall. It is told a height there instead, and the height
+       is the one it held before this part. */
+    "@media (orientation:portrait){.bc-wizard{height:min(560px,86vh);}}" +
     /* the body takes what the head and the buttons leave. min-height:0 is
        what lets a flex child scroll rather than push the box open. */
     ".bc-wizard .bc-wiz__body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;}" +
@@ -1113,7 +1124,10 @@
     bcScrim = doc.createElement("div");
     bcScrim.className = "ced-scrim";
     bcPanel = doc.createElement("div");
-    bcPanel.className = "bc-panel";
+    /* ced-box is what gives it the move. Without it the class that sends
+       it back sets the travel and the box jumps there, because nothing
+       said the change should take time. */
+    bcPanel.className = "bc-panel ced-box";
     bcPanel.setAttribute("role", "dialog");
     bcPanel.setAttribute("aria-modal", "true");
     bcPanel.setAttribute("data-tab", "write");
@@ -1344,6 +1358,9 @@
     bcPublishBtn = bcBtn("Publish", "ced-btn--accent", bcPublish, btns);
     bcCloseBtn = bcBtn("Close", "", bcRequestClose, btns);
     bcPanel.appendChild(btns);
+    /* The composer takes the frame and the grip, and keeps its own size.
+       It is the surface a reader is most likely to want taller. */
+    TOOL.grip(bcPanel);
 
     /* an edited post opens with its own time and zone, and the clock stays
        out of it; a new post follows the clock until touched */
@@ -1380,11 +1397,18 @@
   function bcWizFocusables() {
     var front = bcWizFront();
     if (!front) return [];
-    return Array.prototype.filter.call(
+    var items = Array.prototype.filter.call(
       front.querySelectorAll("input, button, [href]"),
       function (el) {
         return el.tabIndex !== -1 && !el.disabled && (el.offsetWidth > 0 || el.offsetHeight > 0);
       });
+    /* The grip belongs to the box and not to the stage, so it is not in
+       the query above. It is still in front of the reader, and a grip that
+       cannot be reached by keyboard is no use to anyone who does not use a
+       pointer, so it goes last in the ring. */
+    var grip = bcWiz && bcWiz.box.querySelector(".ced-grip");
+    if (grip) items.push(grip);
+    return items;
   }
   /* Captured, so it runs before the composer's own handler, which also
      yields while the wizard is up. */
@@ -1409,6 +1433,60 @@
     if (e.shiftKey && doc.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first.focus(); }
   }
+  /* ---------------- the hand-over ----------------
+     Press Publish and the composer has said what it has to say. It steps
+     back and the wizard comes forward in its place, so one box is on
+     screen for the rest of the job.
+
+     It is HIDDEN and not closed, and that is the whole of why this is
+     small: the build reads bcTitle, bcBody and bcImages while the wizard
+     is up, so the composer has to stay alive. Showing it again is the
+     restore. Every field, every image preview, the tab you were on and a
+     height you dragged it to all come back, because nothing was ever
+     taken apart and nothing had to be saved.
+
+     Cancel, Escape and the Failed step's way out give it back. A finished
+     publish does not: bcClose has already taken the composer away by
+     then, and a composer that is gone cannot be restored, so the rule
+     needs no flag of its own to tell the two apart. */
+  var bcPanelHid = false;   /* the composer is alive, and behind the wizard */
+  var bcPanelWas = null;    /* what held focus when it stepped back */
+
+  function bcPanelAway() {
+    if (!bcPanel || !bcPanel.parentNode || bcPanelHid) return;
+    bcPanelHid = true;
+    bcPanelWas = doc.activeElement;
+    bcPanel.classList.add("ced-box--past");
+    /* the composer's own ground goes now rather than after the fade: the
+       wizard's counted ground goes up in this same tick, so the page is
+       never without one, and never under two at once */
+    if (bcScrim && bcScrim.parentNode) bcScrim.parentNode.removeChild(bcScrim);
+    window.setTimeout(function () {
+      if (bcPanelHid && bcPanel) bcPanel.hidden = true;
+    }, STAGE_MS);
+  }
+  function bcPanelBack() {
+    var panel = bcPanel;
+    if (!bcPanelHid) return;
+    bcPanelHid = false;
+    if (!panel || !panel.parentNode) return;
+    panel.hidden = false;
+    if (bcScrim && !bcScrim.parentNode) doc.body.appendChild(bcScrim);
+    /* one frame at the far side, so coming back is a move and not a paint */
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        panel.classList.remove("ced-box--past");
+        window.setTimeout(function () {
+          if (bcPanelWas && doc.body.contains(bcPanelWas) && bcPanelWas.focus) {
+            try { bcPanelWas.focus(); } catch (err) { /* a gone element refuses */ }
+          }
+          bcPanelWas = null;
+          TOOL.repoint();
+        }, STAGE_MS + 40);
+      });
+    });
+  }
+
   /* Open the box, or reuse it for the next step. It sits at the modal layer
      above the composer and takes the keyboard while it is up. */
   function bcWizShow(step, title) {
@@ -1448,8 +1526,21 @@
       stepEl.appendChild(body);
       stepEl.appendChild(btns);
       box.appendChild(stepEl);
+      /* on the box, not on a stage: a step replaces its stage, and the
+         grip has to outlive that. It is appended after, so a guest that
+         arrives later still sits under it. */
+      TOOL.grip(box);
       TOOL.scrimUp();
+      /* One box, one way of arriving. It comes forward whether or not a
+         composer is stepping back for it, so a wizard opened by Rebuild,
+         Delete or Edit reads the same as one opened by Publish. */
+      box.classList.add("ced-box", "ced-box--next");
       doc.body.appendChild(box);
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          box.classList.remove("ced-box--next");
+        });
+      });
       doc.addEventListener("keydown", bcWizKeys, true);
       bcBarAt = 0;
       bcWiz = { box: box, stepEl: stepEl, head: head, jobEl: jobEl, stageEl: stageEl,
@@ -1638,9 +1729,18 @@
     bcJob = null;
     bcBarAt = 0;
     TOOL.scrimDown();
-    if (bcWiz.box.parentNode) bcWiz.box.parentNode.removeChild(bcWiz.box);
+    /* It leaves the way a stage leaves, and is dropped once it has gone.
+       The timer is not a belt on top of braces: a transition in a
+       background tab never fires transitionend at all. */
+    var box = bcWiz.box;
+    box.classList.add("ced-box--next");
+    window.setTimeout(function () {
+      if (box.parentNode) box.parentNode.removeChild(box);
+    }, STAGE_MS + 120);
     bcWiz = null;
-    if (bcPanel && bcPanel.parentNode && bcTitle) bcTitle.focus();
+    /* and the composer comes forward, if there is still one to come. A
+       finished publish closed it first, so this finds nothing. */
+    bcPanelBack();
   }
   function bcWizBtn(label, cls, fn) {
     var b = doc.createElement("button");
@@ -1715,7 +1815,14 @@
        With no folder remembered the button opens a picker, which the
        blurb under the lists already describes, so no note is added. */
     if (can && TOOL.hasRepo()) {
-      TOOL.point(folder, "You can do this now!", { onHover: true });
+      /* From the LEFT. This button is the last in the row, so an arrow
+         that picks its own side takes the room under it and hangs the
+         label off the right of the box, over the editor panel. There is
+         no room for the words there: it measured 13px, which is the floor
+         the label shrinks to, against 22px with room. From the left the
+         label sits in the clear space beside the row, at full size, and
+         it reads into the button rather than away from it. */
+      TOOL.point(folder, "You can do this now!", { onHover: true, prefer: "left" });
     }
     /* the one to focus is the one that can be pressed */
     return can ? folder : zip;
@@ -1911,13 +2018,13 @@
       var cancel = function () { leave(false); };
       bcWizBtn("Cancel", "", cancel);
       bcWizSpacer();
-      var repo = bcWizBtn("Use my repo folder", "ced-btn--accent", function () {
+      var repo = bcWizBtn("Pick my repo folder", "ced-btn--accent", function () {
         if (!TOOL.hasPicker()) { folder.click(); return; }
         TOOL.pickRepo(reads.all).then(function (took) {
           if (took !== null) after();
         }, function (err) { note.textContent = err && err.message ? err.message : String(err); });
       });
-      repo.title = "Choose the root of your repo folder one time. Every file is read from it.";
+      repo.title = "Pick the root of your repo folder one time. Every file is read from it.";
       bcWizBtn("Continue", "", function () { leave(true); });
       repo.focus();
       w.onEscape = cancel;
@@ -2205,8 +2312,10 @@
       });
     }
     bcWizBtn("Compose another", "", function () {
-      bcWizClose();
+      /* the old composer goes FIRST, so the close does not hand it back
+         for the length of a fade before this builds a new one */
       bcClose();
+      bcWizClose();
       if (!TOOL.editorOn()) window.edit();
       openComposer(null);
     });
@@ -2271,7 +2380,11 @@
         : "Fix the cause and publish again. The composer keeps your post.") + "</p>";
     var close = function () { bcWizClose(); };
     bcWizSpacer();
-    bcWizBtn("Close", "ced-btn--accent", close).focus();
+    /* "Close" stopped saying what this does once the composer began
+       waiting behind the wizard. It says where it goes when there is a
+       post to go back to, and keeps the old word when there is not: a
+       failed Edit of an id the manifest does not know has no composer. */
+    bcWizBtn(bcPanelHid ? "Back to the post" : "Close", "ced-btn--accent", close).focus();
     w.onEscape = close;
   }
 
@@ -3669,6 +3782,10 @@
     });
     var reads = bcPublishReads(date, willWrite, neighbours);
     var route = null;
+    /* Everything above can still refuse the publish and leave the composer
+       where it is. Nothing below does, so this is the moment the reader has
+       said what they have to say. */
+    bcPanelAway();
     bcWizJob("PUBLISH", bcEditing ? "This post again, and every page it touches"
                                   : "A new post, and every page it touches");
     bcWizConfirm(willWrite, willReplace)

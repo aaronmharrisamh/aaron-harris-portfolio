@@ -965,6 +965,19 @@
     /* the display above beats the browser's own rule for [hidden], so the
        offer has to be told to go away in the same breath */
     ".ced-handoff__offer[hidden]{display:none;}" +
+    /* THE PLACE IN THE LINE, at the right of the head.
+       This is the one piece of the wizard plan that was deferred, because
+       it had to read the line of asks. It reads required() and expected,
+       which are that line, so it is a fact and not an estimate. It sat
+       beside the file name at the name's own size; margin-left:auto is
+       what puts it at the right of a flex row, and the badge's face is
+       what tells it apart from the name. It costs no height. */
+    ".ced-handoff__count{margin-left:auto;font:700 10px/1 Consolas,monospace;" +
+    "letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap;}" +
+    /* nothing sits in the top right of an ask or a confirm: the 3rem in the
+       shared head rule clears the region editor's close control, which
+       these boxes do not have, and it would hold the count off the edge */
+    ".ced-handoff .ced-modal__head{padding-right:1.1rem;}" +
     ".ced-handoff__list{display:flex;flex-wrap:wrap;gap:.3rem;padding:0 1.1rem .2rem;}" +
     ".ced-handoff__item{font:700 9.5px/1 Consolas,monospace;letter-spacing:.06em;border-radius:4px;padding:3px 6px;border:1px solid var(--line);color:var(--dim);}" +
     ".ced-handoff__item.is-now{border-color:var(--accent);color:var(--accent-bright);}" +
@@ -1008,6 +1021,50 @@
     "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
     ".ced-modal__btns .ced-btn--accent:hover{border-color:var(--accent-bright);" +
     "background:var(--accent-bright);color:var(--bg-deep);}" +
+    /* HOW A BOX ARRIVES, AND HOW IT LEAVES.
+
+       A stage inside the wizard travels by writing transform outright,
+       because a stage is laid across the box and has no transform of its
+       own. A BOX does: every one is centred by translate(-50%,-50%), and a
+       dragged one carries translateX(-50%). A class that wrote transform
+       would throw the box to a corner.
+
+       So the travel is a variable that each box's own transform already
+       includes. A centred box, a dragged box and a stage then all move the
+       same distance, and none of them loses its place. */
+    ".ced-box{transition:transform .26s var(--ease),opacity .26s var(--ease);}" +
+    ".ced-box--next{--travel:28px;opacity:0;}" +
+    ".ced-box--past{--travel:-28px;opacity:0;}" +
+    /* a box on its way in or out must not answer a click on the way */
+    ".ced-box--next,.ced-box--past{pointer-events:none;}" +
+    /* A drag is direct manipulation, not an animation. Taking a box over
+       swaps translate(-50%,-50%) for translateX(-50%) and writes an
+       explicit top, and with a transition on transform that swap SLID:
+       the box moved half its own height while the reader held the grip. */
+    ".ced-box--still{transition:none;}" +
+    "@media (prefers-reduced-motion:reduce){" +
+    ".ced-box{transition:opacity .2s var(--ease);}" +
+    ".ced-box--next,.ced-box--past{--travel:0px;}}" +
+    /* THE GRIP.
+       A bar across the foot of a box. A box is as tall as its rule says,
+       and this is how a reader says the rule is wrong for what they are
+       doing now.
+
+       It lies inside the button row's own bottom padding, which is .9rem,
+       so 13px covers no button. z-index puts it over a wizard stage, which
+       is laid across the whole box.
+
+       touch-action:none is required. Without it a phone scrolls the page
+       instead of dragging the box. */
+    ".ced-grip{position:absolute;left:0;right:0;bottom:0;height:13px;z-index:2;" +
+    "cursor:ns-resize;display:grid;place-items:center;touch-action:none;}" +
+    ".ced-grip::before{content:'';width:46px;height:3px;border-radius:2px;" +
+    "background:var(--line);transition:background .2s;}" +
+    ".ced-grip:hover::before{background:var(--accent);}" +
+    ".ced-grip:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;}" +
+    ".ced-grip:focus-visible::before{background:var(--accent);}" +
+    /* while a drag runs, a stray selection must not follow the pointer */
+    "html.ced-gripping,html.ced-gripping *{user-select:none;}" +
     ".ced-scrim{position:fixed;inset:0;z-index:3200;background:rgba(4,6,10,.72);}" +
     /* the tutorial arrow: above every dialog, below the launcher */
     ".ced-point{position:fixed;z-index:3400;pointer-events:none;}" +
@@ -1035,9 +1092,35 @@
     ".ced-point.is-off .ced-point__curve{transition-delay:.2s;transition-duration:.3s;}" +
     ".ced-point.is-off .ced-point__head{transition-delay:.46s;}" +
     ".ced-point.is-still *{transition:none !important;}" +
-    ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;transform:translate(-50%,-50%);" +
-    "width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--panel);" +
-    "border:1px solid var(--line);border-radius:14px;box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
+    /* THE RATIO: 16:9 IN LANDSCAPE, FLOW IN PORTRAIT.
+
+       Four dialogs held four sizes, so the same file ask was one shape
+       inside the wizard and another shape in a box of its own. One rule
+       replaces them. The width anchors the ratio, and the height follows.
+
+       Measured: 1920x1080 and 1280x800 both give 960x540. 800x600 gives
+       736x414, where 92vw binds before the 960 cap. 390x844 is portrait,
+       drops the ratio, and flows at 359 wide.
+
+       max-height stays, against the plan, and the measurement is the
+       reason: it binds at none of those four viewports, and it is what
+       holds a box on screen in a short landscape window, where 16:9 of
+       960px is 540px and the window is not that tall. A box that cannot
+       be seen cannot be closed, so the screen wins over the ratio there
+       and nowhere else. */
+    ".ced-modal{position:fixed;z-index:3300;left:50%;top:50%;" +
+    "transform:translate(-50%,-50%) translateX(var(--travel,0px));" +
+    "width:min(960px,92vw);aspect-ratio:16/9;max-height:90vh;display:flex;flex-direction:column;" +
+    "background:var(--panel);border:1px solid var(--line);border-radius:14px;" +
+    "box-shadow:0 40px 100px -40px rgba(0,0,0,1);}" +
+    /* A box that flows takes the height its content needs. This is the
+       per-box answer for a surface that 16:9 does not suit. No surface
+       needs it today, and the gate proves it works, so the first one that
+       needs it can say so in one word. */
+    ".ced-modal--flow{aspect-ratio:auto;}" +
+    /* Portrait drops the ratio everywhere. A phone is tall and narrow, and
+       a held 16:9 there is a letterbox with the content pressed into it. */
+    "@media (orientation:portrait){.ced-modal{aspect-ratio:auto;}}" +
     /* THE THREE BANDS.
        A rule under the head and a rule above the buttons. Between them
        every surface reads the same way: what this is, what it holds, and
@@ -1060,7 +1143,11 @@
     ".ced-tool{min-width:30px;padding:.28rem .5rem;border-radius:7px;border:1px solid var(--line);" +
     "background:var(--bg-deep);color:var(--text-soft);font:600 .72rem var(--font);cursor:pointer;}" +
     ".ced-tool:hover{border-color:var(--accent);color:var(--text);}" +
-    ".ced-modal textarea{margin:0 1.1rem;flex:1 1 auto;min-height:240px;resize:vertical;" +
+    /* Decision A, 2026-09-07: the box grip is the only way to make room
+       here. The corner grip grew the text inside a box that was already
+       too small, which moves the scrollbar rather than making room. The
+       textarea takes whatever the box gives it. */
+    ".ced-modal textarea{margin:0 1.1rem;flex:1 1 auto;min-height:240px;resize:none;" +
     "background:var(--bg-deep);color:var(--text);border:1px solid var(--line);border-radius:8px;" +
     "padding:.7rem .8rem;font:12.5px/1.55 Consolas,'Courier New',monospace;white-space:pre-wrap;}" +
     ".ced-modal textarea:focus-visible{outline:2px solid var(--accent);}" +
@@ -1074,8 +1161,15 @@
     ".ced-modal{--ced-read:72ch;}" +
     ".ced-modal__status{padding:.35rem 1.1rem 0;font-size:.7rem;color:var(--muted);min-height:1.2em;" +
     "max-width:var(--ced-read);}" +
+    /* margin-top:auto pins the row to the foot of the box.
+       Before the ratio a dialog was as tall as its content, so the buttons
+       sat at the bottom by definition. A held box is taller than its
+       content, and the row floated in the middle of the file ask with the
+       rule above it drawn across nothing.
+       The wizard and the region editor each have a flexible child that
+       already takes the slack, so this changes neither of them. */
     ".ced-modal__btns{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem 1.1rem .9rem;" +
-    "border-top:1px solid var(--line);}" +
+    "border-top:1px solid var(--line);margin-top:auto;}" +
     ".ced-modal__btns .ced-spacer{flex:1 1 auto;}" +
     /* image / gallery editing */
     ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
@@ -1166,6 +1260,126 @@
     e.preventDefault();
     e.stopPropagation();
     dialogStack[dialogStack.length - 1]();
+  }
+
+  /* ---------------- the grip ----------------
+     Every box is centred by a transform, so adding height grows it equally
+     up and down. To grow downward, the box's current top is written as an
+     explicit top and the transform drops to translateX only. A box stops
+     being centred once it is dragged, which is correct: the reader put it
+     where it is.
+
+     Nothing is remembered. Four of the five boxes are built again at every
+     open, and the fifth is reset at its own, so a box always comes back on
+     its rule. There is no stored height and nothing to migrate. */
+  var GRIP_MIN = 180;    /* under this the head and the buttons stop fitting */
+  var GRIP_STEP = 24;    /* one press of an arrow key */
+  var GRIP_EDGE = 8;     /* the box never sits against the foot of the screen */
+  var gripBoxes = [];    /* every box carrying a grip, for the resize clamp */
+
+  /* Take the box off its rule and onto an explicit height, anchored at the
+     top it has now. Safe to call again: it takes over once. */
+  function gripTake(box) {
+    if (box.style.height) return parseFloat(box.style.height);
+    var r = box.getBoundingClientRect();
+    /* off for the length of this change, and on again straight after, so
+       the box arrives at its new anchor in one frame and every later move
+       of --travel still travels */
+    box.classList.add("ced-box--still");
+    box.style.top = Math.round(r.top) + "px";
+    box.style.transform = "translateX(-50%) translateX(var(--travel,0px))";
+    /* the ratio and the viewport cap each decide a height, and from here
+       the reader does. gripTo is what keeps the box on the screen. */
+    box.style.maxHeight = "none";
+    box.style.height = Math.round(r.height) + "px";
+    /* reading a layout value is what makes the change take now rather than
+       at the next frame, which is what the class has to outlast */
+    void box.offsetHeight;
+    box.classList.remove("ced-box--still");
+    return Math.round(r.height);
+  }
+  /* Ask for a height and get the one that fits. The floor keeps the head
+     and the buttons. The ceiling is the screen, because a box taller than
+     the screen cannot be closed with its own buttons. */
+  function gripTo(box, want) {
+    var top = parseFloat(box.style.top);
+    if (isNaN(top)) top = box.getBoundingClientRect().top;
+    var room = window.innerHeight - top - GRIP_EDGE;
+    var h = Math.max(GRIP_MIN, Math.min(want, room));
+    box.style.height = Math.round(h) + "px";
+    return Math.round(h);
+  }
+  /* Give the box back to its rule. */
+  function gripReset(box) {
+    box.style.top = "";
+    box.style.height = "";
+    box.style.transform = "";
+    box.style.maxHeight = "";
+  }
+  /* A window that gets shorter must not leave a dragged box off the screen:
+     a box that cannot be reached cannot be closed. */
+  function gripClampAll() {
+    gripBoxes = gripBoxes.filter(function (b) { return b.parentNode; });
+    gripBoxes.forEach(function (box) {
+      if (!box.style.height) return;
+      var top = parseFloat(box.style.top) || 0;
+      var highest = window.innerHeight - GRIP_MIN - GRIP_EDGE;
+      if (top > highest) box.style.top = Math.round(Math.max(GRIP_EDGE, highest)) + "px";
+      gripTo(box, parseFloat(box.style.height));
+    });
+  }
+  window.addEventListener("resize", gripClampAll);
+
+  /* Put a grip on a box. It is appended last, so it lies over the button
+     row's lower edge, and nothing is appended after it. */
+  function gripAdd(box) {
+    var grip = doc.createElement("div");
+    grip.className = "ced-grip";
+    grip.tabIndex = 0;
+    grip.setAttribute("role", "separator");
+    grip.setAttribute("aria-orientation", "horizontal");
+    grip.setAttribute("aria-label", "Make this box taller or shorter");
+    grip.title = "Drag, or use the arrow keys. Home puts the box back.";
+
+    var from = 0, at = 0, dragging = false;
+    grip.addEventListener("pointerdown", function (e) {
+      /* preventDefault stops the drag from starting a text selection */
+      e.preventDefault();
+      from = e.clientY;
+      at = gripTake(box);
+      dragging = true;
+      doc.documentElement.classList.add("ced-gripping");
+      /* capture, so the drag survives the pointer leaving the box */
+      try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    grip.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      gripTo(box, at + (e.clientY - from));
+    });
+    function done(e) {
+      if (!dragging) return;
+      dragging = false;
+      doc.documentElement.classList.remove("ced-gripping");
+      try { grip.releasePointerCapture(e.pointerId); } catch (err) {}
+    }
+    grip.addEventListener("pointerup", done);
+    grip.addEventListener("pointercancel", done);
+
+    /* A grip that answers only a pointer is unreachable for anyone who
+       does not use one. */
+    grip.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        gripTo(box, gripTake(box) + (e.key === "ArrowDown" ? GRIP_STEP : -GRIP_STEP));
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        gripReset(box);
+      }
+    });
+
+    box.appendChild(grip);
+    gripBoxes.push(box);
+    return grip;
   }
 
   /* The shell that holds this file's dialogs, when one is on screen.
@@ -1766,6 +1980,7 @@
     btn("Revert", "", revertModal);
     btn("Cancel", "", closeModal);
     modal.appendChild(btns);
+    gripAdd(modal);
 
     doc.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && (openRegion || openImage)) { e.preventDefault(); closeModal(); }
@@ -1775,6 +1990,9 @@
   function openModal(r) {
     if (viewing === "before") api.after();   /* never edit on top of the before view */
     if (!modal) buildModal();
+    /* a dragged height is forgotten. This box is kept and reused, so it is
+       the one that has to be told; the other four are built again. */
+    gripReset(modal);
     openImage = null;
     modal.classList.remove("ced-modal--image");
     ta.disabled = false;
@@ -1796,6 +2014,7 @@
   function openImageModal(g, index) {
     if (viewing === "before") api.after();
     if (!modal) buildModal();
+    gripReset(modal);
     var en = g.model[index];
     if (!en) return;
     openRegion = null;
@@ -2900,13 +3119,13 @@
       var other = doc.createElement("button");
       other.type = "button";
       other.className = "ced-btn";
-      other.textContent = "Choose a different folder";
+      other.textContent = "Pick a different folder";
       var spacer = doc.createElement("span");
       spacer.className = "ced-spacer";
       var use = doc.createElement("button");
       use.type = "button";
       use.className = "ced-btn ced-btn--accent";
-      use.textContent = "Use this folder";
+      use.textContent = "Use the saved folder";
 
       /* Once only, for the reason given on the hand-off dialog's own done:
          a check still in flight must not take the ground twice. */
@@ -2922,7 +3141,7 @@
         }
         resolve(answer);
       }
-      /* Escape means the same as "Choose a different folder": not this
+      /* Escape means the same as "Pick a different folder": not this
          folder, so open the picker. */
       function escMe() { done(null); }
       repoConfirmWire(handle, mode, use, other,
@@ -2933,6 +3152,7 @@
       body.appendChild(note);
       if (box) {
         box.appendChild(btns);
+        gripAdd(box);
         scrimUp();
         doc.body.appendChild(box);
       }
@@ -3024,7 +3244,7 @@
      remembered it is an instruction; once one is chosen and the step is
      still open, the same button is the way on, so the note stops telling
      the reader to do what they have already done. */
-  var REPO_LABEL = "Click and choose root of repo folder!";
+  var REPO_LABEL = "Click and pick root of repo folder!";
   var REPO_SET_LABEL = "You're all set!";
   function pointRepo(btn) { pointAt(btn, repoDir ? REPO_SET_LABEL : REPO_LABEL); }
 
@@ -3103,15 +3323,24 @@
       folder.setAttribute("directory", "");
       folder.style.display = "none";
 
+      /* THE TWO VERBS.
+         Pick opens a picker. Use accepts something this browser already
+         has. The editor asks for a folder on four surfaces, and one verb
+         used to mean both jobs: "use my repo folder" opened a picker while
+         "use this folder" accepted a folder already saved.
+           Pick this file, Pick my repo folder, Pick a different folder
+           Use the saved folder
+         "Write into my repo folder" on the wizard's route step is a
+         delivery choice and not a pick, so it keeps its own verb. */
       var pick = doc.createElement("button");
       pick.type = "button";
       pick.className = "ced-btn ced-btn--accent";
-      pick.textContent = "Choose file";
+      pick.textContent = "Pick this file";
       var all = doc.createElement("button");
       all.type = "button";
       all.className = "ced-btn";
-      all.textContent = "Use my repo folder";
-      all.title = "Choose the root of your repo folder one time. The publish reads only the " +
+      all.textContent = "Pick my repo folder";
+      all.title = "Pick the root of your repo folder one time. The publish reads only the " +
         "files it needs from it, and does not ask again.";
       var spacer = doc.createElement("span");
       spacer.className = "ced-spacer";
@@ -3264,6 +3493,7 @@
       body.appendChild(folder);
       if (box) {
         box.appendChild(btns);
+        gripAdd(box);
         scrimUp();
         doc.body.appendChild(box);
       }
@@ -3288,7 +3518,7 @@
          keeps the box. See repoConfirmStep.
 
          Showing the offer spends it. A reader who ignores it and presses
-         "Use my repo folder" wants a different folder, and repoChoose
+         "Pick my repo folder" wants a different folder, and repoChoose
          then goes straight to the picker. */
       function offerRemembered() {
         if (!hasPicker() || repoDir || repoOffered.read) return;
@@ -3313,11 +3543,11 @@
         var use = doc.createElement("button");
         use.type = "button";
         use.className = "ced-btn ced-btn--accent";
-        use.textContent = "Use this folder";
+        use.textContent = "Use the saved folder";
         var other = doc.createElement("button");
         other.type = "button";
         other.className = "ced-btn";
-        other.textContent = "Choose a different folder";
+        other.textContent = "Pick a different folder";
         row.appendChild(use); row.appendChild(other);
         offer.appendChild(ask); offer.appendChild(why); offer.appendChild(row);
         offer.hidden = false;
@@ -3366,7 +3596,7 @@
     if (must.length < 2) return "";
     var at = must.indexOf(path);
     if (at < 0) return "";
-    return ' <span class="ced-hidden">file ' + (at + 1) + " of " + must.length + "</span>";
+    return ' <span class="ced-handoff__count">file ' + (at + 1) + " of " + must.length + "</span>";
   }
 
   /* The whole list, with what is in hand ticked off and what is not there
@@ -4355,6 +4585,7 @@
      their definitions, where the reasons for them are written out. */
   AMH.tool.injectStyles = injectStyles;    /* put the editor's styles in <head> */
   AMH.tool.addStyles = addStyles;          /* add a trunk's own rules to them */
+  AMH.tool.grip = gripAdd;                 /* put the drag handle on a box */
   AMH.tool.scrimUp = scrimUp;              /* show the one ground, and count this box */
   AMH.tool.scrimDown = scrimDown;          /* drop this box's claim on it */
   AMH.tool.armGuard = armGuard;            /* arm the unsaved-work unload guard */

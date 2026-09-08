@@ -1948,14 +1948,23 @@ async function main() {
     var tip = tipLocal.matrixTransform(curve.getScreenCTM());
     var lbl = pt.querySelector('.ced-point__label').getBoundingClientRect();
     return { arrow: true, on: pt.classList.contains('is-on'),
+             /* The tip touches the button: below it when there is room, at a
+                side when the box sits low. This used to demand "below", which
+                held while the ask was as tall as its content. The ratio makes
+                the box taller and pins the row to its foot, so at a short
+                viewport there is no room below and the arrow comes from the
+                side instead. The files step already measures its own arrow
+                this way, for this reason. */
+             near: tip.x >= b.left - 12 && tip.x <= b.right + 12 &&
+                   tip.y >= b.top - 12 && tip.y <= b.bottom + 12,
              dx: Math.round(tip.x - (b.left + b.width / 2)), dy: Math.round(tip.y - b.bottom),
              label: pt.querySelector('.ced-point__label').textContent,
              inView: lbl.left >= 0 && lbl.right <= innerWidth && lbl.top >= 0 && lbl.bottom <= innerHeight,
              offset: getComputedStyle(curve).strokeDashoffset };
   })()`);
-  check("arrow: the first hand-off points at \"Use my repo folder\", tip under its centre, label on screen",
-    firstAsk.arrow && firstAsk.on && Math.abs(firstAsk.dx) <= 2 && firstAsk.dy >= 4 && firstAsk.dy <= 9 &&
-    firstAsk.label === "Click and choose root of repo folder!" && firstAsk.inView &&
+  check("arrow: the first hand-off points at \"Pick my repo folder\", tip on the button, label on screen",
+    firstAsk.arrow && firstAsk.on && firstAsk.near &&
+    firstAsk.label === "Click and pick root of repo folder!" && firstAsk.inView &&
     parseFloat(firstAsk.offset) === 0,
     JSON.stringify(firstAsk));
 
@@ -2766,8 +2775,10 @@ async function main() {
       counts: !!panel.querySelector('.bc-counts'), tags: !!panel.querySelector('.bc-tags input'),
     };
   })()`);
-  check("composer: the layout is head, title row, write, images, preview, tags, view row, status, buttons",
-    layout.order.join(" ") === "bc-head ced-modal__x bc-fields bc-write bc-images bc-preview bc-tags bc-tabs bc-status bc-btns",
+  // The grip is last, and has to be: it lies over the button row's lower
+  // edge, inside that row's own bottom padding, so nothing may follow it.
+  check("composer: the layout is head, title row, write, images, preview, tags, view row, status, buttons, grip",
+    layout.order.join(" ") === "bc-head ced-modal__x bc-fields bc-write bc-images bc-preview bc-tags bc-tabs bc-status bc-btns ced-grip",
     layout.order.join(" "));
   check("composer: the title is optional, and the posted group sits to its right with room for three inputs",
     layout.placeholder === "Title (optional)" && layout.postedRight &&
@@ -3066,24 +3077,47 @@ async function main() {
   })()`);
   const failStep = await pressPublish();
   await sleep(700);
+  // The composer is alive behind the box and not on screen with it: Publish
+  // hands over, so one box is up for the whole job, a failure included. The
+  // post is still in it, which is what "keeps the post" now means, and the
+  // way out is named for where it goes.
   const failedStep = await evaluate(`(function () {
     var box = document.querySelector('.bc-wizard');
-    var r = { step: box ? box.getAttribute('data-step') : 'none',
-              head: box ? box.querySelector('.ced-modal__head').textContent : '',
-              body: box ? box.querySelector('.bc-wiz__body').textContent : '',
-              title: document.querySelector('.bc-title').value,
-              publishEnabled: ![...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled };
-    var close = box && [...box.querySelectorAll('.ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; });
-    if (close) close.click();
-    r.closed = !document.querySelector('.bc-wizard');
-    AMH.tool.pristine = window.__realPristine;
-    return r;
+    var panel = document.querySelector('.bc-panel');
+    return { step: box ? box.getAttribute('data-step') : 'none',
+             head: box ? box.querySelector('.ced-modal__head').textContent : '',
+             body: box ? box.querySelector('.bc-wiz__body').textContent : '',
+             title: document.querySelector('.bc-title').value,
+             panelKept: !!panel, panelHidden: !!panel && panel.hidden === true,
+             ways: box ? [...box.querySelectorAll('.ced-modal__btns button')]
+               .map(function (b) { return b.textContent; }) : [],
+             publishEnabled: ![...document.querySelectorAll('.bc-btns .ced-btn')].find(function (b) { return b.textContent === 'Publish'; }).disabled };
   })()`);
+  // and the way out gives it back. The box leaves the way a stage leaves, so
+  // this waits for the move rather than reading the frame after the click.
+  const failedBack = await evaluate(`(function () {
+    var b = [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')]
+      .find(function (x) { return x.textContent === 'Back to the post'; });
+    if (b) b.click();
+    return new Promise(function (res) { setTimeout(function () {
+      var panel = document.querySelector('.bc-panel');
+      AMH.tool.pristine = window.__realPristine;
+      res({ pressed: !!b, closed: !document.querySelector('.bc-wizard'),
+            panelBack: !!panel && panel.hidden === false,
+            title: document.querySelector('.bc-title').value });
+    }, 700); });
+  })()`, { awaitPromise: true });
   check("wizard: a failed publish shows the failed step, and the composer keeps the post",
     failStep !== "timeout" && failedStep.step === "failed" && /Publish failed/.test(failedStep.head) &&
     /forced failure/.test(failedStep.body) && /Nothing was written/.test(failedStep.body) &&
-    failedStep.title === "E2E first post" && failedStep.publishEnabled && failedStep.closed,
+    failedStep.title === "E2E first post" && failedStep.publishEnabled &&
+    failedStep.panelKept && failedStep.panelHidden &&
+    JSON.stringify(failedStep.ways) === '["Back to the post"]',
     failStep + " " + JSON.stringify(failedStep).slice(0, 220));
+  check("wizard: the way out of a failure gives the composer back with the post in it",
+    failedBack.pressed && failedBack.closed && failedBack.panelBack &&
+    failedBack.title === "E2E first post",
+    JSON.stringify(failedBack));
 
   // PW2. the confirm step replaces the browser box: the two lists, the
   // reminder, the checkbox, and no window.confirm at all
@@ -3310,10 +3344,13 @@ async function main() {
   // PW4b. Finishing ends the job in one press: the box goes, and so does
   // the composer behind it. Leaving the composer on screen under a closed
   // wizard said the work was not finished when it was.
-  const finished = await evaluate(`({
-    wizard: !!document.querySelector('.bc-wizard'),
-    composer: !!document.querySelector('.bc-panel'),
-  })`);
+  // The box leaves the way a stage leaves, so this waits for the move. The
+  // composer is already gone by then: the finish closes it first, which is
+  // what stops the close from handing it back for the length of a fade.
+  const finished = await evaluate(`new Promise(function (res) { setTimeout(function () {
+    res({ wizard: !!document.querySelector('.bc-wizard'),
+          composer: !!document.querySelector('.bc-panel') });
+  }, 700); })`, { awaitPromise: true });
   check("wizard: OK! Done! closes the box and the composer behind it",
     finished.wizard === false && finished.composer === false,
     JSON.stringify(finished));
@@ -3385,7 +3422,7 @@ async function main() {
     JSON.stringify(stacked));
   check("wizard: the stage carries the same names a box of its own carries",
     /FILE/.test(stacked.head) && /2693\.html/.test(stacked.head) &&
-    JSON.stringify(stacked.btns) === '["Choose file","Use my repo folder","Cancel"]',
+    JSON.stringify(stacked.btns) === '["Pick this file","Pick my repo folder","Cancel"]',
     JSON.stringify(stacked));
 
   const escFront = await evaluate(`(function () {
@@ -3507,10 +3544,12 @@ async function main() {
 
   const escAlone2 = await evaluate(`(function () {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    /* 300ms was enough while the box was removed on the press. It leaves
+       the way a stage leaves now, so this waits for the move. */
     return new Promise(function (res) { setTimeout(function () {
       res({ wizard: !!document.querySelector('.bc-wizard'),
             scrims: document.querySelectorAll('.ced-scrim').length });
-    }, 300); });
+    }, 700); });
   })()`, { awaitPromise: true });
   check("wizard: Escape still answers the wizard when it is the only box",
     escAlone2.wizard === false && escAlone2.scrims === 0, JSON.stringify(escAlone2));
@@ -6681,7 +6720,7 @@ async function main() {
                  folder", so the accent no longer marks the accept button
                  in this state. accentOn records where it went. */
               accept: offer ? [].slice.call(offer.querySelectorAll('.ced-btn'))
-                .filter(function (b) { return b.textContent === 'Use this folder'; })
+                .filter(function (b) { return b.textContent === 'Use the saved folder'; })
                 .map(function (b) { return b.disabled; })[0] : null,
               accentOn: offer ? (offer.querySelector('.ced-btn--accent') || {}).textContent : '',
               boxes: document.querySelectorAll('.ced-modal').length,
@@ -6694,10 +6733,10 @@ async function main() {
       JSON.stringify(inlineOffer));
     check("repo memory: a folder that cannot be read is offered with the reason, and cannot be accepted",
       /could not be read/.test(inlineOffer.why) && inlineOffer.accept === true &&
-      inlineOffer.accentOn === "Choose a different folder",
+      inlineOffer.accentOn === "Pick a different folder",
       JSON.stringify(inlineOffer));
 
-    // "Choose a different folder" is what the confirm resolving false does:
+    // "Pick a different folder" is what the confirm resolving false does:
     // it opens the picker, and it still opens no second box.
     const offerNo = await evaluate(`(function () {
       var offer = document.querySelector('.ced-handoff__offer');
@@ -6763,12 +6802,12 @@ async function main() {
     })()`, { awaitPromise: true });
     check("repo memory: with no shell on screen the write route builds its own box",
       writeBox.box === true && /FOLDER/.test(writeBox.head) && writeBox.inline === false &&
-      JSON.stringify(writeBox.btns) === '["Choose a different folder","Use this folder"]',
+      JSON.stringify(writeBox.btns) === '["Pick a different folder","Use the saved folder"]',
       JSON.stringify(writeBox));
 
     // THE FIFTH SURFACE WEARS THE FRAME TOO, AND FILLS ONE CONTROL.
     // The accent MOVES here: a remembered folder that fails its checks makes
-    // "choose a different folder" the one move. It moved from four branches
+    // "pick a different folder" the one move. It moved from four branches
     // and was taken back by none, so this box drew two filled controls once
     // the fill became shared. One filled control is the invariant, whichever
     // of the two currently holds it.
@@ -6903,10 +6942,13 @@ async function main() {
         window.__g1.then(function () { return 1; }, function () { return 0; }),
         window.__g2.then(function () { return 1; }, function () { return 0; })]);
     })()`, { awaitPromise: true });
-    const allGone = await evaluate(`({
-      boxes: document.querySelectorAll('.ced-modal').length,
-      scrims: document.querySelectorAll('.ced-scrim').length,
-      owns: AMH.tool.modalOpen() })`);
+    /* the ground drops on the press, but the box leaves the way a stage
+       leaves, so the count of boxes is read once the move is over */
+    const allGone = await evaluate(`new Promise(function (res) { setTimeout(function () {
+      res({ boxes: document.querySelectorAll('.ced-modal').length,
+            scrims: document.querySelectorAll('.ced-scrim').length,
+            owns: AMH.tool.modalOpen() });
+    }, 700); })`, { awaitPromise: true });
     check("stages: with every stage and the box gone, the ground goes too",
       allGone.boxes === 0 && allGone.scrims === 0 && allGone.owns === false,
       JSON.stringify(allGone));
@@ -7145,11 +7187,11 @@ async function main() {
     filesStep.protocol === "file:" && filesStep.step === "files" &&
     JSON.stringify(filesStep.items) ===
       '["is-wait:blog.html","is-wait:index.html","is-wait is-opt:search.js"]' &&
-    JSON.stringify(filesStep.btns) === '["Cancel","Use my repo folder","Continue"]' && filesStep.zone,
+    JSON.stringify(filesStep.btns) === '["Cancel","Pick my repo folder","Continue"]' && filesStep.zone,
     JSON.stringify(filesStep).slice(0, 260));
   check("files step: the arrow points at the folder button and says what to choose",
-    filesStep.label === "Click and choose root of repo folder!" && filesStep.near &&
-    filesStep.focused === "Use my repo folder",
+    filesStep.label === "Click and pick root of repo folder!" && filesStep.near &&
+    filesStep.focused === "Pick my repo folder",
     JSON.stringify({ label: filesStep.label, near: filesStep.near, focused: filesStep.focused }));
   await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'Continue').click()`);
   await sleep(500);
@@ -7427,16 +7469,17 @@ async function main() {
   check("frame: no run of prose is wider than the 72ch reading column",
     overRun.length === 0, sName.map((k) => k + "=" + surfaces[k].prose + "ch").join(" "));
 
-  // NOTHING MOVED. The two fixed-height boxes are the ones that must not
-  // change, and the rule is recorded rather than a pixel count: the gate runs
-  // at whatever size headless Chrome gives it. Part 2 replaces both of these
-  // rules with one ratio, so a part that changes a size edits this on purpose.
-  const wizWant = [Math.min(560, Math.round(frWizard.vw * 0.92)),
-                   Math.min(560, Math.round(frWizard.vh * 0.86))];
+  // THE TWO SIZE RULES, RECORDED RATHER THAN THEIR PIXELS. The gate runs at
+  // whatever size headless Chrome gives it, so each rule is computed from the
+  // viewport it ran at. Part 1 recorded two fixed sizes here. Part 2 replaced
+  // the wizard's 560px square with the shared ratio, and left the composer's
+  // own size alone on purpose, so a part that changes a size edits this.
+  const wizW = Math.min(960, Math.round(frWizard.vw * 0.92));
+  const wizWant = [wizW, Math.round((wizW * 9) / 16)];
   const panWant = [Math.min(960, Math.round(frComposer.vw * 0.96)),
                    Math.min(860, Math.round(frComposer.vh * 0.94))];
   const near = (a, b) => Math.abs(a - b) <= 1;
-  check("frame: the paint moved no box - the wizard holds 560/86vh and the composer 960/94vh",
+  check("frame: the wizard takes the shared 16:9, and the composer keeps its own size",
     near(frWizard.w, wizWant[0]) && near(frWizard.h, wizWant[1]) &&
     near(frComposer.w, panWant[0]) && near(frComposer.h, panWant[1]),
     JSON.stringify({ wizard: [frWizard.w, frWizard.h], wizWant,
@@ -7448,6 +7491,401 @@ async function main() {
     frRegionParts.tools === 10 && frRegionParts.alt === true && frRegionParts.src === true &&
     frRegionParts.toolsW > frRegionParts.ta && frRegionParts.ta > 0,
     JSON.stringify(frRegionParts));
+
+  // ============ ONE RATIO FOR EVERY DIALOG ============
+  // Four dialogs held four sizes, so the same file ask was one shape inside
+  // the wizard and another shape in a box of its own. The width now anchors
+  // one ratio and the height follows it. Portrait drops the ratio, because a
+  // phone is tall and narrow and a held 16:9 there is a letterbox.
+  const RATIO = `
+    window.__RATIO = function (sel) {
+      var box = document.querySelector(sel);
+      if (!box) return { there: false };
+      var r = box.getBoundingClientRect();
+      /* how far the button row sits above the foot of the box. A held box
+         is taller than its content, so a row that is not pinned floats in
+         the middle with its rule drawn across nothing. */
+      var row = box.querySelector('.ced-modal__btns');
+      return { there: true, w: Math.round(r.width), h: Math.round(r.height),
+               ratio: Math.round((r.width / r.height) * 100) / 100,
+               offScreen: r.top < -1 || r.bottom > innerHeight + 1,
+               boxScrolls: box.scrollHeight > box.clientHeight + 1,
+               footGap: row ? Math.round(r.bottom - row.getBoundingClientRect().bottom) : null,
+               vw: innerWidth, vh: innerHeight };
+    };`;
+  await evaluate(RATIO);
+
+  async function atSize(w, h) {
+    await send("Emulation.setDeviceMetricsOverride",
+      { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    await sleep(450);
+  }
+  // open one surface, measure it, and close it again
+  async function shapeOf(kind) {
+    if (kind === "handoff") {
+      await evaluate(`window.__rq = AMH.tool.handOff("blog/2605.html", new Error("ratio"));`);
+      await sleep(500);
+      const s = await evaluate(`window.__RATIO(".ced-handoff")`);
+      await evaluate(`(function () {
+        var b = [...document.querySelectorAll(".ced-handoff .ced-modal__btns button")]
+          .find(function (x) { return x.textContent === "Cancel"; });
+        if (b) b.click();
+      })()`);
+      await sleep(300);
+      return s;
+    }
+    if (kind === "region") {
+      await evaluate(`[...document.querySelectorAll(".ced-chip")].find(c => c.title === "blog-eyebrow")?.click()`);
+      await sleep(400);
+      const s = await evaluate(`window.__RATIO(".ced-modal")`);
+      await evaluate(`[...document.querySelectorAll(".ced-modal__btns .ced-btn")].find(b => b.textContent === "Cancel")?.click()`);
+      await sleep(300);
+      return s;
+    }
+    await evaluate(`window.edit.blog()`);
+    await sleep(600);
+    await evaluate(`document.querySelector(".bc-title").value = "Ratio check"`);
+    await evaluate(`document.querySelector(".bc-write textarea").value = "A body."`);
+    await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Publish").click()`);
+    await sleep(700);
+    const s = await evaluate(`window.__RATIO(".bc-wizard")`);
+    await evaluate(`[...document.querySelectorAll(".bc-wizard .ced-modal__btns button")].find(b => b.textContent === "Cancel")?.click()`);
+    await sleep(400);
+    await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+    await sleep(400);
+    return s;
+  }
+
+  // R1. landscape holds 16:9 on all three dialogs
+  await atSize(1280, 800);
+  const land = {};
+  for (const k of ["handoff", "region", "wizard"]) land[k] = await shapeOf(k);
+  const landBad = Object.keys(land).filter((k) =>
+    !(land[k].there && Math.abs(land[k].ratio - 1.78) <= 0.02 && !land[k].offScreen));
+  check("ratio: every dialog holds 16:9 in landscape",
+    landBad.length === 0,
+    Object.keys(land).map((k) => k + "=" + land[k].w + "x" + land[k].h +
+      " r=" + land[k].ratio).join(" "));
+
+  // R1b. the button row reaches the foot of every held box. This is the one
+  // fault the ratio introduced: the file ask and the folder confirm are as
+  // tall as their content, so before the ratio their buttons were at the
+  // bottom by definition. Held, they floated in the middle of the box.
+  const footBad = Object.keys(land).filter((k) =>
+    !(land[k].footGap !== null && land[k].footGap <= 3));
+  check("ratio: the button row sits at the foot of every held box",
+    footBad.length === 0,
+    Object.keys(land).map((k) => k + "=" + land[k].footGap + "px").join(" "));
+
+  // R2. portrait flows. The wizard is the exception and its reason is in
+  // publish.js: every stage is laid over the box, so it has no in-flow
+  // content to take a height from and is told one instead.
+  await atSize(390, 844);
+  const port = {};
+  for (const k of ["handoff", "region", "wizard"]) port[k] = await shapeOf(k);
+  const portBad = Object.keys(port).filter((k) =>
+    !(port[k].there && port[k].ratio < 1.7 && !port[k].offScreen && !port[k].boxScrolls));
+  check("ratio: portrait drops the ratio, and no box passes the viewport",
+    portBad.length === 0,
+    Object.keys(port).map((k) => k + "=" + port[k].w + "x" + port[k].h +
+      " r=" + port[k].ratio + (port[k].offScreen ? " OFFSCREEN" : "")).join(" "));
+
+  // R3. the same ask is the same shape in a box of its own and as a stage
+  // inside the wizard. That difference is what started this part.
+  await atSize(1280, 800);
+  const aloneShape = await shapeOf("handoff");
+  await evaluate(`window.edit.blog()`);
+  await sleep(600);
+  await evaluate(`document.querySelector(".bc-title").value = "Stage check"`);
+  await evaluate(`document.querySelector(".bc-write textarea").value = "A body."`);
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Publish").click()`);
+  await sleep(700);
+  // The ask arrives as a stage one frame after it is asked for, and the
+  // wizard steps it in, so this waits for it rather than guessing a delay.
+  // When it does not come, the detail says what was on screen instead.
+  // The SAME file both times, which is what the check claims. A different
+  // one is not interchangeable: by this point in the run a repo folder is
+  // picked, and a month file the folder holds is read from it with no ask
+  // at all, so the stage never opens and the check reads as a shape fault.
+  await evaluate(`window.__rq2 = AMH.tool.handOff("blog/2605.html", new Error("ratio"));`);
+  let stagedShape = { there: false };
+  for (let i = 0; i < 20 && !stagedShape.there; i++) {
+    await sleep(250);
+    stagedShape = await evaluate(`(function () {
+      var g = document.querySelector(".bc-wiz__guest"), b = document.querySelector(".bc-wizard");
+      if (!g || !b) return { there: false,
+        wizard: !!b, step: b ? b.getAttribute("data-step") : null,
+        guest: !!g, ask: !!document.querySelector(".ced-handoff"),
+        composer: !!document.querySelector(".bc-panel") };
+      var gr = g.getBoundingClientRect(), br = b.getBoundingClientRect();
+      return { there: true, guest: [Math.round(gr.width), Math.round(gr.height)],
+               box: [Math.round(br.width), Math.round(br.height)] };
+    })()`);
+  }
+  // the guest sits inside the box border, so two pixels in each direction is
+  // the frame and not a change of shape
+  check("ratio: the file ask is the same shape in its own box and as a stage",
+    aloneShape.there && stagedShape.there &&
+    Math.abs(stagedShape.box[0] - aloneShape.w) <= 1 && Math.abs(stagedShape.box[1] - aloneShape.h) <= 1 &&
+    aloneShape.w - stagedShape.guest[0] <= 2 && aloneShape.h - stagedShape.guest[1] <= 2,
+    JSON.stringify({ alone: [aloneShape.w, aloneShape.h], ...stagedShape }));
+
+  // R4. the per-box escape hatch. No surface sets it today, so this check is
+  // what proves it works, and the first surface that needs it says so in one
+  // word rather than inventing a second size rule.
+  const flowed = await evaluate(`(function () {
+    var box = document.querySelector(".bc-wizard");
+    if (!box) return { there: false };
+    var held = Math.round(box.getBoundingClientRect().height);
+    box.classList.add("ced-modal--flow");
+    var h = Math.round(box.getBoundingClientRect().height);
+    box.classList.remove("ced-modal--flow");
+    var back = Math.round(box.getBoundingClientRect().height);
+    return { there: true, held: held, flowing: h, back: back };
+  })()`);
+  check("ratio: the flow class drops the ratio, and taking it off puts it back",
+    flowed.there && flowed.flowing !== flowed.held && flowed.back === flowed.held,
+    JSON.stringify(flowed));
+
+  await evaluate(`(function () {
+    var b = [...document.querySelectorAll(".ced-handoff .ced-modal__btns button")]
+      .find(function (x) { return x.textContent === "Cancel"; });
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll(".bc-wizard .ced-modal__btns button")].find(b => b.textContent === "Cancel")?.click()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+
+  // ============ THE GRIP ============
+  // A box is as tall as its rule says. The grip is how a reader says the
+  // rule is wrong for what they are doing now. It grows the box downward,
+  // clamps at both ends, answers the keyboard, and is forgotten.
+  //
+  // A fixed viewport, because every number below is a height.
+  await atSize(1280, 900);
+  const GRIP = `
+    window.__drag = function (sel, dy) {
+      var box = document.querySelector(sel);
+      if (!box) return { there: false };
+      var grip = box.querySelector(".ced-grip");
+      if (!grip) return { there: false, grip: false };
+      var before = box.getBoundingClientRect();
+      var g = grip.getBoundingClientRect();
+      var x = g.left + g.width / 2, y = g.top + g.height / 2;
+      function fire(type, cy) {
+        grip.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true,
+          clientX: x, clientY: cy, pointerId: 1, pointerType: "mouse", buttons: 1 }));
+      }
+      fire("pointerdown", y);
+      fire("pointermove", y + dy);
+      fire("pointerup", y + dy);
+      var after = box.getBoundingClientRect();
+      return { there: true, grip: true,
+               topBefore: Math.round(before.top), topAfter: Math.round(after.top),
+               hBefore: Math.round(before.height), hAfter: Math.round(after.height),
+               bottom: Math.round(after.bottom), vh: innerHeight,
+               /* the drag must not leave the page selecting text */
+               gripping: document.documentElement.classList.contains("ced-gripping") };
+    };`;
+  await evaluate(GRIP);
+
+  // G1. every box carries a grip, and it covers no button. The grip lies in
+  // the button row's own bottom padding, so a button that reaches into it
+  // would be a button the reader cannot press.
+  await evaluate(`[...document.querySelectorAll(".ced-chip")].find(c => c.title === "blog-eyebrow")?.click()`);
+  await sleep(500);
+  const gripSafe = await evaluate(`(function () {
+    var box = document.querySelector(".ced-modal");
+    if (!box) return { there: false };
+    var grip = box.querySelector(".ced-grip");
+    if (!grip) return { there: true, grip: false };
+    var g = grip.getBoundingClientRect(), cs = getComputedStyle(grip);
+    var over = [].slice.call(box.querySelectorAll(".ced-modal__btns .ced-btn"))
+      .filter(function (b) { return b.getBoundingClientRect().bottom > g.top + 0.5; })
+      .map(function (b) { return b.textContent; });
+    return { there: true, grip: true, h: Math.round(g.height), over: over,
+             /* without this a phone scrolls the page instead of dragging */
+             touchAction: cs.touchAction, cursor: cs.cursor,
+             tabbable: grip.tabIndex === 0, label: grip.getAttribute("aria-label") || "" };
+  })()`);
+  check("grip: the box carries one, it covers no button, and a touch drags it",
+    gripSafe.there && gripSafe.grip && gripSafe.over.length === 0 &&
+    gripSafe.touchAction === "none" && gripSafe.cursor === "ns-resize" &&
+    gripSafe.tabbable && gripSafe.label.length > 0,
+    JSON.stringify(gripSafe));
+
+  // G2. it grows DOWNWARD. Every box is centred by a transform, so height
+  // added without anchoring the top would grow it equally both ways.
+  const grew = await evaluate(`window.__drag(".ced-modal", 100)`);
+  check("grip: a drag grows the box downward and leaves its top where it was",
+    grew.there && grew.grip && grew.topAfter === grew.topBefore &&
+    grew.hAfter === grew.hBefore + 100 && grew.gripping === false,
+    JSON.stringify(grew));
+
+  // G3. both clamps. A box under the floor loses its head and buttons; a box
+  // past the screen cannot be closed with its own buttons.
+  const floor = await evaluate(`window.__drag(".ced-modal", -4000)`);
+  const ceiling = await evaluate(`window.__drag(".ced-modal", 4000)`);
+  check("grip: it stops at a floor that keeps the head and the buttons, and at the screen",
+    floor.hAfter === 180 && ceiling.bottom === ceiling.vh - 8 &&
+    floor.topAfter === floor.topBefore,
+    JSON.stringify({ floor: floor.hAfter, ceiling: ceiling.bottom, vh: ceiling.vh }));
+
+  // G4. the keyboard. A grip that answers only a pointer is unreachable for
+  // anyone who does not use one.
+  const keys = await evaluate(`(function () {
+    var box = document.querySelector(".ced-modal");
+    var grip = box.querySelector(".ced-grip");
+    grip.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    var start = Math.round(box.getBoundingClientRect().height);
+    grip.focus();
+    var took = document.activeElement === grip;
+    function press(k, n) {
+      for (var i = 0; i < n; i++) {
+        grip.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+      }
+      return Math.round(box.getBoundingClientRect().height);
+    }
+    var down = press("ArrowDown", 5), up = press("ArrowUp", 2), home = press("Home", 1);
+    return { took: took, start: start, down: down, up: up, home: home };
+  })()`);
+  check("grip: the keyboard reaches it, a step is 24px, and Home puts the box back",
+    keys.took && keys.down === keys.start + 120 && keys.up === keys.down - 48 &&
+    keys.home === keys.start,
+    JSON.stringify(keys));
+
+  // G5. a dragged height is forgotten. This is the decision that means no
+  // stored key, no per-box memory, and nothing to migrate.
+  await evaluate(`window.__drag(".ced-modal", 120)`);
+  const held = await evaluate(`(function () {
+    var b = document.querySelector(".ced-modal");
+    return { h: Math.round(b.getBoundingClientRect().height), inline: b.getAttribute("style") || "" };
+  })()`);
+  await evaluate(`[...document.querySelectorAll(".ced-modal__btns .ced-btn")].find(b => b.textContent === "Cancel")?.click()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll(".ced-chip")].find(c => c.title === "blog-eyebrow")?.click()`);
+  await sleep(500);
+  const forgot = await evaluate(`(function () {
+    var b = document.querySelector(".ced-modal");
+    return { h: Math.round(b.getBoundingClientRect().height), inline: b.getAttribute("style") || "" };
+  })()`);
+  check("grip: a dragged height is forgotten, and the box opens on its rule again",
+    held.h > forgot.h && held.inline.indexOf("height") !== -1 &&
+    forgot.inline.indexOf("height") === -1,
+    JSON.stringify({ held: held, forgot: forgot }));
+
+  // G6. decision A: the box grip is the only grip here. The textarea used to
+  // carry the browser's corner grip, which grew the text inside a box that
+  // was already too small and so only moved the scrollbar.
+  const soleGrip = await evaluate(`(function () {
+    var ta = document.querySelector(".ced-modal textarea");
+    return { resize: ta ? getComputedStyle(ta).resize : "absent",
+             grips: document.querySelectorAll(".ced-modal .ced-grip").length };
+  })()`);
+  check("grip: the region editor has one grip, not two - its textarea gave up the corner",
+    soleGrip.resize === "none" && soleGrip.grips === 1,
+    JSON.stringify(soleGrip));
+  await evaluate(`[...document.querySelectorAll(".ced-modal__btns .ced-btn")].find(b => b.textContent === "Cancel")?.click()`);
+  await sleep(400);
+
+  // G7. the other surfaces carry one too, and each of them grows.
+  await evaluate(`window.__gq = AMH.tool.handOff("blog/2605.html", new Error("grip"));`);
+  await sleep(600);
+  const askGrew = await evaluate(`window.__drag(".ced-handoff", 90)`);
+  await evaluate(`(function () {
+    var b = [...document.querySelectorAll(".ced-handoff .ced-modal__btns button")]
+      .find(function (x) { return x.textContent === "Cancel"; });
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+  await evaluate(`window.edit.blog()`);
+  await sleep(700);
+  const panelGrew = await evaluate(`window.__drag(".bc-panel", 20)`);
+  await evaluate(`document.querySelector(".bc-title").value = "Grip check"`);
+  await evaluate(`document.querySelector(".bc-write textarea").value = "A body."`);
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Publish").click()`);
+  await sleep(800);
+  const wizGrew = await evaluate(`window.__drag(".bc-wizard", 110)`);
+  // The composer is the one box with almost no room to grow: it already
+  // stands at 94vh, so its drag meets the screen clamp within a pixel or
+  // two rather than following the pointer. That is the clamp working, so
+  // what is asked of it is that it grows and then stops at the screen.
+  check("grip: the file ask, the composer and the wizard each carry one and each grows",
+    askGrew.grip && askGrew.hAfter === askGrew.hBefore + 90 &&
+    panelGrew.grip && panelGrew.hAfter > panelGrew.hBefore &&
+    panelGrew.bottom === panelGrew.vh - 8 &&
+    wizGrew.grip && wizGrew.hAfter === wizGrew.hBefore + 110,
+    JSON.stringify({ ask: [askGrew.hBefore, askGrew.hAfter],
+                     composer: [panelGrew.hBefore, panelGrew.hAfter],
+                     composerFoot: [panelGrew.bottom, panelGrew.vh],
+                     wizard: [wizGrew.hBefore, wizGrew.hAfter] }));
+  await evaluate(`[...document.querySelectorAll(".bc-wizard .ced-modal__btns button")].find(b => b.textContent === "Cancel")?.click()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+
+  // ============ THE HAND-OVER ============
+  // Press Publish and the composer has said what it has to say. It steps
+  // back, the wizard comes forward in its place, and one box is on screen
+  // for the rest of the job. Cancel gives the composer back as it was.
+  //
+  // It is HIDDEN and not closed, because the build reads the composer's
+  // fields while the wizard is up. That is also why the restore keeps
+  // everything: nothing was ever taken apart.
+  await atSize(1280, 900);
+  await evaluate(`window.edit.blog()`);
+  await sleep(700);
+  await evaluate(`document.querySelector(".bc-title").value = "The hand-over"`);
+  await evaluate(`document.querySelector(".bc-write textarea").value = "Typed before Publish."`);
+  await evaluate(`document.querySelector(".bc-tags").querySelector("input").value = "xr planetarium"`);
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Publish").click()`);
+  await sleep(800);
+  const handedOver = await evaluate(`(function () {
+    var p = document.querySelector(".bc-panel"), w = document.querySelector(".bc-wizard");
+    return { panelKept: !!p, panelHidden: !!p && p.hidden === true,
+             panelShown: !!p && getComputedStyle(p).display !== "none",
+             wizard: !!w, step: w ? w.getAttribute("data-step") : null,
+             /* one ground, not two: the composer drops its own as the
+                wizard raises the counted one, in the same tick */
+             scrims: document.querySelectorAll(".ced-scrim").length,
+             /* the fields are still readable, which is what lets the build
+                run while the composer is out of sight */
+             title: document.querySelector(".bc-title").value };
+  })()`);
+  check("hand-over: Publish puts the composer away and the wizard takes its place",
+    handedOver.panelKept && handedOver.panelHidden && !handedOver.panelShown &&
+    handedOver.wizard && handedOver.step === "confirm" && handedOver.scrims === 1 &&
+    handedOver.title === "The hand-over",
+    JSON.stringify(handedOver));
+
+  // Cancel gives it back, with everything that was in it.
+  await evaluate(`[...document.querySelectorAll(".bc-wizard .ced-modal__btns button")].find(b => b.textContent === "Cancel").click()`);
+  await sleep(800);
+  const handedBack = await evaluate(`(function () {
+    var p = document.querySelector(".bc-panel");
+    return { wizard: !!document.querySelector(".bc-wizard"),
+             panelShown: !!p && p.hidden === false && getComputedStyle(p).display !== "none",
+             /* it comes back on its rule, not off to the side */
+             travel: p ? getComputedStyle(p).getPropertyValue("--travel").trim() : null,
+             scrims: document.querySelectorAll(".ced-scrim").length,
+             title: document.querySelector(".bc-title").value,
+             body: document.querySelector(".bc-write textarea").value,
+             tags: document.querySelector(".bc-tags").querySelector("input").value };
+  })()`);
+  check("hand-over: Cancel gives the composer back with every word still in it",
+    handedBack.wizard === false && handedBack.panelShown && handedBack.scrims === 1 &&
+    (handedBack.travel === "" || handedBack.travel === "0px") &&
+    handedBack.title === "The hand-over" && handedBack.body === "Typed before Publish." &&
+    handedBack.tags === "xr planetarium",
+    JSON.stringify(handedBack));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(500);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
