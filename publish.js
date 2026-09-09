@@ -84,6 +84,7 @@
   var HL_COUNT = 4;
   var bcPanel = null, bcScrim = null, bcBody = null, bcDate = null, bcTitle = null;
   var bcAdv = null, bcAdvSum = null, bcAdvBody = null;   /* the advanced section */
+  var bcSpecBtn = null, bcSpecPanel = null;              /* the special commands */
   var bcTime = null, bcZone = null, bcTags = null, bcCountsEl = null;
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
@@ -456,6 +457,41 @@
     ".bc-write,.bc-images,.bc-preview{flex:1;min-height:0;display:none;flex-direction:column;" +
     "margin:0 1.1rem;}" +
     ".bc-write{position:relative;}" +
+    /* THE SPECIAL COMMANDS.
+       The control sits after a divider at the end of the toolbar, so it
+       reads as a different kind of thing from the buttons that write text.
+       It is scoped to .bc-write, which is the composer's own toolbar: the
+       region editor uses the same .ced-modal__tools class and must not
+       gain either of these. */
+    ".bc-write .ced-tool__sep{width:1px;align-self:stretch;margin:.15rem .35rem;" +
+    "background:var(--line);flex:none;}" +
+    ".bc-write .bc-spec__btn{display:inline-flex;align-items:center;gap:.3rem;}" +
+    ".bc-write .bc-spec__btn svg{width:12px;height:12px;flex:none;}" +
+    ".bc-write .bc-spec__btn.on{border-color:var(--accent);color:var(--accent-bright);}" +
+    /* Above the toolbar, not below it: the toolbar sits at the top of the
+       write view, so a panel under it would cover the words being written. */
+    /* top is set when it opens, from the row's own foot. This is only what
+       it starts at before the first open. */
+    ".bc-spec{position:absolute;left:0;right:0;top:2.4rem;z-index:4;" +
+    "background:var(--panel);border:1px solid var(--line);border-radius:10px;" +
+    "box-shadow:0 24px 60px -24px rgba(0,0,0,.9);padding:.6rem .8rem;" +
+    "max-height:60%;overflow:auto;}" +
+    ".bc-spec[hidden]{display:none;}" +
+    ".bc-spec__head{font:700 .66rem var(--font);letter-spacing:.12em;" +
+    "text-transform:uppercase;color:var(--dim);padding-bottom:.4rem;" +
+    "border-bottom:1px solid var(--line-soft);margin-bottom:.5rem;}" +
+    ".bc-spec__list{display:grid;grid-template-columns:max-content 1fr;" +
+    "gap:.5rem .8rem;align-items:baseline;}" +
+    ".bc-spec__write{flex:none;font:12px Consolas,'Courier New',monospace;" +
+    "color:var(--accent-bright);white-space:nowrap;}" +
+    ".bc-spec__of{min-width:0;display:flex;flex-direction:column;gap:.1rem;}" +
+    ".bc-spec__where{font-size:.66rem;color:var(--dim);}" +
+    ".bc-spec__does{font-size:.74rem;color:var(--text-soft);line-height:1.45;}" +
+    ".bc-spec__foot{margin:.5rem 0 0;padding-top:.45rem;" +
+    "border-top:1px solid var(--line-soft);font-size:.7rem;color:var(--dim);}" +
+    /* a phone has no room for the code beside the words */
+    "@media (max-width:560px){.bc-spec__list{grid-template-columns:1fr;gap:.1rem;}" +
+    ".bc-spec__list .bc-spec__of{padding-bottom:.4rem;}}" +
     ".bc-panel[data-tab=write] .bc-write{display:flex;}" +
     ".bc-panel[data-tab=images] .bc-images{display:flex;}" +
     ".bc-panel[data-tab=preview] .bc-preview{display:flex;}" +
@@ -976,6 +1012,41 @@
     bcBody.selectionEnd = s + t.length;
     bcRefreshCounts();
   }
+  /* THE SPECIAL COMMANDS.
+
+     Things a post body can carry that plain Markdown does not know. The
+     panel behind the (i) on the toolbar is built from this, so what it
+     lists is what the code accepts.
+
+     The FLAG half is READ from the renderer, which is what decides them. A
+     flag added there appears here without being copied, and that is the one
+     way a help panel stays true.
+
+     The other two are the composer's own and are declared here, beside the
+     code that reads them: the image tag, which bcPublish resolves against
+     the Images view, and the heading rule in bcHeadingTitle. */
+  function bcSpecials() {
+    var out = ((AMH.markdown && AMH.markdown.flags) || []).map(function (f) {
+      return { write: "{" + f.name + "}", where: "alone on its own line", does: f.does };
+    });
+    out.push({ write: "[img0001,caption|alt]", where: "on its own line",
+               does: "Places an image from the Images view. Use png0001 for a .png. " +
+                     "The caption and the alt text are both optional." });
+    out.push({ write: "# A heading", where: "the first line of the post",
+               does: "Becomes the post's name in the stream, the month list and the " +
+                     "search index. The heading stays in the body." });
+    return out;
+  }
+  /* One toolbar button that writes one flag. The word and the sentence are
+     the renderer's, so the hover and the panel can never disagree. */
+  function bcFlagTool(label, name) {
+    var flags = (AMH.markdown && AMH.markdown.flags) || [];
+    var f = null, i;
+    for (i = 0; i < flags.length; i++) if (flags[i].name === name) f = flags[i];
+    var word = "{" + name + "}";
+    return [label, word + " - " + (f ? f.does : ""), function () { bcInsertFlag(word); }];
+  }
+
   var BC_TOOLS = [
     ["H", "heading: H2, H3, H4, then plain", bcHeadingCycle],
     ["• list", "bullet list", function () { bcListToggle("- "); }],
@@ -988,10 +1059,70 @@
       if (url) { TOOL.wrap("[", "](" + url + ")"); bcRefreshCounts(); }
     }],
     ["Table", "table: a two by two skeleton", bcInsertTable],
-    ["Expand", "expand for more: the feed folds the post here", function () { bcInsertFlag("{expandformore}"); }],
-    ["Break", "page break: the feed ends the post here with Read more", function () { bcInsertFlag("{pagebreak}"); }],
+    bcFlagTool("Expand", "expandformore"),
+    bcFlagTool("Break", "pagebreak"),
     ["Clear", "clear formatting in the selection", bcClearMarks]
   ];
+
+  /* ---------------- the special-commands flyout ----------------
+     Filled from bcSpecials each time it opens, so a flag added to the
+     renderer is in the list without this file being touched. */
+  function bcSpecIsOpen() { return !!(bcSpecPanel && !bcSpecPanel.hidden); }
+  function bcSpecOpen(open) {
+    if (!bcSpecPanel) return;
+    if (open) {
+      bcSpecFill();
+      /* The toolbar wraps to two lines on a phone, so a fixed offset would
+         lay the panel over its second line. It hangs from where the row
+         actually ends. offsetTop is inside .bc-write, which is the panel's
+         own containing block. */
+      var row = bcSpecPanel.parentNode &&
+        bcSpecPanel.parentNode.querySelector(".ced-modal__tools");
+      if (row) bcSpecPanel.style.top = (row.offsetTop + row.offsetHeight + 4) + "px";
+    }
+    bcSpecPanel.hidden = !open;
+    bcSpecBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    bcSpecBtn.classList.toggle("on", !!open);
+  }
+  function bcSpecFill() {
+    var rows = bcSpecials().map(function (s) {
+      /* two cells of one grid, not a row that lays itself out: the widest
+         command sizes the first column and every description then starts in
+         the same place, which a per-row flex cannot do. */
+      return '<code class="bc-spec__write">' + TOOL.escAttr(s.write) + "</code>" +
+        '<div class="bc-spec__of"><span class="bc-spec__where">' +
+        TOOL.escAttr(s.where) + "</span>" +
+        '<span class="bc-spec__does">' + TOOL.escAttr(s.does) + "</span></div>";
+    }).join("");
+    bcSpecPanel.innerHTML =
+      '<div class="bc-spec__head">Special commands</div>' +
+      '<div class="bc-spec__list">' + rows + "</div>" +
+      '<p class="bc-spec__foot">Everything else in a post body is Markdown.</p>';
+  }
+  /* Escape closes it, and so does a press anywhere that is not the panel or
+     the control that opened it. Both listeners are on the document and are
+     put on once, with the panel, and go with it. */
+  function bcSpecWire() {
+    doc.addEventListener("keydown", bcSpecKey, true);
+    doc.addEventListener("pointerdown", bcSpecAway, true);
+  }
+  function bcSpecUnwire() {
+    doc.removeEventListener("keydown", bcSpecKey, true);
+    doc.removeEventListener("pointerdown", bcSpecAway, true);
+  }
+  function bcSpecKey(e) {
+    if (e.key !== "Escape" || !bcSpecIsOpen()) return;
+    /* it is in front of the composer, so it answers the key first */
+    e.preventDefault();
+    e.stopPropagation();
+    bcSpecOpen(false);
+    bcSpecBtn.focus();
+  }
+  function bcSpecAway(e) {
+    if (!bcSpecIsOpen()) return;
+    if (bcSpecPanel.contains(e.target) || bcSpecBtn.contains(e.target)) return;
+    bcSpecOpen(false);
+  }
 
   /* ---------------- the tag dropdown ----------------
 
@@ -1110,6 +1241,9 @@
   }
   function bcClose() {
     bcStopTicker();
+    bcSpecUnwire();
+    bcSpecBtn = null;
+    bcSpecPanel = null;
     bcImages.forEach(function (im) { if (im.previewURL) URL.revokeObjectURL(im.previewURL); });
     bcImages = [];
     if (bcScrim && bcScrim.parentNode) bcScrim.parentNode.removeChild(bcScrim);
@@ -1326,7 +1460,45 @@
       b.addEventListener("click", t[2]);
       tools.appendChild(b);
     });
+    /* THE SPECIAL COMMANDS, BEHIND AN (i).
+
+       The toolbar writes two of them and never names the third or the
+       fourth, and the two it does write are called things nobody guesses:
+       the flags are {expandformore} and {pagebreak}, not the shorter words
+       a reader reaches for. A row of buttons cannot carry that, so the row
+       carries a way to ask.
+
+       A flyout and not a box: a second box over the composer is the thing
+       this editor has spent its design removing, and a title cannot hold
+       four commands with their syntax. It is anchored to the control, it
+       closes on Escape or a click outside, and it needs no new layer. */
+    var sep = doc.createElement("span");
+    sep.className = "ced-tool__sep";
+    sep.setAttribute("aria-hidden", "true");
+    tools.appendChild(sep);
+
+    bcSpecBtn = doc.createElement("button");
+    bcSpecBtn.type = "button";
+    bcSpecBtn.className = "ced-tool bc-spec__btn";
+    bcSpecBtn.tabIndex = -1;
+    bcSpecBtn.setAttribute("aria-expanded", "false");
+    bcSpecBtn.title = "The commands a post body can carry that Markdown does not know";
+    bcSpecBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/>' +
+      '<line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.6"/></svg>' +
+      "<span>Special commands</span>";
+    bcSpecBtn.addEventListener("click", function () { bcSpecOpen(!bcSpecIsOpen()); });
+    tools.appendChild(bcSpecBtn);
+
+    bcSpecPanel = doc.createElement("div");
+    bcSpecPanel.className = "bc-spec";
+    bcSpecPanel.hidden = true;
+    bcSpecPanel.setAttribute("role", "dialog");
+    bcSpecPanel.setAttribute("aria-label", "Special commands");
+
     writeEl.appendChild(tools);
+    writeEl.appendChild(bcSpecPanel);
     bcBody = doc.createElement("textarea");
     bcBody.spellcheck = true;
     bcBody.placeholder = bcMode === "html"
@@ -1463,6 +1635,7 @@
     bcPanel.appendChild(bcAdv);
     /* shut, and already saying what is in it */
     bcAdvOpen(false);
+    bcSpecWire();
 
     bcStatus = doc.createElement("div");
     bcStatus.className = "bc-status";
@@ -1576,6 +1749,10 @@
 
   function bcPanelAway() {
     if (!bcPanel || !bcPanel.parentNode || bcPanelHid) return;
+    /* A flyout left open would be hidden with the composer and still answer
+       Escape from in front of the wizard, so the key would close a panel
+       nobody can see instead of the step in front. */
+    bcSpecOpen(false);
     bcPanelHid = true;
     bcPanelWas = doc.activeElement;
     bcPanel.classList.add("ced-box--past");

@@ -2801,9 +2801,13 @@ async function main() {
     layout.placeholder === "Title (optional)" && layout.postedRight &&
     layout.widths.every((w, i) => w >= [70, 80, 55][i]) && layout.counts && layout.tags,
     JSON.stringify(layout).slice(0, 200));
-  check("composer: the Markdown toolbar has the eleven buttons, none of them a tab stop",
-    layout.tools === 11 && layout.toolStops === 0 &&
-    layout.toolLabels.join("|") === "H|• list|1. list|B|I|S|Link|Table|Expand|Break|Clear",
+  // Eleven write text. The twelfth opens the panel that says what the
+  // special commands are, and it is last, after a divider, so it reads as a
+  // different kind of thing from the eleven.
+  check("composer: the Markdown toolbar has eleven buttons and the (i), none of them a tab stop",
+    layout.tools === 12 && layout.toolStops === 0 &&
+    layout.toolLabels.join("|") ===
+      "H|• list|1. list|B|I|S|Link|Table|Expand|Break|Clear|Special commands",
     layout.tools + " buttons, " + layout.toolStops + " stops: " + layout.toolLabels.join("|"));
 
   // The ring: title, body, the images area, Publish, Close, and nothing
@@ -8038,6 +8042,73 @@ async function main() {
     stale.off === true && /behind the server/.test(stale.state) &&
     /site\.css/.test(stale.state),
     JSON.stringify(stale));
+
+  // ============ THE SPECIAL COMMANDS ============
+  // A post body can carry things Markdown does not know, and the two the
+  // toolbar writes are called {expandformore} and {pagebreak}, which are not
+  // the words anyone reaches for. The row carries a way to ask.
+  //
+  // The panel is built from one list. The FLAG half is read from the
+  // renderer, which is what decides them, so the check below proves the two
+  // still agree. A help panel that is written twice goes stale the first
+  // time a flag is added, and that is the fault this guards.
+  await evaluate(`window.edit.blog()`);
+  await sleep(800);
+  const spec = await evaluate(`(function () {
+    var row = document.querySelector(".bc-write .ced-modal__tools");
+    var btn = document.querySelector(".bc-spec__btn");
+    var p = document.querySelector(".bc-spec");
+    if (!row || !btn || !p) return { there: false };
+    var shut = p.hidden;
+    btn.click();
+    var codes = [].slice.call(p.querySelectorAll(".bc-spec__write"))
+      .map(function (x) { return x.textContent; });
+    var ofs = [].slice.call(p.querySelectorAll(".bc-spec__of"))
+      .map(function (x) { return Math.round(x.getBoundingClientRect().left); });
+    var btns = [].slice.call(row.querySelectorAll(".ced-tool"));
+    var tops = btns.map(function (b) { return Math.round(b.getBoundingClientRect().top); });
+    return { there: true, shutAtFirst: shut, open: !p.hidden, codes: codes,
+             /* every description starts in the same place, which a row that
+                lays itself out cannot do */
+             aligned: ofs.every(function (v) { return v === ofs[0]; }),
+             sep: !!row.querySelector(".ced-tool__sep"),
+             buttons: btns.length,
+             lines: tops.filter(function (v, i) { return tops.indexOf(v) === i; }).length,
+             /* the list the renderer itself holds */
+             flags: (AMH.markdown.flags || []).map(function (f) { return "{" + f.name + "}"; }) };
+  })()`);
+  check("special: the toolbar carries a divider and an (i), and the row still holds one line",
+    spec.there && spec.sep && spec.buttons === 12 && spec.lines === 1 &&
+    spec.shutAtFirst === true && spec.open === true,
+    JSON.stringify({ sep: spec.sep, buttons: spec.buttons, lines: spec.lines,
+                     shutAtFirst: spec.shutAtFirst, open: spec.open }));
+  // THE CHECK THAT KEEPS IT HONEST. Every flag the renderer accepts must be
+  // in the panel. Add one to markdown.js and forget the panel, and this fails.
+  const specMissing = (spec.flags || []).filter((f) => spec.codes.indexOf(f) === -1);
+  check("special: every flag the renderer accepts is listed, and the image tag with them",
+    specMissing.length === 0 && spec.codes.indexOf("[img0001,caption|alt]") !== -1 &&
+    spec.codes.length >= spec.flags.length + 1 && spec.aligned,
+    JSON.stringify({ renderer: spec.flags, panel: spec.codes, specMissing, aligned: spec.aligned }));
+
+  // Escape closes the flyout and leaves the composer where it is: it is a
+  // panel inside the box, so it must not read as the box's own way out.
+  const specOut = await evaluate(`(function () {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    var afterEsc = { open: !document.querySelector(".bc-spec").hidden,
+                     composer: !!document.querySelector(".bc-panel") };
+    document.querySelector(".bc-spec__btn").click();
+    var reopened = !document.querySelector(".bc-spec").hidden;
+    document.querySelector(".bc-write textarea")
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    return { afterEsc: afterEsc, reopened: reopened,
+             afterOutside: !document.querySelector(".bc-spec").hidden };
+  })()`);
+  check("special: Escape and a press outside close the flyout, and the composer stays",
+    specOut.afterEsc.open === false && specOut.afterEsc.composer === true &&
+    specOut.reopened === true && specOut.afterOutside === false,
+    JSON.stringify(specOut));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(400);
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
