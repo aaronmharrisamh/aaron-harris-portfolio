@@ -162,6 +162,7 @@
   var modal = null, scrim = null, ta = null, modalTitle = null, modalStatus = null;
   var altIn = null, srcLine = null;
   var pendingChip = null;
+  var buildRow = null;         /* the build mark and what it agrees with */
   /* The last bundle publish.js built, until the site shows it. The line is
      on every page because a person may be anywhere when they wonder whether
      they pushed it. publish.js owns the record; this only reads it. */
@@ -992,6 +993,16 @@
     "background:var(--c-orange);opacity:0;}" +
     ".ced-panel__row.ced-edited .ced-dot{opacity:1;}" +
     ".ced-panel__row .ced-hidden{color:var(--dim);font-size:.62rem;}" +
+    /* one line, and it wraps rather than pushing the panel wider */
+    ".ced-panel__build{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;" +
+    "padding:.4rem .6rem;border-bottom:1px solid var(--line-soft);font-size:.62rem;" +
+    "color:var(--dim);line-height:1.5;}" +
+    ".ced-panel__build .ced-b{flex:none;color:var(--accent-bright);font:700 10px/1 Consolas,monospace;}" +
+    ".ced-panel__mark{flex:none;font:700 10px/1 Consolas,monospace;color:var(--text-soft);}" +
+    ".ced-panel__state{min-width:0;}" +
+    /* behind is a fact to act on, so it is the one state that is colored */
+    ".ced-panel__build.is-off{color:var(--c-orange);}" +
+    ".ced-panel__build.is-off .ced-panel__mark{color:var(--c-orange);}" +
     ".ced-panel__foot{padding:.55rem .6rem;border-top:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:.35rem;}" +
     ".ced-btn{padding:.34rem .66rem;border-radius:999px;border:1px solid var(--line);background:var(--bg-deep);" +
     "color:var(--text-soft);font:600 .7rem var(--font);cursor:pointer;transition:border-color .2s,color .2s;}" +
@@ -1260,6 +1271,175 @@
     e.preventDefault();
     e.stopPropagation();
     dialogStack[dialogStack.length - 1]();
+  }
+
+  /* ---------------- the build mark ----------------
+     ONE SHORT MARK FOR EVERY FILE THIS PAGE IS BUILT FROM.
+
+     The site edits itself, so the editor you are running is a file the site
+     served you, and a browser will happily keep an old one. GitHub Pages
+     sends max-age=600 and every page loads its scripts by bare name, with
+     no version query, so a deploy does not reach a tab that is already
+     open. That is a silent fault: the editor looks right and behaves like
+     last week.
+
+     THE PAGE'S OWN STAMP CANNOT ANSWER THIS. A publish writes a stamp into
+     every page, and comparing that would be wrong here: the HTML can be
+     fresh while a script is cached, which is exactly the case that catches
+     people, and a page-to-page comparison calls it current.
+
+     NOTHING CAN BE STAMPED INTO THE SCRIPTS EITHER. They are hand-written
+     source, a publish writes generated files only, and the project has no
+     build step, so no hash can be put inside them.
+
+     What is left is the server's own answer. Same origin, so the editor can
+     read the ETag of the copy the browser holds and the copy the server
+     holds, and never download either. The repo has no ETag, so that side is
+     compared by content, which is a local read on both halves.
+
+     Three marks, three faults, and they are different faults:
+       browser against server   you must refresh
+       repo against browser     you have commits you did not push
+     A side that cannot be read says so. It never counts as agreement. */
+
+  /* Every same-origin file this page is built from, derived from the page
+     itself so there is no list to keep in sync. */
+  function buildSet() {
+    var out = [];
+    Array.prototype.forEach.call(doc.querySelectorAll("script[src]"), function (s) {
+      out.push(s.getAttribute("src"));
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll('link[rel="stylesheet"]'), function (l) {
+      out.push(l.getAttribute("href"));
+    });
+    out.push((location.pathname.replace(/^.*\//, "") || "index.html"));
+    /* a font or a CDN is not ours to check, and a query would not compare */
+    return out.filter(function (u) {
+      return u && !/^https?:/.test(u) && !/^\/\//.test(u) && u.indexOf("?") === -1;
+    });
+  }
+  /* FNV-1a, base 36, six characters. Short enough to read out, long enough
+     that two different builds do not collide in a project this size. */
+  function buildHash(text) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ("00000" + h.toString(36)).slice(-6);
+  }
+  /* The identity of one file, as the server states it. "?" means the file
+     could not be read, which is never the same as "it matches". */
+  function buildTag(res) {
+    if (!res || !res.ok) return "?";
+    return res.headers.get("etag") || res.headers.get("last-modified") || "?";
+  }
+  function buildSide(how) {
+    var files = buildSet();
+    return Promise.all(files.map(function (u) {
+      return fetch(u, how).then(buildTag, function () { return "?"; });
+    })).then(function (tags) { return { files: files, tags: tags }; });
+  }
+  /* What this browser is running: the copy in its own cache, which is the
+     copy it gave to the page. */
+  function buildMine() { return buildSide({ cache: "force-cache" }); }
+  /* What the server holds now. HEAD, so no body crosses the wire. */
+  function buildTheirs() { return buildSide({ method: "HEAD", cache: "no-store" }); }
+  /* What the repo folder holds. No ETag exists here, so this side is
+     compared by content against the browser's own copy. Both reads are
+     local, so nothing crosses the wire at all. */
+  function buildRepo(files) {
+    if (!repoDir) return Promise.resolve(null);
+    return Promise.all(files.map(function (u) {
+      return readFromRepo(u).then(function (text) {
+        return text === null ? "?" : buildHash(text);
+      }, function () { return "?"; });
+    }));
+  }
+  function buildMineText(files) {
+    return Promise.all(files.map(function (u) {
+      return fetch(u, { cache: "force-cache" }).then(function (r) {
+        return r.ok ? r.text().then(buildHash) : "?";
+      }, function () { return "?"; });
+    }));
+  }
+  /* Which files two sides disagree on. A "?" on either side is a disagreement
+     that cannot be resolved, and is reported as unread rather than as equal. */
+  function buildDiff(files, a, b) {
+    var off = [], unread = [];
+    files.forEach(function (u, i) {
+      if (a[i] === "?" || b[i] === "?") unread.push(u);
+      else if (a[i] !== b[i]) off.push(u);
+    });
+    return { off: off, unread: unread };
+  }
+
+  /* Read all three and say what they mean. Resolves an answer; it never
+     rejects, because a check that throws tells a reader nothing. */
+  function buildCheck() {
+    var fromDisk = location.protocol === "file:";
+    return buildMine().then(function (mine) {
+      var files = mine.files;
+      var mark = buildHash(mine.tags.join("|"));
+      if (fromDisk) {
+        return { mark: mark, files: files, server: "disk", repo: "unchecked",
+                 say: "opened from disk, so the server cannot be asked" };
+      }
+      return buildTheirs().then(function (theirs) {
+        var d = buildDiff(files, mine.tags, theirs.tags);
+        return { mark: mark, files: files,
+                 server: d.off.length ? "behind" : (d.unread.length ? "unread" : "same"),
+                 behind: d.off, unread: d.unread };
+      }).then(function (r) {
+        if (!repoDir) { r.repo = "unchecked"; return r; }
+        return buildMineText(files).then(function (mineText) {
+          return buildRepo(files).then(function (repo) {
+            var d2 = buildDiff(files, mineText, repo);
+            r.repo = d2.off.length ? "differs" : (d2.unread.length ? "unread" : "same");
+            r.repoOff = d2.off;
+            return r;
+          });
+        });
+      });
+    });
+  }
+
+  /* Run the check and put the answer in the row. It is called once, when
+     the panel is built, because that is a deliberate act and the answer is
+     only interesting at the moment you sit down to edit. */
+  function buildSay() {
+    if (!buildRow) return;
+    var mark = buildRow.querySelector(".ced-panel__mark");
+    var state = buildRow.querySelector(".ced-panel__state");
+    buildCheck().then(function (r) {
+      if (!buildRow) return;
+      mark.textContent = r.mark;
+      var bad = r.server === "behind" || r.repo === "differs";
+      var say;
+      if (r.server === "disk") {
+        say = "opened from disk, so nothing was checked";
+      } else if (r.server === "behind") {
+        say = r.behind.length + (r.behind.length === 1 ? " file is" : " files are") +
+          " behind the server: " + r.behind.join(", ") + ". Press Ctrl+F5.";
+      } else if (r.repo === "differs") {
+        say = "current, but " + r.repoOff.length +
+          (r.repoOff.length === 1 ? " file in your repo differs" : " files in your repo differ") +
+          ": " + r.repoOff.join(", ") + ". Commit and push.";
+      } else if (r.server === "unread" || r.repo === "unread") {
+        say = "some files could not be read, so this is not a clean answer";
+      } else if (r.repo === "unchecked") {
+        say = "matches the server. The repo folder was not given, so it was not checked.";
+      } else {
+        say = "browser, server and repo agree";
+      }
+      state.textContent = say;
+      buildRow.classList.toggle("is-off", bad);
+      buildRow.title = r.files.join("\n");
+    }, function () {
+      if (!buildRow) return;
+      mark.textContent = "??????";
+      state.textContent = "the check could not run";
+    });
   }
 
   /* ---------------- the grip ----------------
@@ -1591,6 +1771,17 @@
     head.appendChild(shut);
     panel.appendChild(head);
 
+    /* THE BUILD ROW. Its own line, directly under the head, because it
+       describes the whole panel below it rather than any one thing in it.
+       Quiet when the three marks agree, and marked when they do not. */
+    buildRow = doc.createElement("div");
+    buildRow.className = "ced-panel__build";
+    buildRow.innerHTML = '<span class="ced-b">BUILD</span>' +
+      '<span class="ced-panel__mark">......</span>' +
+      '<span class="ced-panel__state">checking...</span>';
+    panel.appendChild(buildRow);
+    buildSay();
+
     pendingChip = doc.createElement("button");
     pendingChip.type = "button";
     pendingChip.className = "ced-pending";
@@ -1842,6 +2033,7 @@
 
   function teardownUI() {
     pendingChip = null;
+    buildRow = null;
     publishLine = null;
     closeModal();
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);

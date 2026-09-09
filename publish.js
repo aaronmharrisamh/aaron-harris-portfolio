@@ -425,7 +425,11 @@
     "color:var(--dim);pointer-events:none;}" +
     /* A tab strip, not a row of pills. The strip's own line is the baseline
        the chosen tab sits on, and the chosen tab breaks it. */
-    ".bc-tabs{display:flex;gap:.1rem;padding:.45rem 1.1rem 0;" +
+    /* The room below the line is the strip's, not the toolbar's.
+       .ced-modal__tools has no top padding and the region editor uses the
+       same class, so padding the toolbar would move that box too. The strip
+       is the composer's alone, so the space lands here. */
+    ".bc-tabs{display:flex;gap:.1rem;padding:.45rem 1.1rem 0;margin-bottom:.55rem;" +
     "border-bottom:1px solid var(--line);}" +
     ".bc-tab{padding:.4rem .85rem .7rem;border:0;border-bottom:2px solid transparent;" +
     "margin-bottom:-1px;background:none;color:var(--muted);" +
@@ -1970,7 +1974,14 @@
       var cancel = function () { bcWizClose(); take(false); };
       bcWizBtn("Cancel", "", cancel);
       bcWizSpacer();
-      bcRouteButtons(take).focus();
+      /* The rebuild and the delete come through here, and they deliver the
+         same two ways a publish does. The folder is asked for on the press
+         for all three, or this step would hand a folder job to a build that
+         only asks at the end, which is the wait that started this. */
+      bcRouteButtons(function (route) {
+        if (!route) { take(route); return; }
+        bcFolderFirst(route).then(take);
+      }).focus();
       wz.onEscape = cancel;
     });
   }

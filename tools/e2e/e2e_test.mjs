@@ -7982,6 +7982,63 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
+  // ============ THE BUILD MARK ============
+  // The site edits itself, so the editor is a file the site served, and a
+  // browser keeps an old one for as long as its cache says it may. A deploy
+  // then does not reach a tab that is already open, and the editor looks
+  // right while behaving like last week. That fault is silent, so the panel
+  // states it: one short mark for every file the page is built from, and a
+  // line saying what agrees with what.
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(600);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(2500);
+  const mark = await evaluate(`(function () {
+    var r = document.querySelector(".ced-panel__build");
+    if (!r) return { there: false };
+    return { there: true,
+             mark: r.querySelector(".ced-panel__mark").textContent,
+             state: r.querySelector(".ced-panel__state").textContent,
+             off: r.classList.contains("is-off"),
+             /* the set is derived from the page, so there is no list to
+                keep in sync with the pages themselves */
+             files: (r.title || "").split(String.fromCharCode(10)) };
+  })()`);
+  check("build: the panel names the build it is running, and every file it is built from",
+    mark.there && /^[a-z0-9]{6}$/.test(mark.mark) &&
+    mark.files.indexOf("tool.js") !== -1 && mark.files.indexOf("site.css") !== -1 &&
+    mark.files.indexOf("index.html") !== -1,
+    JSON.stringify(mark).slice(0, 200));
+  // Nothing changed under this page, so it is current. The line still says
+  // the repo was not checked: a side that cannot be read is never counted
+  // as agreement, which is the whole point of the check.
+  check("build: with nothing behind, it says so and does not claim what it did not check",
+    mark.off === false && /matches the server/.test(mark.state) &&
+    /not checked/.test(mark.state),
+    JSON.stringify({ off: mark.off, state: mark.state }));
+
+  // and it CATCHES a deploy that lands under a page already open, which is
+  // the fault it exists for. The served copy changes; the tab does not.
+  writeFileSync(join(SERVE, "site.css"),
+    readFileSync(join(SERVE, "site.css"), "utf-8") + "\n/* a later build */\n");
+  await sleep(1200);
+  const stale = await evaluate(`(function () {
+    /* window.edit toggles, so twice is off and on: the panel is built
+       again, and the check runs with it */
+    window.edit();
+    window.edit();
+    return new Promise(function (res) { setTimeout(function () {
+      var r = document.querySelector(".ced-panel__build");
+      res({ state: r ? r.querySelector(".ced-panel__state").textContent : "no row",
+            off: r ? r.classList.contains("is-off") : null });
+    }, 2500); });
+  })()`, { awaitPromise: true });
+  check("build: a file that changed on the server is named, and the row is marked",
+    stale.off === true && /behind the server/.test(stale.state) &&
+    /site\.css/.test(stale.state),
+    JSON.stringify(stale));
+
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
   process.exitCode = failed ? 1 : 0;
