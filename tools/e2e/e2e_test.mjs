@@ -6255,9 +6255,13 @@ async function main() {
       tools: [...document.querySelectorAll('.bc-write .ced-tool')].map(b => b.textContent).join('|'),
       title: document.querySelector('.bc-title').value,
     })`);
+    /* The (i) is last on this toolbar too. What is behind it is shorter
+       here: an HTML post never goes through the Markdown renderer, so the
+       flags and the heading rule do nothing in it and are not listed. The
+       image tag is, because a publish resolves it in either mode. */
     check("HTML mode: a post from before V047 opens as HTML, with the HTML toolbar and the note",
       htmlMode.mode === "html" && /written in HTML\. It stays HTML/.test(htmlMode.status) &&
-      /^B\|I\|Link\|BR\|/.test(htmlMode.tools) && /H3\|P$/.test(htmlMode.tools) && htmlMode.title === "Hand title",
+      /^B\|I\|Link\|BR\|/.test(htmlMode.tools) && /H3\|P\|Special commands$/.test(htmlMode.tools) && htmlMode.title === "Hand title",
       JSON.stringify(htmlMode).slice(0, 220));
     await pressPublish();
     const zip10 = await capturePublish();
@@ -8052,8 +8056,16 @@ async function main() {
   // renderer, which is what decides them, so the check below proves the two
   // still agree. A help panel that is written twice goes stale the first
   // time a flag is added, and that is the fault this guards.
+  /* The build-mark block above left the browser on the home page, which
+     carries no composer at all. This is the blog page's own surface, so it
+     opens that page first. */
+  await send("Page.navigate", { url: BLOGPAGE });
+  await waitLoaded();
+  await sleep(900);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(600);
   await evaluate(`window.edit.blog()`);
-  await sleep(800);
+  await sleep(900);
   const spec = await evaluate(`(function () {
     var row = document.querySelector(".bc-write .ced-modal__tools");
     var btn = document.querySelector(".bc-spec__btn");

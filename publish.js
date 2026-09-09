@@ -1026,15 +1026,22 @@
      code that reads them: the image tag, which bcPublish resolves against
      the Images view, and the heading rule in bcHeadingTitle. */
   function bcSpecials() {
-    var out = ((AMH.markdown && AMH.markdown.flags) || []).map(function (f) {
+    /* A post written in HTML never goes through the Markdown renderer, so
+       the flags and the heading rule do nothing in it. The image tag does:
+       bcPublish resolves it whichever mode the post is in. Listing a
+       command that cannot work is worse than listing none. */
+    var md = bcMode !== "html";
+    var out = md ? ((AMH.markdown && AMH.markdown.flags) || []).map(function (f) {
       return { write: "{" + f.name + "}", where: "alone on its own line", does: f.does };
-    });
+    }) : [];
     out.push({ write: "[img0001,caption|alt]", where: "on its own line",
                does: "Places an image from the Images view. Use png0001 for a .png. " +
                      "The caption and the alt text are both optional." });
-    out.push({ write: "# A heading", where: "the first line of the post",
-               does: "Becomes the post's name in the stream, the month list and the " +
-                     "search index. The heading stays in the body." });
+    if (md) {
+      out.push({ write: "# A heading", where: "the first line of the post",
+                 does: "Becomes the post's name in the stream, the month list and the " +
+                       "search index. The heading stays in the body." });
+    }
     return out;
   }
   /* One toolbar button that writes one flag. The word and the sentence are
@@ -1097,7 +1104,8 @@
     bcSpecPanel.innerHTML =
       '<div class="bc-spec__head">Special commands</div>' +
       '<div class="bc-spec__list">' + rows + "</div>" +
-      '<p class="bc-spec__foot">Everything else in a post body is Markdown.</p>';
+      '<p class="bc-spec__foot">Everything else in this post is ' +
+      (bcMode === "html" ? "HTML" : "Markdown") + ".</p>";
   }
   /* Escape closes it, and so does a press anywhere that is not the panel or
      the control that opened it. Both listeners are on the document and are
