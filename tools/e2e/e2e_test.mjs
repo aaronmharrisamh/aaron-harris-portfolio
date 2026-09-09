@@ -8122,6 +8122,97 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
+  // ============ A FLAG ANYWHERE, AND THE ESCAPE ============
+  // A flag used to be read only when it was alone on its line, so
+  // "{expandformore} and more words" rendered as text and cut nothing, with
+  // no word said about it. A flag now counts anywhere on a line and the
+  // paragraph SPLITS where it was written: the words before it stay shown
+  // and the words after it are what the cut hides.
+  //
+  // {!name} and [!img0001] write a command as text. The mark answers only
+  // for a command the renderer knows, so {!hello} is not an escape.
+  const flagCases = await evaluate(`(function () {
+    var NL = String.fromCharCode(10), BT = String.fromCharCode(96);
+    function R(t) { return AMH.markdown.render(t); }
+    function cuts(h) { return (h.match(/data-cut="[a-z]+"/g) || []).length; }
+    function paras(h) { return (h.match(/<p>/g) || []).length; }
+    var inline = R(["First post of the day", "", "{expandformore} and the rest"].join(NL));
+    var mid = R("Here is the intro {pagebreak} and here is the rest");
+    var alone = R(["One", "", "{expandformore}", "", "Two"].join(NL));
+    return {
+      /* the case that started this: a flag first on a line, words after it */
+      inlineCuts: cuts(inline), inlineParas: paras(inline),
+      inlineHtml: inline.split(String.fromCharCode(10)).join(" "),
+      /* mid-sentence splits AT the flag, so the intro is still shown */
+      midCuts: cuts(mid), midParas: paras(mid), midHtml: mid.split(String.fromCharCode(10)).join(" "),
+      /* a flag on its own line is what it always was */
+      aloneCuts: cuts(alone), aloneParas: paras(alone),
+      /* the escapes */
+      escFlag: R("Write {!expandformore} to fold."),
+      escNotACommand: R("This is {!hello} here."),
+      escTag: R("Write [!img0001] for an image."),
+      /* a flag in a code span is text */
+      inCode: R("Use " + BT + "{pagebreak}" + BT + " to stop."),
+      /* a cut with nothing above it would hide the whole post */
+      first: R("{pagebreak} only this"),
+      /* the words a post is named and searched by carry no flag */
+      plain: AMH.markdown.text("First post {expandformore} and the rest"),
+      plainEsc: AMH.markdown.text("Write {!pagebreak} here.")
+    };
+  })()`);
+  check("flags: a flag anywhere on a line cuts, and the paragraph splits where it was written",
+    flagCases.inlineCuts === 1 && flagCases.inlineParas === 2 &&
+    flagCases.midCuts === 1 && flagCases.midParas === 2 &&
+    /<p>Here is the intro<\/p>/.test(flagCases.midHtml) &&
+    /<p>and here is the rest<\/p>/.test(flagCases.midHtml) &&
+    flagCases.aloneCuts === 1 && flagCases.aloneParas === 2,
+    JSON.stringify({ inline: flagCases.inlineHtml, mid: flagCases.midHtml }).slice(0, 240));
+  check("flags: the escape writes a command as text, and only for a command",
+    /\{expandformore\}/.test(flagCases.escFlag) && !/data-cut/.test(flagCases.escFlag) &&
+    /\{!hello\}/.test(flagCases.escNotACommand) &&
+    /\[img0001\]/.test(flagCases.escTag) && !/<figure/.test(flagCases.escTag),
+    JSON.stringify({ flag: flagCases.escFlag, notACommand: flagCases.escNotACommand,
+                     tag: flagCases.escTag }));
+  check("flags: a flag in a code span is text, and a flag above everything cuts nothing",
+    !/data-cut/.test(flagCases.inCode) && /<code>\{pagebreak\}<\/code>/.test(flagCases.inCode) &&
+    !/data-cut/.test(flagCases.first) && /only this/.test(flagCases.first),
+    JSON.stringify({ inCode: flagCases.inCode, first: flagCases.first }));
+  check("flags: the post's own words carry no flag, and keep what was escaped",
+    !/expandformore/.test(flagCases.plain) && /First post/.test(flagCases.plain) &&
+    /and the rest/.test(flagCases.plain) && /\{pagebreak\}/.test(flagCases.plainEsc),
+    JSON.stringify({ plain: flagCases.plain, plainEsc: flagCases.plainEsc }));
+
+  // and the STREAM folds where the split put the marker, which is the whole
+  // point of the split: the renderer and the reading engine have to agree.
+  const splitFold = await evaluate(`(function () {
+    var host = document.querySelector(".bs-stream") || document.body;
+    var art = document.createElement("article");
+    art.className = "bs-post";
+    art.id = "p9101";
+    art.setAttribute("data-id", "9101");
+    art.setAttribute("data-date", "260101");
+    var body = document.createElement("div");
+    body.className = "bs-post__body";
+    body.innerHTML = AMH.markdown.render("The intro {pagebreak} and the rest");
+    art.appendChild(body);
+    host.appendChild(art);
+    AMH.blog.cut();
+    var blocks = [].slice.call(body.children);
+    var btn = body.querySelector(".bs-more");
+    var shown = blocks.filter(function (b) {
+      return !b.hidden && !(b.classList && b.classList.contains("bs-more")); });
+    var out = { kind: btn ? btn.getAttribute("data-more") : "",
+               shown: shown.length,
+               shownText: shown.map(function (b) { return b.textContent; }).join("|"),
+               hidden: blocks.filter(function (b) { return b.hidden; }).length };
+    art.remove();
+    return out;
+  })()`);
+  check("flags: the stream folds where the split put the cut, so the intro stays shown",
+    splitFold.kind === "hard" && splitFold.shownText.indexOf("The intro") !== -1 &&
+    splitFold.shownText.indexOf("and the rest") === -1 && splitFold.hidden >= 1,
+    JSON.stringify(splitFold));
+
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
   process.exitCode = failed ? 1 : 0;

@@ -1032,7 +1032,8 @@
        command that cannot work is worse than listing none. */
     var md = bcMode !== "html";
     var out = md ? ((AMH.markdown && AMH.markdown.flags) || []).map(function (f) {
-      return { write: "{" + f.name + "}", where: "alone on its own line", does: f.does };
+      return { write: "{" + f.name + "}", where: "anywhere on a line",
+               does: f.does + " The line splits where you write it." };
     }) : [];
     out.push({ write: "[img0001,caption|alt]", where: "on its own line",
                does: "Places an image from the Images view. Use png0001 for a .png. " +
@@ -1042,6 +1043,12 @@
                  does: "Becomes the post's name in the stream, the month list and the " +
                        "search index. The heading stays in the body." });
     }
+    /* Last, because it is about the ones above rather than a command of its
+       own. It answers only for a command the editor knows, so {!hello} is
+       not an escape and stays as you type it. */
+    out.push({ write: "{!command}  [!img0001]", where: "in place of the command",
+               does: "Writes the command as text instead of obeying it. Use it to " +
+                     "write about a command without using one." });
     return out;
   }
   /* One toolbar button that writes one flag. The word and the sentence are

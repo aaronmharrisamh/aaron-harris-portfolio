@@ -106,7 +106,7 @@ Text after.
 [png0002,Cap two]
 <p>Text after.</p>
 ====
-flags: alone on a line they become cut markers; beside text they are text
+flags: a flag anywhere is a cut, and the paragraph splits where it is written
 Intro.
 
 {expandformore}
@@ -121,7 +121,23 @@ Rest. {pagebreak}
 <span class="bp-cut" data-cut="soft"></span>
 <p>More.</p>
 <span class="bp-cut" data-cut="hard"></span>
-<p>Rest. {pagebreak}</p>
+<p>Rest.</p>
+<span class="bp-cut" data-cut="hard"></span>
+====
+flags: a flag mid-sentence splits there, so the words before it stay shown
+Here is the intro {pagebreak} and here is the rest.
+----
+<p>Here is the intro</p>
+<span class="bp-cut" data-cut="hard"></span>
+<p>and here is the rest.</p>
+====
+escapes: {!name} and [!img] write a command as text, and only for a real command
+Write {!expandformore} as text.
+
+And [!img0001] too, and {!hello} is not a command.
+----
+<p>Write {expandformore} as text.</p>
+<p>And [img0001] too, and {!hello} is not a command.</p>
 ====
 inline marks: bold, both italics, strikethrough, code; an underscore inside a word is text
 **bold** and *it* and _it too_ and ~~gone~~ and `co<de> **raw**` and snake_case_word stays.
