@@ -998,7 +998,14 @@
     "padding:.4rem .6rem;border-bottom:1px solid var(--line-soft);font-size:.62rem;" +
     "color:var(--dim);line-height:1.5;}" +
     ".ced-panel__build .ced-b{flex:none;color:var(--accent-bright);font:700 10px/1 Consolas,monospace;}" +
-    ".ced-panel__mark{flex:none;font:700 10px/1 Consolas,monospace;color:var(--text-soft);}" +
+    /* The mark is the one thing on this row a person reads back, so it is
+       larger than its own label and spaced enough to be counted as six
+       characters rather than scanned as a word.
+
+       UPPER CASE BY STYLE, not by value. The text stays as the hash made
+       it, so anything that reads it sees what was computed. */
+    ".ced-panel__mark{flex:none;font:700 13px/1 Consolas,monospace;" +
+    "letter-spacing:.09em;text-transform:uppercase;color:var(--text-soft);}" +
     ".ced-panel__state{min-width:0;}" +
     /* behind is a fact to act on, so it is the one state that is colored */
     ".ced-panel__build.is-off{color:var(--c-orange);}" +
