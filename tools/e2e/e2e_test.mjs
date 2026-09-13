@@ -165,20 +165,26 @@ const EXPECTED_REGIONS = {
     "nav-about", "nav-contact",
     "hero-eyebrow", "hero-h1", "hero-sub", "hero-note", "hero-cta-work",
     "hero-cta-contact", "work-eyebrow", "work-h2", "work-intro",
+    // Every card carries both optional blocks now, wrapped whether or not
+    // they hold anything, so one can gain stats or highlights from the form
+    // without a source edit. The cull empties a wrapped block rather than
+    // removing it, and :empty hides it.
     "fr3-gallery", "fr3-title", "fr3-meta", "fr3-lead", "fr3-desc",
-    "fr3-stats", "fr3-spec-role", "fr3-spec-stack", "fr3-more",
-    "fr3-deepdive", "fr3-dd-gallery", "fr2-gallery", "fr2-title",
-    "fr2-meta", "fr2-lead", "fr2-desc", "fr2-stats", "fr2-spec-role",
-    "fr2-spec-stack", "fr2-more", "fr2-deepdive", "fr2-dd-gallery",
+    "fr3-stats", "fr3-highlights", "fr3-spec-role", "fr3-spec-stack",
+    "fr3-more", "fr3-deepdive", "fr3-dd-gallery", "fr2-gallery", "fr2-title",
+    "fr2-meta", "fr2-lead", "fr2-desc", "fr2-stats", "fr2-highlights",
+    "fr2-spec-role", "fr2-spec-stack", "fr2-more", "fr2-deepdive",
+    "fr2-dd-gallery",
     "phl-gallery", "phl-title", "phl-meta", "phl-lead", "phl-desc",
-    "phl-stats", "phl-spec-role", "phl-spec-stack", "aiw-gallery",
-    "aiw-title", "aiw-meta", "aiw-lead", "aiw-desc", "aiw-highlights",
-    "aiw-spec-role", "aiw-spec-stack", "cog-gallery", "cog-title",
-    "cog-meta", "cog-lead", "cog-desc", "cog-stats", "cog-spec-role",
-    "cog-spec-stack", "cvr-gallery", "cvr-title", "cvr-meta", "cvr-lead",
-    "cvr-desc", "cvr-stats", "cvr-spec-role", "cvr-spec-stack",
+    "phl-stats", "phl-highlights", "phl-spec-role", "phl-spec-stack",
+    "aiw-gallery", "aiw-title", "aiw-meta", "aiw-lead", "aiw-desc",
+    "aiw-stats", "aiw-highlights", "aiw-spec-role", "aiw-spec-stack",
+    "cog-gallery", "cog-title", "cog-meta", "cog-lead", "cog-desc",
+    "cog-stats", "cog-highlights", "cog-spec-role", "cog-spec-stack",
+    "cvr-gallery", "cvr-title", "cvr-meta", "cvr-lead", "cvr-desc",
+    "cvr-stats", "cvr-highlights", "cvr-spec-role", "cvr-spec-stack",
     "br-gallery", "br-title", "br-meta", "br-lead", "br-desc", "br-stats",
-    "br-spec-role", "br-spec-tech",
+    "br-highlights", "br-spec-role", "br-spec-tech",
     "latest-eyebrow", "latest-h2", "blog-highlights",
     "about-eyebrow", "about-lede",
     "about-p1", "about-p2", "about-p3", "about-place", "about-link",
@@ -207,7 +213,9 @@ const EXPECTED_REGIONS = {
 // always last. A page declares only the trunks it needs: blog.js is on the
 // blog page and nowhere else. A wrong order fails here, not in the browser.
 const EXPECTED_SCRIPTS = {
-  "index.html": ["site.js", "work.js", "tool.js"],
+  // markdown.js on the home page: a deep dive is written in Markdown and
+  // carries its source, and tool.js is what asks the renderer for the rest.
+  "index.html": ["site.js", "work.js", "markdown.js", "tool.js"],
   "blog.html": ["site.js", "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"],
   "gallery.html": ["site.js", "work.js", "tool.js", "gallery.js"],
 };
@@ -275,10 +283,52 @@ function servedSource(page) {
   return page === "blog.html" ? emptyBlogPage(src) : src;
 }
 
-function exportIsByteExact(page, exported, editedSlugs) {
+// remove the CONTENT of the named lists, so everything outside them can be
+// compared byte for byte even after a block was added, removed or moved.
+// A slug that lives inside a stripped list must not also be named: its
+// markers went with the content.
+function stripLists(txt, names) {
+  let out = txt;
+  for (const n of names) {
+    const open = `<!--[list:${n}]-->`, close = `<!--[/list:${n}]-->`;
+    const a = out.indexOf(open);
+    const b = out.indexOf(close, a);
+    if (a < 0 || b < 0) return null;
+    out = out.slice(0, a + open.length) + out.slice(b);
+  }
+  return out;
+}
+
+// The items of one list, by id, as the exact bytes between their own markers.
+// A reorder moves bytes and changes none of them, so every item that was in
+// the source has to come back identical.
+function listItems(txt, name) {
+  const open = `<!--[list:${name}]-->`, close = `<!--[/list:${name}]-->`;
+  const a = txt.indexOf(open);
+  const b = txt.indexOf(close, a);
+  if (a < 0 || b < 0) return null;
+  const inner = txt.slice(a + open.length, b);
+  const out = {};
+  const re = /<!--\[item:([\w-]+)\]-->/g;
+  let m;
+  while ((m = re.exec(inner))) {
+    const shut = `<!--[/item:${m[1]}]-->`;
+    const e = inner.indexOf(shut, m.index + m[0].length);
+    if (e < 0) return null;
+    out[m[1]] = inner.slice(m.index, e + shut.length);
+    re.lastIndex = e + shut.length;
+  }
+  return out;
+}
+
+function exportIsByteExact(page, exported, editedSlugs, listNames = []) {
   const src = servedSource(page);
-  const a = stripSpans(src, editedSlugs);
-  const b = stripSpans(exported, editedSlugs);
+  const srcNoLists = stripLists(src, listNames);
+  const expNoLists = stripLists(exported, listNames);
+  if (srcNoLists === null) return { ok: false, detail: page + ": a list is missing from the source" };
+  if (expNoLists === null) return { ok: false, detail: page + ": a list is missing from the export" };
+  const a = stripSpans(srcNoLists, editedSlugs);
+  const b = stripSpans(expNoLists, editedSlugs);
   if (a === null) return { ok: false, detail: page + ": a slug is missing from the source" };
   if (b === null) return { ok: false, detail: page + ": a slug is missing from the export" };
   return { ok: a === b, detail: a === b ? page + " clean" : page + " " + firstDiff(a, b) };
@@ -433,7 +483,7 @@ async function main() {
     const trains = src.split('<div class="gal-train"').slice(1);
     const faults = [];
     for (const train of trains) {
-      const id = (/data-project="([^"]+)"/.exec(train) || [, "?"])[1];
+      const id = (/data-section="([^"]+)"/.exec(train) || [, "?"])[1];
       const spans = [...train.matchAll(/data-span="(\d)"/g)].map((m) => +m[1]);
       let row = 0, rows = [];
       for (const s of spans) {
@@ -1113,6 +1163,532 @@ async function main() {
   await sleep(400);
   await send("Emulation.clearDeviceMetricsOverride");
 
+  // ============ GL. THE GALLERY IS A LIST ============
+  // Every other edit replaces what is between one pair of markers, so nothing
+  // could add a pair. A list is the answer: a run of blocks the editor may add
+  // to, remove from and reorder. The gallery is its first consumer, and the
+  // home page's projects will be its second.
+
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html` });
+  await waitLoaded();
+  await sleep(1400);
+
+  // GL1. the list is read off the page, and its blocks wear their controls
+  const glOn = await evaluate(`(() => {
+    window.edit();
+    const s = window.AMH.tool.listState("gallery");
+    const arrows = document.querySelectorAll('.ced-pills .ced-pill--icon');
+    return {
+      source: s ? s.source : null, order: s ? s.order : null,
+      dirty: window.AMH.tool.listDirty(),
+      pills: document.querySelectorAll('.gal-train__head .ced-pills').length,
+      foot: document.querySelectorAll('.ced-listfoot').length,
+      up: arrows[0] ? arrows[0].disabled : null,
+      down: arrows[1] ? arrows[1].disabled : null,
+    };
+  })()`);
+  check("gallery list: the page's one list is read, with its one item",
+    glOn.source.join() === "br" && glOn.order.join() === "br" && glOn.dirty === false,
+    JSON.stringify(glOn));
+  check("gallery list: the band carries its controls and the list its new-section pill",
+    glOn.pills === 1 && glOn.foot === 1, JSON.stringify(glOn));
+  check("gallery list: a block at both ends of the list cannot move either way",
+    glOn.up === true && glOn.down === true, JSON.stringify(glOn));
+
+  // GL2. The number is counted by the stylesheet, never typed. A computed
+  // content value is the counter EXPRESSION rather than its result, so the
+  // rendered number is read where generated content lands instead.
+  await send("Accessibility.enable");
+  const bandRef = await send("Runtime.evaluate", {
+    expression: `document.querySelector('.gal-train__head')`,
+  });
+  const axBand = await send("Accessibility.queryAXTree", { objectId: bandRef.result.objectId });
+  const axSeen = [];
+  for (const node of axBand.nodes) {
+    const v = node.name && node.name.value;
+    if (v && v !== axSeen[axSeen.length - 1]) axSeen.push(v);
+  }
+  check("gallery list: the section number is counted, and reaches the reader",
+    axSeen.slice(0, 3).join("") === "01 / PROJECT", JSON.stringify(axSeen.slice(0, 4)));
+
+  // GL3. the form is the one place a section is named
+  const glForm = await evaluate(`(() => {
+    window.AMH.tool.listForm("gallery", "br");
+    const box = document.querySelector('.ced-listform');
+    const ins = [...box.querySelectorAll('.ced-field input')].map(i => i.value);
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Cancel').click();
+    const r = window.AMH.tool.regionFor("gal-br");
+    return { fields: ins, open: !!document.querySelector('.ced-listform'),
+             dirty: window.AMH.tool.imageRegion.dirty(r) };
+  })()`);
+  check("gallery list: the form opens on the band as the file holds it",
+    glForm.fields.join("|") === "Project|Blockade Runner|2024", JSON.stringify(glForm));
+  check("gallery list: Cancel leaves the section exactly as it was",
+    glForm.open === false && glForm.dirty === false, JSON.stringify(glForm));
+
+  // GL4. Apply writes the band; Revert puts the published one back
+  const glApply = await evaluate(`(() => {
+    window.AMH.tool.listForm("gallery", "br");
+    const box = document.querySelector('.ced-listform');
+    const ins = box.querySelectorAll('.ced-field input');
+    ins[1].value = "Blockade Runner II";
+    ins[2].value = "2011-2016";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Apply').click();
+    const r = window.AMH.tool.regionFor("gal-br");
+    const after = {
+      title: document.querySelector('.gal-train__title').textContent,
+      year: document.querySelector('.gal-train__year').textContent,
+      count: document.querySelector('.gal-train__count').textContent,
+      dirty: window.AMH.tool.imageRegion.dirty(r),
+    };
+    const real = window.confirm;
+    window.confirm = () => true;
+    window.edit.revertAll();
+    window.confirm = real;
+    return { after, back: r.head, backDirty: window.AMH.tool.imageRegion.dirty(r),
+             onPage: document.querySelector('.gal-train__title').textContent };
+  })()`);
+  check("gallery list: Apply writes the band and marks the section changed",
+    glApply.after.title === "Blockade Runner II" && glApply.after.year === "2011-2016" &&
+    glApply.after.dirty === true, JSON.stringify(glApply.after));
+  check("gallery list: the image count stays the editor's to write",
+    glApply.after.count === "8 images", glApply.after.count);
+  check("gallery list: Revert puts the published band back",
+    glApply.back.title === "Blockade Runner" && glApply.backDirty === false &&
+    glApply.onPage === "Blockade Runner", JSON.stringify(glApply));
+
+  // GL5. a new section, which is the thing no other region can do
+  const glNew = await evaluate(`(() => {
+    window.AMH.tool.listForm("gallery", null);
+    const box = document.querySelector('.ced-listform');
+    const ins = box.querySelectorAll('.ced-field input');
+    ins[0].value = "Travel"; ins[1].value = "Paris spring"; ins[2].value = "2026";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Apply').click();
+    const s = window.AMH.tool.listState("gallery");
+    const trains = document.querySelectorAll('.gal-train');
+    const last = trains[trains.length - 1];
+    return {
+      order: s.order, added: Object.keys(s.added), trains: trains.length,
+      id: last.getAttribute('data-section'),
+      label: last.querySelector('.gal-train__n').textContent,
+      title: last.querySelector('.gal-train__title').textContent,
+      count: last.querySelector('.gal-train__count').textContent,
+      tiles: last.querySelectorAll('.gal-tile').length,
+      slot: !!last.querySelector('.gal-tile img[src^="data:"]'),
+      region: !!window.AMH.tool.regionFor("gal-ps"),
+      packed: !!(last.querySelector('.gal-tile') || {}).style &&
+              !!last.querySelector('.gal-tile').style.gridColumn,
+      chip: window.edit.list().length,
+    };
+  })()`);
+  check("gallery list: a new section lands on the page with its own permanent id",
+    glNew.trains === 2 && glNew.id === "ps" && glNew.title === "Paris spring" &&
+    glNew.label === "Travel" && glNew.order.join() === "br,ps", JSON.stringify(glNew));
+  check("gallery list: it registers as an image region with one place to drop",
+    glNew.region === true && glNew.tiles === 1 && glNew.slot === true &&
+    glNew.count === "no images", JSON.stringify(glNew));
+  check("gallery list: the packer takes a section it never saw at load",
+    glNew.packed === true, JSON.stringify(glNew));
+
+  // GL6. a drop, then the export. THE DEFECT THIS PART EXISTS TO CLOSE:
+  // the region holds the band as well as the tiles, and a serializer that
+  // wrote only figures dropped the section's own title.
+  const glDrop = await evaluate(`(async () => {
+    const region = window.AMH.tool.regionFor("gal-br");
+    const cv = document.createElement('canvas');
+    cv.width = 1600; cv.height = 900;
+    cv.getContext('2d').fillRect(0, 0, 1600, 900);
+    const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+    window.AMH.tool.dropFiles(region, [new File([blob], 'band.png', { type: 'image/png' })], 0);
+    await new Promise(r => setTimeout(r, 600));
+    const modal = document.querySelector('.ced-modal__x');
+    if (modal) modal.click();
+    return { model: region.model.length, count:
+      document.querySelector('.gal-train__count').textContent };
+  })()`, { awaitPromise: true });
+  check("gallery list: a drop replaces the seed set and the count follows it",
+    glDrop.model === 1 && glDrop.count === "1 image", JSON.stringify(glDrop));
+
+  const glOut = await evaluate(
+    `window.AMH.tool.buildPage("gallery.html").then(p => p.text)`, { awaitPromise: true });
+  const glBr = glOut.slice(glOut.indexOf("<!--[edit:gal-br]-->"),
+    glOut.indexOf("<!--[/edit:gal-br]-->"));
+  check("gallery list: the export keeps the band a tile edit used to drop",
+    /gal-train__head/.test(glBr) && /Blockade Runner<\/h3>/.test(glBr) &&
+    /<span class="gal-train__count">1 image<\/span>/.test(glBr) &&
+    (glBr.match(/<figure/g) || []).length === 1,
+    glBr.replace(/\s+/g, " ").slice(0, 200));
+  check("gallery list: the exported band carries no number, because none is a value",
+    /<i class="gal-train__i"><\/i>Project/.test(glBr) && !/>\s*0\d\s*\//.test(glBr),
+    glBr.replace(/\s+/g, " ").slice(0, 140));
+  const glPs = glOut.slice(glOut.indexOf("<!--[edit:gal-ps]-->"),
+    glOut.indexOf("<!--[/edit:gal-ps]-->"));
+  check("gallery list: a section with no photographs exports a band and no tiles",
+    /Paris spring/.test(glPs) && !/<figure/.test(glPs) && !/img\/seed/.test(glPs) &&
+    !/data:image/.test(glPs) && /<span class="gal-train__count">no images<\/span>/.test(glPs),
+    glPs.replace(/\s+/g, " ").slice(0, 160));
+  const glItems = listItems(glOut, "gallery");
+  check("gallery list: the export holds both items, in the order on screen",
+    glItems && Object.keys(glItems).join() === "br,ps", JSON.stringify(Object.keys(glItems || {})));
+  const glExact = exportIsByteExact("gallery.html", glOut, [], ["gallery"]);
+  check("gallery list: every byte outside the list is untouched", glExact.ok, glExact.detail);
+
+  // GL7. a reorder moves bytes and changes none of them
+  const glMove = await evaluate(`(() => {
+    const wraps = document.querySelectorAll('[data-ced-list="gallery"]');
+    wraps[wraps.length - 1].querySelectorAll('.ced-pill--icon')[0].click();
+    const s = window.AMH.tool.listState("gallery");
+    const trains = document.querySelectorAll('.gal-train');
+    return { order: s.order, first: trains[0].getAttribute('data-section'),
+             firstUpOff: document.querySelectorAll('[data-ced-list="gallery"]')[0]
+               .querySelectorAll('.ced-pill--icon')[0].disabled,
+             pending: window.edit.pending() };
+  })()`);
+  check("gallery list: Move up reorders the page and the list together",
+    glMove.order.join() === "ps,br" && glMove.first === "ps" && glMove.firstUpOff === true,
+    JSON.stringify(glMove));
+  const glOut2 = await evaluate(
+    `window.AMH.tool.buildPage("gallery.html").then(p => p.text)`, { awaitPromise: true });
+  const glItems2 = listItems(glOut2, "gallery");
+  check("gallery list: the reordered export is the same items in the new order",
+    glItems2 && Object.keys(glItems2).join() === "ps,br" &&
+    glItems2.br === glItems.br && glItems2.ps === glItems.ps,
+    Object.keys(glItems2 || {}).join());
+
+  // GL8. the list travels, and so do the bytes its own trunk wrote. gallery.js
+  // loads on the gallery page only, so an export made from anywhere else has
+  // no serializer to ask for a train.
+  check("gallery list: the waiting work is counted on the page that holds it",
+    /change(s)? on 1 page/.test(glMove.pending), glMove.pending);
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+  const glAway = await evaluate(
+    `window.AMH.tool.buildPage("gallery.html").then(p => p.text)`, { awaitPromise: true });
+  const awayBr = glAway.slice(glAway.indexOf("<!--[edit:gal-br]-->"),
+    glAway.indexOf("<!--[/edit:gal-br]-->"));
+  const awayItems = listItems(glAway, "gallery");
+  check("gallery list: a gallery exported from another page still writes figures and a band",
+    /gal-train__head/.test(awayBr) && /<figure class="gal-tile"/.test(awayBr) &&
+    /<span class="gal-train__count">1 image<\/span>/.test(awayBr) &&
+    /\n          <figure class="gal-tile"/.test(awayBr),
+    awayBr.replace(/\s+/g, " ").slice(0, 200));
+  check("gallery list: and the new section travels with it, in order",
+    awayItems && Object.keys(awayItems).join() === "ps,br", Object.keys(awayItems || {}).join());
+
+  // GL9. back again: the page is put together from what was waiting
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html` });
+  await waitLoaded();
+  await sleep(1600);
+  const glBack = await evaluate(`(() => {
+    window.edit();
+    const trains = document.querySelectorAll('.gal-train');
+    return { trains: trains.length, first: trains[0].getAttribute('data-section'),
+             title: trains[0].querySelector('.gal-train__title').textContent,
+             packed: !!trains[0].querySelector('.gal-tile').style.gridColumn,
+             pills: document.querySelectorAll('.gal-train__head .ced-pills').length };
+  })()`);
+  check("gallery list: a walk away and back puts the list back as it was",
+    glBack.trains === 2 && glBack.first === "ps" && glBack.title === "Paris spring" &&
+    glBack.pills === 2, JSON.stringify(glBack));
+  check("gallery list: a section restored from the store reaches the packer",
+    glBack.packed === true, JSON.stringify(glBack));
+
+  // GL10. Duplicate, then Delete
+  const glDup = await evaluate(`(() => {
+    window.AMH.tool.listForm("gallery", "br");
+    const box = document.querySelector('.ced-listform');
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Duplicate').click();
+    const s = window.AMH.tool.listState("gallery");
+    const open = document.querySelector('.ced-listform');
+    const el = document.querySelector('.gal-train[data-section="brc"]');
+    return { order: s.order,
+             name: open ? open.querySelectorAll('.ced-field input')[1].value : null,
+             tiles: el ? el.querySelectorAll('.gal-tile').length : -1,
+             count: el ? el.querySelector('.gal-train__count').textContent : null };
+  })()`);
+  check("gallery list: Duplicate puts a copy right after the original",
+    glDup.order.join() === "ps,br,brc" && glDup.name === "Blockade Runner copy" &&
+    glDup.tiles === 1 && glDup.count === "1 image", JSON.stringify(glDup));
+
+  const glDel = await evaluate(`(() => {
+    const real = window.confirm;
+    window.confirm = () => true;
+    const open = document.querySelector('.ced-listform');
+    [...open.querySelectorAll('.ced-btn')].find(b => /^Delete/.test(b.textContent)).click();
+    window.confirm = real;
+    const s = window.AMH.tool.listState("gallery");
+    return { order: s.order, trains: document.querySelectorAll('.gal-train').length,
+             region: !!window.AMH.tool.regionFor("gal-brc"),
+             listed: /gal-brc/.test(String(window.edit.list())) };
+  })()`);
+  check("gallery list: Delete takes the section, its region and its listing away",
+    glDel.order.join() === "ps,br" && glDel.trains === 2 && glDel.region === false &&
+    glDel.listed === false, JSON.stringify(glDel));
+
+  // GL11. the pill is one paint, wherever it is. The blog's post pill wears
+  // it too, and its own stylesheet keeps only where that one sits.
+  const glPill = await evaluate(`(() => {
+    const b = document.querySelector('.ced-pills .ced-pill');
+    const cs = getComputedStyle(b);
+    return { bg: cs.backgroundColor, color: cs.color, radius: cs.borderTopLeftRadius,
+             border: cs.borderTopColor };
+  })()`);
+  check("gallery list: a pill is solid yellow with dark text, as the blog's is",
+    glPill.bg === "rgb(242, 193, 78)" && glPill.color === "rgb(16, 18, 23)" &&
+    glPill.radius === "999px" && glPill.border === "rgb(242, 193, 78)",
+    JSON.stringify(glPill));
+
+  await evaluate(`window.edit.pending.clear(); window.edit()`);
+  await sleep(400);
+
+  // ============ PJ. THE HOME PAGE'S PROJECTS ARE A LIST ============
+  // The second consumer of the list engine, and the first with a form of
+  // its own. Every blue chip still works; the form is a second door onto
+  // the same regions, and both write through applyRegion.
+
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+
+  const pjOn = await evaluate(`(() => {
+    window.edit();
+    const s = window.AMH.tool.listState("projects");
+    const wraps = [...document.querySelectorAll('[data-ced-list="projects"]')];
+    return {
+      source: s ? s.source : null, dirty: window.AMH.tool.listDirty(),
+      pills: document.querySelectorAll('.project__body > .ced-pills').length,
+      foot: document.querySelectorAll('.ced-listfoot').length,
+      chips: document.querySelectorAll('.ced-chip').length,
+      firstUp: wraps[0].querySelectorAll('.ced-pill--icon')[0].disabled,
+      lastDown: wraps[wraps.length - 1].querySelectorAll('.ced-pill--icon')[1].disabled,
+      beside: document.querySelector('.project__body > .ced-pills')
+        .previousElementSibling.className,
+    };
+  })()`);
+  check("projects: the seven cards are one list, and nothing is changed by reading it",
+    pjOn.source.join() === "fr3,fr2,phl,aiw,cog,cvr,br" && pjOn.dirty === false,
+    JSON.stringify(pjOn.source));
+  check("projects: every card carries its three controls, beside its number",
+    pjOn.pills === 7 && pjOn.foot === 1 && pjOn.beside === "project__index" &&
+    pjOn.firstUp === true && pjOn.lastDown === true, JSON.stringify(pjOn));
+  // The chips are the point of option C: the form is a second door, not a
+  // replacement, so every field keeps the one it had.
+  check("projects: the blue chips are all still on the page",
+    pjOn.chips > 90, String(pjOn.chips));
+
+  const pjForm = await evaluate(`(() => {
+    window.AMH.tool.listForm("projects", "br");
+    const box = document.querySelector('.ced-projform');
+    const rows = [...box.querySelectorAll('.ced-field')].map(f => ({
+      value: (f.querySelector('input:not(.ced-pair__name), textarea') || {}).value,
+      name: (f.querySelector('.ced-pair__name') || {}).value,
+      why: !!f.querySelector('.ced-field__why'),
+    }));
+    const remove = [...box.querySelectorAll('.ced-btn')].find(b => /^Remove/.test(b.textContent));
+    return { rows, head: box.querySelector('.ced-slug').textContent,
+             tabs: [...box.querySelectorAll('.ced-tab')].map(t => t.textContent).join('|'),
+             removeWide: Math.round(remove.getBoundingClientRect().width),
+             buttons: [...box.querySelectorAll('.ced-modal__btns .ced-btn')]
+               .map(b => b.textContent).join('|') };
+  })()`);
+  check("projects: the form opens on the card, a row for every field",
+    pjForm.rows.length === 8 && pjForm.head === "Blockade Runner" &&
+    pjForm.tabs === "Card|Images|Deep dive",
+    JSON.stringify({ rows: pjForm.rows.length, head: pjForm.head, tabs: pjForm.tabs }));
+  check("projects: each field reads back into its own control, none as raw HTML",
+    pjForm.rows[0].value === "Blockade Runner" &&
+    pjForm.rows[4].value === "5,000+ | paying customers\nBi-weekly | release cadence" &&
+    pjForm.rows[5].value === "" && pjForm.rows[7].name === "Tech" &&
+    pjForm.rows[7].value === "Custom voxel engine, Real-time physics, Proprietary fluid sim" &&
+    pjForm.rows.every(r => r.why === false),
+    JSON.stringify(pjForm.rows.map(r => (r.value || "").slice(0, 30))));
+  // A way out that cannot be seen is not a way out. The region editor is
+  // one box reused for two jobs and hides the controls the job on screen
+  // does not want; that is its rule and not every box's.
+  check("projects: all four moves are on screen, Remove among them",
+    pjForm.removeWide > 40 &&
+    pjForm.buttons === "Remove project|Duplicate|Cancel|Apply",
+    JSON.stringify({ wide: pjForm.removeWide, buttons: pjForm.buttons }));
+
+  const pjCancel = await evaluate(`(() => {
+    const box = document.querySelector('.ced-projform');
+    box.querySelector('.ced-field input').value = "Something else";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Cancel').click();
+    return { open: !!document.querySelector('.ced-projform'),
+             title: document.querySelector('#work .project:last-of-type .project__title').textContent,
+             edits: String(window.edit.list()) };
+  })()`);
+  check("projects: Cancel leaves the card and the edit list alone",
+    pjCancel.open === false && pjCancel.title === "Blockade Runner" &&
+    !/br-title/.test(pjCancel.edits), JSON.stringify(pjCancel).slice(0, 160));
+
+  const pjApply = await evaluate(`(() => {
+    window.AMH.tool.listForm("projects", "br");
+    const box = document.querySelector('.ced-projform');
+    const ins = box.querySelectorAll('.ced-field input, .ced-field textarea');
+    ins[0].value = "Blockade Runner II";
+    ins[4].value = "9,000+ | paying customers\\nWeekly | release cadence";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Apply').click();
+    const all = JSON.parse(sessionStorage.getItem("amh-pending-edits") || "{}");
+    const rows = [...document.querySelectorAll('.ced-panel__row')];
+    rows.find(r => r.textContent.indexOf('br-title') !== -1).click();
+    const viaChip = document.querySelector('.ced-modal textarea').value;
+    document.querySelector('.ced-modal__x').click();
+    return {
+      title: document.querySelector('#work .project:last-of-type .project__title').textContent,
+      stats: document.querySelector('#work .project:last-of-type .stats').innerHTML.trim(),
+      waiting: Object.keys((all["index.html"] || {}).text || {}).sort(),
+      viaChip: viaChip,
+    };
+  })()`);
+  // A field the person did not touch writes nothing, so the two that did
+  // are the only two waiting.
+  check("projects: Apply writes the fields that changed, and only those",
+    pjApply.title === "Blockade Runner II" &&
+    pjApply.waiting.join() === "br-stats,br-title",
+    JSON.stringify(pjApply.waiting));
+  check("projects: a stat is written in the shape the card holds them in",
+    /<span class="stat"><b>9,000\+<\/b> paying customers<\/span>/.test(pjApply.stats),
+    pjApply.stats.replace(/\s+/g, " ").slice(0, 140));
+  // Two doors onto one region. If they ever disagreed, one of them would be
+  // writing somewhere the other cannot see.
+  check("projects: the field's own chip shows what the form wrote",
+    pjApply.viaChip === "Blockade Runner II", pjApply.viaChip);
+
+  const pjOut1 = await evaluate(
+    `window.AMH.tool.buildPage("index.html").then(p => p.text)`, { awaitPromise: true });
+  const pjItems1 = listItems(pjOut1, "projects");
+  check("projects: the export holds the seven items, in order",
+    pjItems1 && Object.keys(pjItems1).join() === "fr3,fr2,phl,aiw,cog,cvr,br",
+    Object.keys(pjItems1 || {}).join());
+
+  const pjMove = await evaluate(`(() => {
+    const wraps = [...document.querySelectorAll('[data-ced-list="projects"]')];
+    wraps[wraps.length - 1].querySelectorAll('.ced-pill--icon')[0].click();
+    const s = window.AMH.tool.listState("projects");
+    const arts = [...document.querySelectorAll('#work .project')];
+    return { order: s.order,
+             sixth: arts[5].querySelector('.project__title').textContent,
+             pending: window.edit.pending() };
+  })()`);
+  check("projects: Move up reorders the page and the list together",
+    pjMove.order.join() === "fr3,fr2,phl,aiw,cog,br,cvr" &&
+    pjMove.sixth === "Blockade Runner II", JSON.stringify(pjMove.order));
+  const pjOut2 = await evaluate(
+    `window.AMH.tool.buildPage("index.html").then(p => p.text)`, { awaitPromise: true });
+  const pjItems2 = listItems(pjOut2, "projects");
+  // A reorder moves bytes and changes none of them, which is the whole
+  // reason an item contributes its source span verbatim.
+  check("projects: the reordered export is the same seven items, moved",
+    pjItems2 && Object.keys(pjItems2).join() === "fr3,fr2,phl,aiw,cog,br,cvr" &&
+    Object.keys(pjItems1).every((id) => pjItems1[id] === pjItems2[id]),
+    Object.keys(pjItems2 || {}).join());
+
+  const pjNew = await evaluate(`(() => {
+    window.AMH.tool.listForm("projects", null);
+    const box = document.querySelector('.ced-projform');
+    const ins = box.querySelectorAll('.ced-field input, .ced-field textarea');
+    ins[0].value = "Liquid Cubed";
+    ins[1].value = "HarrisXR · Research · 2026";
+    ins[2].value = "A fluid simulation that runs in a browser.";
+    ins[4].value = "60 fps | on a laptop";
+    ins[5].value = "One point\\nAnother point";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Apply').click();
+    const s = window.AMH.tool.listState("projects");
+    const arts = [...document.querySelectorAll('#work .project')];
+    const last = arts[arts.length - 1];
+    return { order: s.order, cards: arts.length,
+             title: last.querySelector('.project__title').textContent,
+             points: last.querySelectorAll('.highlights li').length,
+             stats: last.querySelectorAll('.stats .stat').length,
+             pills: last.querySelectorAll('.ced-pills').length,
+             chips: [...document.querySelectorAll('.ced-chip')]
+               .filter(c => (c.title || '').indexOf('lc-') === 0).length,
+             gallery: !!window.AMH.tool.regionFor("lc-gallery") };
+  })()`);
+  // An id is the title's initials, and is permanent from then on. It may
+  // not collide with a slug that is not a project's either: "brand-title"
+  // is a region, so "brand" is not free.
+  check("projects: a new project lands on the page with its own id",
+    pjNew.order.join() === "fr3,fr2,phl,aiw,cog,br,cvr,lc" && pjNew.cards === 8 &&
+    pjNew.title === "Liquid Cubed" && pjNew.points === 2 && pjNew.stats === 1,
+    JSON.stringify(pjNew));
+  check("projects: and it carries its badges, its controls and its gallery",
+    pjNew.chips >= 7 && pjNew.pills === 1 && pjNew.gallery === true,
+    JSON.stringify({ chips: pjNew.chips, pills: pjNew.pills, gallery: pjNew.gallery }));
+
+  const pjOut3 = await evaluate(
+    `window.AMH.tool.buildPage("index.html").then(p => p.text)`, { awaitPromise: true });
+  const pjSlugs = [...pjOut3.matchAll(/<!--\[edit:(lc-[\w-]+)\]-->/g)].map((m) => m[1]);
+  check("projects: the export holds the new card with all nine of its regions",
+    pjSlugs.join() === "lc-gallery,lc-title,lc-meta,lc-lead,lc-desc,lc-stats," +
+      "lc-highlights,lc-spec-role,lc-spec-stack",
+    pjSlugs.join());
+
+  const pjDup = await evaluate(`(() => {
+    window.AMH.tool.listForm("projects", "br");
+    const box = document.querySelector('.ced-projform');
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Duplicate').click();
+    const s = window.AMH.tool.listState("projects");
+    const open = document.querySelector('.ced-projform');
+    const el = document.querySelector('.project__body');
+    return { order: s.order,
+             name: open ? open.querySelectorAll('.ced-field input')[0].value : null,
+             photos: document.querySelectorAll('#work .project')[6]
+               .querySelectorAll('.gallery img').length };
+  })()`);
+  check("projects: Duplicate puts a copy right after the original, photographs and all",
+    pjDup.order.join() === "fr3,fr2,phl,aiw,cog,br,bric,cvr,lc" &&
+    pjDup.name === "Blockade Runner II copy" && pjDup.photos === 1,
+    JSON.stringify(pjDup));
+
+  const pjDel = await evaluate(`(() => {
+    const real = window.confirm;
+    window.confirm = () => true;
+    const open = document.querySelector('.ced-projform');
+    [...open.querySelectorAll('.ced-btn')].find(b => /^Remove/.test(b.textContent)).click();
+    window.confirm = real;
+    const s = window.AMH.tool.listState("projects");
+    return { order: s.order, cards: document.querySelectorAll('#work .project').length,
+             region: !!window.AMH.tool.regionFor("bric-gallery"),
+             listed: /bric-title/.test(String(window.edit.list())) };
+  })()`);
+  check("projects: Remove takes the card, its regions and its listing away",
+    pjDel.order.join() === "fr3,fr2,phl,aiw,cog,br,cvr,lc" && pjDel.cards === 8 &&
+    pjDel.region === false && pjDel.listed === false, JSON.stringify(pjDel));
+
+  const pjOut4 = await evaluate(
+    `window.AMH.tool.buildPage("index.html").then(p => p.text)`, { awaitPromise: true });
+  const pjExact = exportIsByteExact("index.html", pjOut4, [], ["projects"]);
+  check("projects: every byte outside the list is untouched", pjExact.ok, pjExact.detail);
+
+  // A region whose shape these readers do not know is offered as it stands,
+  // so opening the form can never flatten a hand-written block.
+  const pjRaw = await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.ced-panel__row')];
+    rows.find(x => x.textContent.indexOf('cvr-stats') !== -1).click();
+    const ta = document.querySelector('.ced-modal textarea');
+    ta.value = '<span class="stat"><b>A</b> b</span><p>a paragraph nobody expected</p>';
+    [...document.querySelectorAll('.ced-modal__btns .ced-btn')]
+      .find(b => b.textContent === 'Apply').click();
+    document.querySelector('.ced-modal__x').click();
+    window.AMH.tool.listForm("projects", "cvr");
+    const box = document.querySelector('.ced-projform');
+    const stats = [...box.querySelectorAll('.ced-field')][4];
+    const out = { why: !!stats.querySelector('.ced-field__why'),
+                  value: stats.querySelector('textarea').value,
+                  label: stats.querySelector('.ced-field__label').textContent };
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Cancel').click();
+    return out;
+  })()`);
+  check("projects: a region the form cannot parse is offered as it stands",
+    pjRaw.why === true && /a paragraph nobody expected/.test(pjRaw.value) &&
+    / - as HTML$/.test(pjRaw.label), JSON.stringify(pjRaw).slice(0, 200));
+
+  await evaluate(`window.edit.pending.clear(); window.edit()`);
+  await sleep(400);
+
   // C-serve. The suite serves its OWN copy, with the blog emptied, so no check
   // depends on what the live site holds. If a stale server from an earlier run
   // still owns the port, the new one fails to bind in silence and every page
@@ -1254,7 +1830,10 @@ async function main() {
     panel: !!document.querySelector('.ced-panel'),
   })`);
   check("edit() returns ON", on === "editor mode ON", String(on));
-  check("panel lists all 87 text regions", ui.rows === 87, "rows=" + ui.rows);
+  // 94 since every card carries both optional blocks, wrapped whether or
+  // not they hold anything, so one can gain stats or highlights from the
+  // project form without a source edit.
+  check("panel lists all 94 text regions", ui.rows === 94, "rows=" + ui.rows);
   check("panel lists 9 gallery rows (all SEED)", ui.imgRows === 9, "imgRows=" + ui.imgRows);
   check("9 IMG chips + 9 plus chips built", ui.imgChips === 9 && ui.plusChips === 9,
     "img=" + ui.imgChips + " plus=" + ui.plusChips);
@@ -1275,7 +1854,8 @@ async function main() {
     };
   })()`);
   check("panel foot: the moves are filled, View stays plain, and Rebuild is not offered here",
-    JSON.stringify(foot.labels) === '["Export","New post","Revert all","Exit"]' &&
+    JSON.stringify(foot.labels) ===
+      '["Export","Save to repo","New post","Revert all","Exit"]' &&
     foot.filled.every((c) => c === "rgb(74, 165, 232)") &&
     foot.view !== "rgb(74, 165, 232)",
     JSON.stringify(foot));
@@ -1555,16 +2135,28 @@ async function main() {
   await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
   await sleep(200);
   await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
-  // also edit the deepdive TEXT region (nested-marker case)
+  // THE TEXT HALF IS NOT EDITED IN THE RAW BOX ANY MORE. Part 4 made the
+  // drawer follow the Markdown the template carries, so the panel row opens
+  // the project on the view that owns it and the raw box never appears.
   await evaluate(`[...document.querySelectorAll('.ced-panel__row')].find(r => r.textContent.includes('fr3-deepdive')).click()`);
-  await sleep(200);
-  await evaluate(`
-    var t = document.querySelector('.ced-modal textarea');
+  await sleep(500);
+  const ddRoute = await evaluate(`({
+    form: !!document.querySelector('.ced-projform'),
+    raw: !!document.querySelector('.ced-modal:not(.ced-projform) textarea'),
+    slug: document.querySelector('.ced-projform .ced-slug')?.textContent || '',
+    tab: [...document.querySelectorAll('.ced-tab')].filter(t => t.classList.contains('on'))
+      .map(t => t.textContent).join(),
+  })`);
+  check("the panel row for a deep dive opens the project on its Deep dive view",
+    ddRoute.form && !ddRoute.raw && ddRoute.slug === "Forerunner 3" &&
+    ddRoute.tab === "Deep dive", JSON.stringify(ddRoute));
+  await evaluate(`(function () {
+    var t = document.querySelector('.ced-projform .ced-field--md textarea');
     t.value = t.value.replace('Forerunner 3 is built', 'Forerunner 3 is TESTEDDD built');
-  `);
-  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
-  await sleep(200);
-  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
 
   // G7. export with nested regions both edited
   await evaluate(`window.__exported = null; window.edit.export();`);
@@ -1685,6 +2277,675 @@ async function main() {
     lbNested === "dd-open+lb-open" && lbAfter === "dd-open",
     "nested=" + lbNested + " after=" + lbAfter);
   await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(400);
+
+  // ============ DD. A DEEP DIVE IS WRITTEN FROM MARKDOWN ============
+  // Phase 1 Part 4. The drawer behind Learn more stops being hand-written
+  // HTML. The template carries the Markdown it was written from, and the
+  // rendered half is written again from that source at every Apply.
+  //
+  // There is no raw box for one: the region sits inside a <template>, so it
+  // has no chip, and its panel row opens the project instead. applyModal
+  // refuses it as well, which no door can reach and devtools can.
+
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`window.edit()`);
+  await sleep(600);
+
+  // DD1. the renderer leaves a sign; this surface decides what it means
+  const ddMarks = await evaluate(`(function () {
+    var nl = String.fromCharCode(10);
+    return {
+      block: AMH.markdown.render(["one", "", "{gallery}", "", "two"].join(nl)),
+      after: AMH.markdown.render(["body", "", "closing words {note}"].join(nl)),
+      before: AMH.markdown.render(["{note}", "", "closing words"].join(nl)),
+      flags: AMH.markdown.flags.filter(function (f) {
+        return (f.for || []).indexOf("deepdive") !== -1;
+      }).map(function (f) { return f.name; }),
+      chip: !!document.querySelector('.ced-chip[title="fr3-deepdive"]'),
+    };
+  })()`);
+  check("deep dive: the renderer signs {gallery} and {note}, and only a deep dive may use them",
+    ddMarks.block.includes('<div class="md-mark" data-mark="gallery"></div>') &&
+    ddMarks.after.includes('<span class="md-mark" data-mark="note"></span>') &&
+    ddMarks.before.includes('<div class="md-mark" data-mark="note"></div>') &&
+    ddMarks.flags.join() === "gallery,note",
+    JSON.stringify({ flags: ddMarks.flags, block: ddMarks.block }));
+  check("deep dive: the region carries no chip, so the raw box is not offered",
+    ddMarks.chip === false);
+
+  // DD2. the Deep dive view of the project form
+  const ddForm = await evaluate(`(() => {
+    AMH.tool.listForm("projects", "fr3", 2);
+    const box = document.querySelector('.ced-projform');
+    const pane = [...box.querySelectorAll('.ced-pane')].find(p => !p.hidden);
+    const spec = box.querySelector('.ced-spec__btn');
+    spec.click();
+    const rows = [...box.querySelectorAll('.ced-spec__write')].map(c => c.textContent);
+    const flyout = box.querySelector('.ced-spec');
+    const whole = flyout.scrollHeight <= flyout.clientHeight + 1;
+    spec.click();
+    const out = {
+      tab: [...box.querySelectorAll('.ced-tab')].filter(t => t.classList.contains('on'))
+        .map(t => t.textContent).join(),
+      labels: [...pane.querySelectorAll('.ced-field__label')].map(l => l.textContent),
+      title: pane.querySelector('.ced-field input').value,
+      tools: pane.querySelectorAll('.ced-tools--own button').length,
+      marks: [...pane.querySelectorAll('.ced-tools--own button use')]
+        .map(u => u.getAttribute('href') || u.getAttribute('xlink:href')),
+      body: pane.querySelector('.ced-field--md textarea').value,
+      rows,
+      remove: [...box.querySelectorAll('.ced-btn')].some(b => b.textContent === 'Remove deep dive'),
+      whole,
+    };
+    [...box.querySelectorAll('.ced-modal__btns .ced-btn')]
+      .find(b => b.textContent === 'Cancel').click();
+    return out;
+  })()`);
+  check("deep dive: the form opens what was typed, not what it rendered to",
+    ddForm.tab === "Deep dive" &&
+    ddForm.labels.join("|") === "Title|Subtitle|The button that opens it|Body, in Markdown|Photographs" &&
+    ddForm.title === "Forerunner 3" && ddForm.body.includes("{gallery}") &&
+    ddForm.body.includes("{note}") && !ddForm.body.includes("<p>") && ddForm.remove,
+    JSON.stringify({ tab: ddForm.tab, labels: ddForm.labels, title: ddForm.title,
+                     remove: ddForm.remove, head: ddForm.body.slice(0, 40) }));
+  check("deep dive: the Markdown bar is over the body, and the (i) names both flags",
+    ddForm.tools === 12 && ddForm.rows.join("|") === "{gallery}|{note}|{!command}",
+    JSON.stringify({ tools: ddForm.tools, rows: ddForm.rows }));
+  // The flyout hangs from the row it belongs to, and that row is one field
+  // here and a whole composer on the blog page. A cap measured against the
+  // host cut the last command's sentence off on this one.
+  check("deep dive: the (i) panel shows every command whole, not only the first",
+    ddForm.whole === true, "nothing hidden: " + ddForm.whole);
+  // ONE MARK, ONE MEANING. Two buttons wearing the same drawing are two
+  // buttons a reader has to hover to tell apart.
+  check("deep dive: every button on the bar wears a mark of its own",
+    ddForm.marks.length === ddForm.tools &&
+    new Set(ddForm.marks).size === ddForm.marks.length &&
+    ddForm.marks.includes("#ced-i-photos") && ddForm.marks.includes("#ced-i-note"),
+    JSON.stringify(ddForm.marks));
+
+  // DD3. Apply writes the template again from the Markdown
+  const DD_BODY = [
+    "A first paragraph, written in the form.",
+    "",
+    "{gallery}",
+    "",
+    "### The points",
+    "",
+    "- One point.",
+    "- Two points.",
+    "",
+    "The closing words. {note}",
+  ].join("\n");
+  await evaluate(`(() => {
+    AMH.tool.listForm("projects", "fr3", 2);
+    document.querySelector('.ced-projform .ced-field--md textarea').value =
+      ${JSON.stringify(DD_BODY)};
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ddWrote = await evaluate(`(() => {
+    const c = document.querySelectorAll('template.deepdive')[0].content;
+    return {
+      source: c.querySelector('script.dd-source').textContent,
+      lead: c.querySelector('.dd-lead')?.textContent || '',
+      sub: c.querySelector('.dd-lead__sub')?.textContent || '',
+      shape: [...c.children].map(n => n.tagName.toLowerCase() +
+        (n.className ? "." + n.className.split(" ").join(".") : "")).join(" "),
+      note: c.querySelector('p.dd-note')?.textContent || '',
+      heading: c.querySelector('h4')?.textContent || '',
+      points: c.querySelectorAll('li').length,
+      gal: c.querySelector('.gallery img')?.getAttribute('src') || '',
+      marks: c.querySelectorAll('.md-mark').length,
+      formOpen: !!document.querySelector('.ced-projform'),
+    };
+  })()`);
+  check("deep dive: Apply writes the source, the head and the rendered half",
+    ddWrote.source === DD_BODY && ddWrote.lead === "Forerunner 3" &&
+    ddWrote.sub.includes("Space Interactions") && ddWrote.formOpen === false,
+    JSON.stringify({ same: ddWrote.source === DD_BODY, lead: ddWrote.lead,
+                     formOpen: ddWrote.formOpen }));
+  check("deep dive: {gallery} takes the photographs and {note} makes the closing note",
+    ddWrote.shape === "script.dd-source h2.dd-lead p.dd-lead__sub p div.gallery h4 ul p.dd-note" &&
+    ddWrote.note === "The closing words." && ddWrote.heading === "The points" &&
+    ddWrote.points === 2 && ddWrote.gal.includes("img/seed/") && ddWrote.marks === 0,
+    JSON.stringify(ddWrote));
+
+  // DD4. and the drawer shows exactly that
+  await evaluate(`document.querySelectorAll('.project__more')[0].click()`);
+  await sleep(800);
+  const ddDrawer = await evaluate(`({
+    title: document.querySelector('.dd__title').textContent,
+    sub: document.querySelector('.dd__subtitle').textContent,
+    source: !!document.querySelector('.dd__body script.dd-source'),
+    lead: !!document.querySelector('.dd__body .dd-lead, .dd__body .dd-lead__sub'),
+    note: document.querySelector('.dd__body p.dd-note')?.textContent || '',
+    gal: !!document.querySelector('.dd__body .gallery.is-ready'),
+    points: document.querySelectorAll('.dd__body li').length,
+  })`);
+  check("deep dive: the drawer lifts the head out and leaves the source behind",
+    ddDrawer.title === "Forerunner 3" && ddDrawer.sub.includes("Space Interactions") &&
+    ddDrawer.source === false && ddDrawer.lead === false &&
+    ddDrawer.note === "The closing words." && ddDrawer.gal && ddDrawer.points === 2,
+    JSON.stringify(ddDrawer));
+  await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(300);
+
+  // DD4b. THE SECOND CONVERTED DRAWER, WHICH NOTHING IN THIS RUN HAS TOUCHED.
+  // The conversion was driven through this same form, and this is what it had
+  // to leave behind: the head lifted out, one carousel where the command
+  // stood, five points, and the closing note.
+  await evaluate(`document.querySelectorAll('.project__more')[1].click()`);
+  await sleep(800);
+  const ddTwoUp = await evaluate(`({
+    title: document.querySelector('.dd__title').textContent,
+    sub: document.querySelector('.dd__subtitle').textContent,
+    note: document.querySelector('.dd__body p.dd-note')?.textContent || '',
+    heading: document.querySelector('.dd__body h4')?.textContent || '',
+    points: document.querySelectorAll('.dd__body li').length,
+    /* the renderer writes a plain <ul>, and the drawer marks its points the
+       way the hand-written one was marked */
+    mark: getComputedStyle(document.querySelector('.dd__body li'), '::before').width,
+    imgs: document.querySelectorAll('.dd__body .gallery img').length,
+    script: document.querySelectorAll('.dd__body script').length,
+    lead: document.querySelectorAll('.dd__body .dd-lead, .dd__body .dd-lead__sub').length,
+    words: document.querySelector('.dd__body').textContent.indexOf('500,000 historical TLE'),
+  })`);
+  check("deep dive: the second converted drawer reads as it was written",
+    ddTwoUp.title === "Forerunner 2" && ddTwoUp.sub.length > 0 &&
+    ddTwoUp.heading === "What I owned" && ddTwoUp.points === 5 &&
+    ddTwoUp.imgs >= 1 && ddTwoUp.script === 0 && ddTwoUp.lead === 0 &&
+    ddTwoUp.note.startsWith("A Space Interactions Inc. platform") &&
+    ddTwoUp.words !== -1 &&
+    ddTwoUp.mark === "7px",
+    JSON.stringify(ddTwoUp));
+  await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(300);
+
+  // DD5. the export: the source block travels, and no other byte moves
+  await evaluate(`
+    window.__exported = null;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) {
+        fetch(this.href).then(r => r.text()).then(t => { window.__exported = t; });
+      }
+    };
+    window.edit.export();
+  `);
+  let ddOut = null;
+  for (let i = 0; i < 20 && !ddOut; i++) { await sleep(400); ddOut = await evaluate(`window.__exported`); }
+  check("deep dive: export produced output", !!ddOut, ddOut ? ddOut.length + " chars" : "none");
+  if (ddOut) {
+    const dA = ddOut.indexOf("<!--[edit:fr3-deepdive]-->");
+    const dB = ddOut.indexOf("<!--[/edit:fr3-deepdive]-->");
+    const dSpan = ddOut.slice(dA, dB);
+    check("deep dive: the written region carries the source, the note and the photographs",
+      dSpan.includes('<script type="text/markdown" class="dd-source">') &&
+      dSpan.includes("The closing words. {note}") &&
+      dSpan.includes('<p class="dd-note">The closing words.</p>') &&
+      dSpan.split("<!--[edit:fr3-dd-gallery]-->").length === 2 &&
+      dSpan.split("<!--[/edit:fr3-dd-gallery]-->").length === 2 &&
+      dSpan.includes('src="img/seed/forerunner-02.jpg"'),
+      dSpan.replace(/\s+/g, " ").slice(0, 150));
+    const ddExact = exportIsByteExact("index.html", ddOut, ["fr3-deepdive"]);
+    check("deep dive: byte-identical outside the region it wrote", ddExact.ok, ddExact.detail);
+  }
+
+  // DD6. a body that mentions a tag: the source block holds it as text, and
+  // both tag checkers walk the region without tripping on it
+  const RT_BODY = [
+    "Tags like <b>bold</b> stay as words, and so does Q&A.",
+    "",
+    "{gallery}",
+  ].join("\n");
+  await evaluate(`(() => {
+    AMH.tool.listForm("projects", "fr3", 2);
+    document.querySelector('.ced-projform .ced-field--md textarea').value =
+      ${JSON.stringify(RT_BODY)};
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ddRound = await evaluate(`(() => {
+    const tpl = document.querySelectorAll('template.deepdive')[0];
+    const held = tpl.content.querySelector('script.dd-source').textContent;
+    AMH.tool.listForm("projects", "fr3", 2);
+    const back = document.querySelector('.ced-projform .ced-field--md textarea').value;
+    [...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+      .find(b => b.textContent === 'Cancel').click();
+    return { held, back, body: tpl.innerHTML,
+             tag: AMH.tool.tagCheck(tpl.parentNode.innerHTML) || "" };
+  })()`);
+  check("deep dive: a tag in the body is held as text and comes back as it was typed",
+    ddRound.back === RT_BODY && ddRound.held.includes("&lt;b>bold&lt;/b>") &&
+    ddRound.held.includes("Q&amp;A") && ddRound.tag === "",
+    JSON.stringify({ same: ddRound.back === RT_BODY, tag: ddRound.tag,
+                     held: ddRound.held.slice(0, 60) }));
+
+  // DD7. one carousel. A second {gallery} is dropped, and the box says so.
+  const TWO_BODY = ["First.", "", "{gallery}", "", "Second.", "", "{gallery}"].join("\n");
+  await evaluate(`(() => {
+    AMH.tool.listForm("projects", "fr3", 2);
+    document.querySelector('.ced-projform .ced-field--md textarea').value =
+      ${JSON.stringify(TWO_BODY)};
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ddTwo = await evaluate(`(() => {
+    const c = document.querySelectorAll('template.deepdive')[0].content;
+    const out = {
+      open: !!document.querySelector('.ced-projform'),
+      said: document.querySelector('.ced-projform .ced-modal__status')?.textContent || '',
+      galleries: c.querySelectorAll('.gallery').length,
+      marks: c.querySelectorAll('.md-mark').length,
+      imgs: c.querySelectorAll('.gallery img').length,
+    };
+    const x = document.querySelector('.ced-projform .ced-modal__x');
+    if (x) x.click();
+    return out;
+  })()`);
+  check("deep dive: a second {gallery} is dropped, and the box stays open to say so",
+    ddTwo.galleries === 1 && ddTwo.marks === 0 && ddTwo.imgs === 1 &&
+    ddTwo.open === true && /1 more \{gallery\} was dropped/.test(ddTwo.said),
+    JSON.stringify(ddTwo));
+
+  // DD7b. no command at all: the photographs still reach the drawer, last,
+  // which is where a reader expects them when nothing said otherwise.
+  const BARE_BODY = ["Only words here.", "", "No command at all."].join("\n");
+  await evaluate(`(() => {
+    AMH.tool.listForm("projects", "fr3", 2);
+    document.querySelector('.ced-projform .ced-field--md textarea').value =
+      ${JSON.stringify(BARE_BODY)};
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ddBare = await evaluate(`(() => {
+    const c = document.querySelectorAll('template.deepdive')[0].content;
+    const kids = [...c.children];
+    return {
+      shape: kids.map(n => n.tagName.toLowerCase() +
+        (n.className ? "." + n.className.split(" ").join(".") : "")).join(" "),
+      last: kids[kids.length - 1].className,
+      imgs: c.querySelectorAll('.gallery img').length,
+      open: !!document.querySelector('.ced-projform'),
+    };
+  })()`);
+  check("deep dive: photographs with no {gallery} go last, and none are lost",
+    ddBare.last === "gallery" && ddBare.imgs === 1 && ddBare.open === false &&
+    ddBare.shape === "script.dd-source h2.dd-lead p.dd-lead__sub p p div.gallery",
+    JSON.stringify(ddBare));
+
+  // DD8. a project with no deep dive can be given one, and lose it again
+  const ddAddPane = await evaluate(`(() => {
+    AMH.tool.listForm("projects", "br", 2);
+    const box = document.querySelector('.ced-projform');
+    const pane = [...box.querySelectorAll('.ced-pane')].find(p => !p.hidden);
+    return { words: pane.querySelector('.ced-empty')?.textContent || '',
+             add: [...pane.querySelectorAll('.ced-btn')].some(b => b.textContent === 'Add a deep dive'),
+             region: !!document.querySelector('[data-ced-item="br"]')
+               .closest('.project').querySelector('template.deepdive') };
+  })()`);
+  check("deep dive: a project without one says so and offers to add it",
+    ddAddPane.add && ddAddPane.words.includes("no deep dive") && !ddAddPane.region,
+    JSON.stringify(ddAddPane));
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-pane:not([hidden]) .ced-btn')]
+    .find(b => b.textContent === 'Add a deep dive').click()`);
+  await sleep(600);
+  const ddAdded = await evaluate(`(() => {
+    const card = document.querySelector('[data-ced-item="br"]').closest('.project');
+    const out = {
+      tpl: !!card.querySelector('template.deepdive'),
+      more: !!card.querySelector('.project__more'),
+      tab: [...document.querySelectorAll('.ced-tab')].filter(t => t.classList.contains('on'))
+        .map(t => t.textContent).join(),
+      rows: [...document.querySelectorAll('.ced-panel__row')]
+        .filter(r => /br-deepdive|br-more/.test(r.textContent)).length,
+      body: document.querySelector('.ced-projform .ced-field--md textarea')?.value,
+    };
+    [...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+      .find(b => b.textContent === 'Cancel').click();
+    return out;
+  })()`);
+  // The two regions are new to the page, so the panel has to draw rows for
+  // them: its own count would otherwise say more than its list showed.
+  check("deep dive: adding one gives the card a template, a button and two regions",
+    ddAdded.tpl && ddAdded.more && ddAdded.tab === "Deep dive" &&
+    ddAdded.rows === 2 && ddAdded.body === "",
+    JSON.stringify(ddAdded));
+  // A NEW DEEP DIVE HAS NOWHERE TO PUT A PHOTOGRAPH UNTIL IT ASKS FOR ONE.
+  // {gallery} with none yet still writes the container, because an empty
+  // region is what a first drop lands on.
+  await evaluate(`(() => {
+    AMH.tool.listForm("projects", "br", 2);
+    document.querySelector('.ced-projform .ced-field--md textarea').value = "{gallery}";
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Apply').click()`);
+  await sleep(500);
+  await evaluate(`AMH.tool.listForm("projects", "br", 2)`);
+  await sleep(400);
+  const ddNewGal = await evaluate(`(() => {
+    const card = document.querySelector('[data-ced-item="br"]').closest('.project');
+    const c = card.querySelector('template.deepdive').content;
+    const out = {
+      gal: !!c.querySelector('.gallery'),
+      imgs: c.querySelectorAll('.gallery img').length,
+      region: !!AMH.tool.regionFor("br-dd-gallery"),
+      zone: !!document.querySelector(
+        '.ced-projform .ced-pane:not([hidden]) .ced-handoff__zone'),
+      marks: c.querySelectorAll('.md-mark').length,
+    };
+    [...document.querySelectorAll('.ced-projform .ced-modal__btns .ced-btn')]
+      .find(b => b.textContent === 'Cancel').click();
+    return out;
+  })()`);
+  check("deep dive: {gallery} with no photographs still writes somewhere to drop one",
+    ddNewGal.gal && ddNewGal.imgs === 0 && ddNewGal.region &&
+    ddNewGal.zone && ddNewGal.marks === 0,
+    JSON.stringify(ddNewGal));
+
+  // AND IT REACHES THE FILE. A deep dive added in a sitting is proved by what
+  // the export writes, because the file on disk has none.
+  await evaluate(`window.__exported = null; window.edit.export();`);
+  let ddAddOut = null;
+  for (let i = 0; i < 20 && !ddAddOut; i++) {
+    await sleep(400); ddAddOut = await evaluate(`window.__exported`);
+  }
+  const ddAddHas = (s) => !!ddAddOut && ddAddOut.includes(s);
+  check("deep dive: the one added in this sitting is in the export, with its markers",
+    ddAddHas("<!--[edit:br-more]-->") && ddAddHas("<!--[edit:br-deepdive]-->") &&
+    ddAddHas("<!--[edit:br-dd-gallery]-->") && ddAddHas('<template class="deepdive">') &&
+    /<!--\[edit:br-deepdive\]-->[\s\S]*?class="dd-lead">Blockade Runner/.test(ddAddOut || ""),
+    JSON.stringify({ more: ddAddHas("<!--[edit:br-more]-->"),
+                     dd: ddAddHas("<!--[edit:br-deepdive]-->"),
+                     gal: ddAddHas("<!--[edit:br-dd-gallery]-->") }));
+
+  const dcDd = dialogCount;
+  await evaluate(`AMH.tool.listForm("projects", "br", 2)`);
+  await sleep(300);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-pane:not([hidden]) .ced-btn')]
+    .find(b => b.textContent === 'Remove deep dive').click()`);
+  await sleep(600);
+  const ddGone = await evaluate(`(() => {
+    const card = document.querySelector('[data-ced-item="br"]').closest('.project');
+    const out = {
+      tpl: !!card.querySelector('template.deepdive'),
+      more: !!card.querySelector('.project__more'),
+      rows: [...document.querySelectorAll('.ced-panel__row')]
+        .filter(r => /br-deepdive|br-more|br-dd-gallery/.test(r.textContent)).length,
+      gal: !!AMH.tool.regionFor("br-dd-gallery"),
+    };
+    const x = document.querySelector('.ced-projform .ced-modal__x');
+    if (x) x.click();
+    return out;
+  })()`);
+  check("deep dive: removing one asks first, then takes the button and all three regions",
+    dialogCount === dcDd + 1 && !ddGone.tpl && !ddGone.more && ddGone.rows === 0 &&
+    ddGone.gal === false,
+    JSON.stringify({ dialogs: dialogCount - dcDd, ...ddGone }));
+
+  // and the page goes back to the file, so what follows starts from clean
+  await evaluate(`window.edit.revertAll()`);
+  await sleep(600);
+  const ddClean = await evaluate(`({
+    dirty: document.querySelectorAll('.ced-panel__row.ced-edited').length,
+    list: AMH.tool.listDirty(),
+    source: document.querySelectorAll('template.deepdive')[0].content
+      .querySelector('script.dd-source').textContent.slice(0, 21),
+    more: document.querySelectorAll('.project__more').length,
+    pending: Object.keys(JSON.parse(sessionStorage.getItem('amh-pending-edits') || '{}')).length,
+  })`);
+  check("deep dive: Revert all puts the Markdown back as the file has it",
+    ddClean.dirty === 0 && ddClean.list === false && ddClean.more === 2 &&
+    ddClean.source === "Forerunner 3 is built" && ddClean.pending === 0,
+    JSON.stringify(ddClean));
+  await evaluate(`window.edit()`);
+  await sleep(300);
+
+  // ============ SV. SAVE TO REPO ============
+  // Export hands over a download that a person then has to find and copy.
+  // Save to repo writes the same bytes into the repo folder, and it is on
+  // every page, because every page is a file. The blog's publish keeps its
+  // own button: it renders what the manifest generates, which is a different
+  // job from writing a page that was edited.
+  //
+  // The picker cannot be answered by a headless browser, so the BROWSER API
+  // is stubbed and everything above it is the real path: the root check, the
+  // permission, the writer, and the record the panel reads.
+
+  // A folder that can be written into, and a note of what landed in it.
+  const FAKE_REPO = `(function () {
+    window.__wrote = {};
+    function fileH(name, seed) {
+      return { kind: "file", name: name,
+        getFile: function () {
+          return Promise.resolve(new File([window.__wrote[name] !== undefined
+            ? window.__wrote[name] : (seed || "")], name, { type: "text/html" }));
+        },
+        createWritable: function () {
+          return Promise.resolve({
+            write: function (bytes) {
+              window.__wrote[name] = typeof bytes === "string" ? bytes
+                : new TextDecoder().decode(bytes);
+              return Promise.resolve();
+            },
+            close: function () { return Promise.resolve(); }
+          });
+        } };
+    }
+    var files = {};
+    var dirs = {};
+    function dirH(prefix) {
+      return {
+        kind: "directory",
+        getDirectoryHandle: function (n) {
+          var key = prefix + n + "/";
+          if (!dirs[key]) dirs[key] = dirH(key);
+          return Promise.resolve(dirs[key]);
+        },
+        getFileHandle: function (n, opts) {
+          var key = prefix + n;
+          if (!files[key]) {
+            /* the two marks that say a folder is this site's root */
+            if (n === "index.html" || n === "blog.html") files[key] = fileH(key, "<html>root</html>");
+            else if (!opts || !opts.create) {
+              return Promise.reject(new DOMException("no " + n, "NotFoundError"));
+            } else files[key] = fileH(key, "");
+          }
+          return Promise.resolve(files[key]);
+        }
+      };
+    }
+    window.__realPicker = window.showDirectoryPicker;
+    window.__picks = 0;
+    window.showDirectoryPicker = function () {
+      window.__picks++;
+      return Promise.resolve(dirH(""));
+    };
+  })()`;
+
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(FAKE_REPO);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+
+  // SV1. the button is there, beside Export, and it is live
+  const svBtn = await evaluate(`(() => {
+    const btns = [...document.querySelectorAll('.ced-panel__foot .ced-btn')];
+    const names = btns.map(b => b.textContent);
+    const save = document.querySelector('.ced-panel__foot .ced-btn--save');
+    return { names, there: !!save, live: save ? !save.disabled : false,
+             after: names[btns.indexOf(save) - 1],
+             help: typeof AMH.tool !== 'undefined' && typeof window.edit.save === 'function' };
+  })()`);
+  check("save: the panel offers Save to repo beside Export, and edit.save() answers to it",
+    svBtn.there && svBtn.live && svBtn.after === "Export" && svBtn.help,
+    JSON.stringify(svBtn));
+
+  // SV2. nothing to save says so, and writes nothing
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await sleep(600);
+  const svNone = await evaluate(`({
+    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
+      .map(b => b.textContent).join("|"),
+    wrote: Object.keys(window.__wrote),
+    picks: window.__picks,
+  })`);
+  check("save: with nothing changed it says so, asks for no folder and writes no file",
+    /Nothing to save/.test(svNone.said) && svNone.wrote.length === 0 && svNone.picks === 0,
+    JSON.stringify(svNone));
+
+  // SV3. one edit, one file, byte-exact outside the region it wrote
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'hero-h1').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-modal textarea').value =
+    '<h1>I help ambitious teams <span class="hl">ship the SAVED impossible</span>.</h1>'`);
+  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await sleep(1200);
+  const svOne = await evaluate(`({
+    wrote: Object.keys(window.__wrote).sort(),
+    text: window.__wrote["index.html"] || "",
+    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
+      .map(b => b.textContent).join("|"),
+    picks: window.__picks,
+    pending: Object.keys(JSON.parse(
+      sessionStorage.getItem('amh-pending-edits') || '{}')).length,
+  })`);
+  check("save: one changed page is written into the folder, and the button counts it",
+    svOne.wrote.join() === "index.html" && svOne.picks === 1 &&
+    svOne.text.includes("ship the SAVED impossible") && /Saved 1 file/.test(svOne.said),
+    JSON.stringify({ wrote: svOne.wrote, picks: svOne.picks, said: svOne.said }));
+  const svExact = exportIsByteExact("index.html", svOne.text, ["hero-h1"]);
+  check("save: everything outside the edited region is byte-identical", svExact.ok, svExact.detail);
+  check("save: a written page is no longer waiting in the record",
+    svOne.pending === 0, "pages still pending: " + svOne.pending);
+
+  // SV4. two changed pages land in one press, and the folder is asked for once
+  await evaluate(`AMH.tool.stage("gallery.html", "gallery-intro",
+    "<p>Written by the save.</p>")`);
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'hero-h1').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-modal textarea').value =
+    '<h1>I help ambitious teams <span class="hl">ship the SAVED TWICE impossible</span>.</h1>'`);
+  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await sleep(1400);
+  const svTwo = await evaluate(`({
+    wrote: Object.keys(window.__wrote).sort(),
+    gal: (window.__wrote["gallery.html"] || "").includes("Written by the save."),
+    idx: (window.__wrote["index.html"] || "").includes("SAVED TWICE"),
+    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
+      .map(b => b.textContent).join("|"),
+    picks: window.__picks,
+  })`);
+  check("save: two changed pages land in one press, on the folder already in hand",
+    svTwo.wrote.join() === "gallery.html,index.html" && svTwo.gal && svTwo.idx &&
+    svTwo.picks === 1 && /Saved 2 files/.test(svTwo.said),
+    JSON.stringify({ wrote: svTwo.wrote, picks: svTwo.picks, said: svTwo.said }));
+
+  // SV5. a refused folder falls back to the download rather than losing the work.
+  // A fresh load, because the folder this tab already holds is the folder: the
+  // picker is how a reader gives a different one, and it is not asked twice.
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`(function () {
+    window.__downloaded = null;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) window.__downloaded = this.download;
+    };
+    window.__realPicker = window.showDirectoryPicker;
+    window.showDirectoryPicker = function () {
+      return Promise.reject(Object.assign(new Error("no"), { name: "AbortError" }));
+    };
+  })()`);
+  await evaluate(`AMH.tool.repoForget()`);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'hero-h1').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-modal textarea').value =
+    '<h1>I help ambitious teams <span class="hl">ship the REFUSED impossible</span>.</h1>'`);
+  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await sleep(1600);
+  const svFell = await evaluate(`({
+    downloaded: window.__downloaded,
+    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
+      .map(b => b.textContent).join("|"),
+  })`);
+  check("save: a refused folder falls back to the download and says which way it went",
+    svFell.downloaded === "index.html" && /Downloaded/.test(svFell.said),
+    JSON.stringify(svFell));
+
+  // SV6. no folder picker at all: the button stays on screen, dead, with the reason
+  await evaluate(`(function () {
+    window.showDirectoryPicker = undefined;
+    window.edit(); window.edit();
+  })()`);
+  await sleep(700);
+  const svNoPicker = await evaluate(`(() => {
+    const b = document.querySelector('.ced-panel__foot .ced-btn--save');
+    return { there: !!b, dead: b ? b.disabled : false, why: b ? b.title : '',
+             dim: b ? getComputedStyle(b).opacity : '' };
+  })()`);
+  check("save: with no folder picker the button stays on screen, dead, with the reason on it",
+    svNoPicker.there && svNoPicker.dead && /no folder picker/.test(svNoPicker.why) &&
+    Number(svNoPicker.dim) < 0.6,
+    JSON.stringify(svNoPicker));
+
+  // SV7. on the blog page it saves the page, and never the files the publish
+  // owns. Updating the site and updating the blog are two jobs, two buttons.
+  //
+  // The home page's record is dropped first, so what this writes is the blog
+  // page's own doing and not the edit SV5 left waiting.
+  await evaluate(`window.showDirectoryPicker = window.__realPicker;
+    window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(500);
+  await send("Page.navigate", { url: BLOGPAGE });
+  await waitLoaded();
+  await sleep(2000);
+  await evaluate(FAKE_REPO);
+  await evaluate(`window.edit()`);
+  await sleep(600);
+  const svBlogFoot = await evaluate(`[...document.querySelectorAll('.ced-panel__foot .ced-btn')]
+    .map(b => b.textContent).join("|")`);
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'blog-eyebrow').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-modal textarea').value = '<span class="eyebrow">Saved from the blog page.</span>'`);
+  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await sleep(1600);
+  const svBlog = await evaluate(`({
+    wrote: Object.keys(window.__wrote).sort(),
+    held: (window.__wrote["blog.html"] || "").includes("Saved from the blog page."),
+    saw: AMH.tool.changedPages(),
+    said: document.querySelector('.ced-panel__foot .ced-btn--save').textContent,
+  })`);
+  check("save: the blog page keeps both buttons, and they do two different jobs",
+    /Save to repo/.test(svBlogFoot) && /Rebuild/.test(svBlogFoot),
+    svBlogFoot);
+  check("save: on the blog page it writes the page and none of the files a publish owns",
+    svBlog.wrote.join() === "blog.html" && svBlog.held,
+    JSON.stringify(svBlog));
+  await evaluate(`window.edit.revertAll(); window.edit();`);
   await sleep(400);
 
   // ============ MULTI-PAGE PUBLISH ============
@@ -2771,7 +4032,13 @@ async function main() {
     return {
       order, tools: panel.querySelectorAll('.bc-write .ced-tool').length,
       toolStops: [...panel.querySelectorAll('.ced-tool')].filter(b => b.tabIndex !== -1).length,
-      toolLabels: [...panel.querySelectorAll('.bc-write .ced-tool')].map(b => b.textContent),
+      /* a tool wears a mark now, and keeps its name where a reader who
+         cannot see one still hears it */
+      toolLabels: [...panel.querySelectorAll('.bc-write .ced-tool')]
+        .map(b => (b.querySelector('.ced-sr') || b).textContent),
+      toolIcons: [...panel.querySelectorAll('.bc-write .ced-tool svg use')]
+        .map(u => u.getAttribute('href')),
+      toolTitles: [...panel.querySelectorAll('.bc-write .ced-tool')].map(b => b.title),
       placeholder: title.placeholder,
       postedRight: p.left > t.right && Math.abs(p.bottom - t.bottom) < 4,
       widths: ['.bc-date', '.bc-time', '.bc-zone'].map(s => Math.round(panel.querySelector(s).getBoundingClientRect().width)),
@@ -2807,8 +4074,20 @@ async function main() {
   check("composer: the Markdown toolbar has eleven buttons and the (i), none of them a tab stop",
     layout.tools === 12 && layout.toolStops === 0 &&
     layout.toolLabels.join("|") ===
-      "H|• list|1. list|B|I|S|Link|Table|Expand|Break|Clear|Special commands",
+      "Heading|Bullet list|Numbered list|Bold|Italic|Strikethrough|Link|Table|Expand|Break|Clear|Special commands",
     layout.tools + " buttons, " + layout.toolStops + " stops: " + layout.toolLabels.join("|"));
+  // The eleven wear marks and the twelfth wears its words, because nothing
+  // about a circle says what is behind it. Each mark is drawn once into the
+  // page and used by reference, so twelve buttons cost no requests.
+  check("composer: every tool carries a mark, and keeps the sentence it had",
+    layout.toolIcons.length === 12 &&
+    layout.toolIcons.join("|") === "#ced-i-h|#ced-i-bullet|#ced-i-number|#ced-i-bold|" +
+      "#ced-i-italic|#ced-i-strike|#ced-i-link|#ced-i-table|#ced-i-expand|#ced-i-break|" +
+      "#ced-i-clear|#ced-i-info" &&
+    layout.toolTitles[0] === "heading: H2, H3, H4, then plain" &&
+    layout.toolTitles[8] === "{expandformore} - The stream folds here and offers Expand." &&
+    layout.toolTitles[10] === "clear formatting in the selection",
+    JSON.stringify({ icons: layout.toolIcons, first: layout.toolTitles[0] }).slice(0, 220));
 
   // The ring: title, body, the images area, Publish, Close, and nothing
   // else. Landing on the images area shows that view; landing back on the
@@ -2898,16 +4177,18 @@ async function main() {
   // Every toolbar button writes its mark; a flag lands alone on its line
   const tools = await evaluate(`(() => {
     const ta = document.querySelector('.bc-write textarea');
-    const btn = (l) => [...document.querySelectorAll('.bc-write .ced-tool')].find(b => b.textContent === l);
+    const btn = (l) => [...document.querySelectorAll('.bc-write .ced-tool')]
+      .find(b => (b.querySelector('.ced-sr') || b).textContent === l);
     const out = {};
     ta.value = 'Title line'; ta.focus(); ta.setSelectionRange(3, 3);
-    btn('H').click(); out.h1 = ta.value; btn('H').click(); out.h2 = ta.value;
-    btn('H').click(); out.h3 = ta.value; btn('H').click(); out.h0 = ta.value;
+    btn('Heading').click(); out.h1 = ta.value; btn('Heading').click(); out.h2 = ta.value;
+    btn('Heading').click(); out.h3 = ta.value; btn('Heading').click(); out.h0 = ta.value;
     ta.value = 'item'; ta.setSelectionRange(0, 0);
-    btn('• list').click(); out.ul = ta.value; btn('1. list').click(); out.ol = ta.value; btn('1. list').click(); out.off = ta.value;
-    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('B').click(); out.b = ta.value;
-    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('I').click(); out.i = ta.value;
-    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('S').click(); out.s = ta.value;
+    btn('Bullet list').click(); out.ul = ta.value; btn('Numbered list').click(); out.ol = ta.value;
+    btn('Numbered list').click(); out.off = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('Bold').click(); out.b = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('Italic').click(); out.i = ta.value;
+    ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('Strikethrough').click(); out.s = ta.value;
     const realPrompt = window.prompt; window.prompt = () => 'https://x.io';
     ta.value = 'some word here'; ta.setSelectionRange(5, 9); btn('Link').click(); out.link = ta.value;
     window.prompt = realPrompt;
@@ -4785,7 +6066,8 @@ async function main() {
                           typeof window.edit.blog.rebuild === 'function') };
     })()`);
     check("panel foot: blog.html offers Rebuild, filled, beside Export",
-      JSON.stringify(blogFoot.labels) === '["Export","Rebuild","New post","Revert all","Exit"]' &&
+      JSON.stringify(blogFoot.labels) ===
+        '["Export","Save to repo","Rebuild","New post","Revert all","Exit"]' &&
       blogFoot.filled === "rgb(74, 165, 232)" && blogFoot.shared,
       JSON.stringify(blogFoot));
 
@@ -8068,14 +9350,14 @@ async function main() {
   await sleep(900);
   const spec = await evaluate(`(function () {
     var row = document.querySelector(".bc-write .ced-modal__tools");
-    var btn = document.querySelector(".bc-spec__btn");
-    var p = document.querySelector(".bc-spec");
+    var btn = document.querySelector(".ced-spec__btn");
+    var p = document.querySelector(".ced-spec");
     if (!row || !btn || !p) return { there: false };
     var shut = p.hidden;
     btn.click();
-    var codes = [].slice.call(p.querySelectorAll(".bc-spec__write"))
+    var codes = [].slice.call(p.querySelectorAll(".ced-spec__write"))
       .map(function (x) { return x.textContent; });
-    var ofs = [].slice.call(p.querySelectorAll(".bc-spec__of"))
+    var ofs = [].slice.call(p.querySelectorAll(".ced-spec__of"))
       .map(function (x) { return Math.round(x.getBoundingClientRect().left); });
     var btns = [].slice.call(row.querySelectorAll(".ced-tool"));
     var tops = btns.map(function (b) { return Math.round(b.getBoundingClientRect().top); });
@@ -8086,34 +9368,95 @@ async function main() {
              sep: !!row.querySelector(".ced-tool__sep"),
              buttons: btns.length,
              lines: tops.filter(function (v, i) { return tops.indexOf(v) === i; }).length,
-             /* the list the renderer itself holds */
-             flags: (AMH.markdown.flags || []).map(function (f) { return "{" + f.name + "}"; }) };
+             /* what the renderer holds FOR THIS SURFACE. A flag another
+                surface owns is not this panel's to list. */
+             flags: (AMH.markdown.flags || []).filter(function (f) {
+               return (f.for || ["post"]).indexOf("post") !== -1;
+             }).map(function (f) { return "{" + f.name + "}"; }),
+             all: (AMH.markdown.flags || []).map(function (f) { return "{" + f.name + "}"; }) };
   })()`);
   check("special: the toolbar carries a divider and an (i), and the row still holds one line",
     spec.there && spec.sep && spec.buttons === 12 && spec.lines === 1 &&
     spec.shutAtFirst === true && spec.open === true,
     JSON.stringify({ sep: spec.sep, buttons: spec.buttons, lines: spec.lines,
                      shutAtFirst: spec.shutAtFirst, open: spec.open }));
-  // THE CHECK THAT KEEPS IT HONEST. Every flag the renderer accepts must be
-  // in the panel. Add one to markdown.js and forget the panel, and this fails.
+  // THE CHECK THAT KEEPS IT HONEST. Every flag the renderer offers a post
+  // must be in the post's panel, and no flag another surface owns may be.
+  // Add one to markdown.js and forget the panel, and this fails.
   const specMissing = (spec.flags || []).filter((f) => spec.codes.indexOf(f) === -1);
-  check("special: every flag the renderer accepts is listed, and the image tag with them",
-    specMissing.length === 0 && spec.codes.indexOf("[img0001,caption|alt]") !== -1 &&
+  const specStray = (spec.all || []).filter((f) =>
+    (spec.flags || []).indexOf(f) === -1 && spec.codes.indexOf(f) !== -1);
+  check("special: every flag a post is offered is listed, and the image tag with them",
+    specMissing.length === 0 && specStray.length === 0 &&
+    spec.codes.indexOf("[img0001,caption|alt]") !== -1 &&
     spec.codes.length >= spec.flags.length + 1 && spec.aligned,
-    JSON.stringify({ renderer: spec.flags, panel: spec.codes, specMissing, aligned: spec.aligned }));
+    JSON.stringify({ post: spec.flags, panel: spec.codes, specMissing, specStray,
+                     aligned: spec.aligned }));
+
+  // ONE BAR, MORE THAN ONE SURFACE. The tools left the composer for the
+  // editor in Part 2, so a surface asks for them rather than owning them.
+  // The deep dive asks in Part 4; this drives a bare textarea, which proves
+  // the same thing without waiting for it.
+  const mdOther = await evaluate(`(function () {
+    var host = document.createElement("div");
+    var ta = document.createElement("textarea");
+    document.body.appendChild(host);
+    document.body.appendChild(ta);
+    AMH.tool.mdToolbar(host, ta, { surface: "deepdive" });
+    var btns = [].slice.call(host.querySelectorAll("button"));
+    var names = btns.map(function (b) { return b.querySelector(".ced-sr").textContent; });
+    ta.value = "a line"; ta.selectionStart = ta.selectionEnd = 2;
+    btns[names.indexOf("Heading")].click();
+    var mine = ta.value;
+    var composer = document.querySelector(".bc-write textarea").value;
+    var tabbable = btns.every(function (b) { return b.tabIndex === 0; });
+    host.remove(); ta.remove();
+    return { names: names, mine: mine, composer: composer, tabbable: tabbable,
+             flags: (AMH.markdown.flags || []).map(function (f) {
+               return (f.for || ["post"]).join(",");
+             }) };
+  })()`);
+  check("toolbar: a second surface gets the same tools and writes only into its own",
+    mdOther.mine === "# a line" && mdOther.composer !== "# a line" &&
+    mdOther.names.indexOf("Heading") === 0 && mdOther.names.indexOf("Clear") !== -1,
+    JSON.stringify({ mine: mdOther.mine, names: mdOther.names }));
+  // A flag is the renderer's, and the renderer says which surfaces have a
+  // use for it. A stream folds; nothing else on the site does.
+  check("toolbar: a flag that does not name this surface is not offered",
+    mdOther.names.length === 11 && mdOther.names.indexOf("Expand") === -1 &&
+    mdOther.names.indexOf("Break") === -1 &&
+    mdOther.names.indexOf("Photographs") !== -1 && mdOther.names.indexOf("Note") !== -1 &&
+    mdOther.flags.join("|") === "post|post|deepdive|deepdive",
+    JSON.stringify({ names: mdOther.names, flags: mdOther.flags }));
+  // The composer keeps its buttons out of the tab ring on purpose. That is
+  // the composer's rule and not the bar's, so a surface that says nothing
+  // gets buttons a keyboard can reach.
+  check("toolbar: the tab ring is the surface's to decide, not the bar's",
+    mdOther.tabbable === true, String(mdOther.tabbable));
+  // The tools are gone from publish.js, not copied out of it. Two copies of
+  // a heading cycle is how the two surfaces drift apart.
+  const mdGone = await evaluate(`(function () {
+    return fetch("publish.js").then(function (r) { return r.text(); }).then(function (t) {
+      return ["BC_TOOLS", "bcLineAt", "bcHeadingCycle", "bcListToggle", "bcInsertFlag",
+              "bcInsertTable", "bcClearMarks", "bcFlagTool"]
+        .filter(function (n) { return t.indexOf(n) !== -1; });
+    });
+  })()`, { awaitPromise: true });
+  check("toolbar: the composer no longer carries a Markdown toolbar of its own",
+    mdGone.length === 0, mdGone.join(", ") || "none left");
 
   // Escape closes the flyout and leaves the composer where it is: it is a
   // panel inside the box, so it must not read as the box's own way out.
   const specOut = await evaluate(`(function () {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    var afterEsc = { open: !document.querySelector(".bc-spec").hidden,
+    var afterEsc = { open: !document.querySelector(".ced-spec").hidden,
                      composer: !!document.querySelector(".bc-panel") };
-    document.querySelector(".bc-spec__btn").click();
-    var reopened = !document.querySelector(".bc-spec").hidden;
+    document.querySelector(".ced-spec__btn").click();
+    var reopened = !document.querySelector(".ced-spec").hidden;
     document.querySelector(".bc-write textarea")
       .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     return { afterEsc: afterEsc, reopened: reopened,
-             afterOutside: !document.querySelector(".bc-spec").hidden };
+             afterOutside: !document.querySelector(".ced-spec").hidden };
   })()`);
   check("special: Escape and a press outside close the flyout, and the composer stays",
     specOut.afterEsc.open === false && specOut.afterEsc.composer === true &&

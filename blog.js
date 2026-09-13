@@ -259,7 +259,9 @@
     if (!id) return;
     var eb = doc.createElement("button");
     eb.type = "button";
-    eb.className = "bs-retry";
+    /* Two classes, two jobs: bs-retry places it in the post's grid, and
+       ced-pill is the paint every one of the editor's pills wears. */
+    eb.className = "bs-retry ced-pill";
     /* The pencil is decoration, so it is hidden from a screen reader and
        carries no title: a title element would put words into textContent,
        and the label is the button's only text. */

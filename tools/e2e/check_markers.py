@@ -1,9 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Validate edit-marker integrity in every managed page.
+"""Validate the marker families in every managed page.
 
 Keep this list in step with MANAGED_PAGES in tool.js. A page the engine may
 write has to obey the marker rules, and a page it may not write is not checked
 here because nothing splices it.
+
+Three families share one page:
+
+    [edit:slug]   one editable region; the editor replaces what is between
+                  the pair, so the span must hold exactly one element
+    [list:name]   a run of blocks the editor may add to and reorder
+    [item:id]     one block of a list; its id is permanent
+
+They share one stack, so a close marker that crosses a family boundary is an
+error here rather than a silent reinterpretation at export time.
 """
 import io, os, re, sys
 
@@ -11,30 +21,32 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 PAGES = ["index.html", "blog.html", "gallery.html"]
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "param", "source", "track", "wbr"}
+MARKER = re.compile(r"<!--\[(/?)(edit|list|item):([\w-]+)\]-->")
 
 def scan_page(text):
-    """Return (errors, slugs, spans) for one page's source."""
-    markers = [(m.start(), m.end(), m.group(1), m.group(2))
-               for m in re.finditer(r"<!--\[(edit|/edit):([\w-]+)\]-->", text)]
+    """Return (errors, slugs, spans, lists) for one page's source."""
+    markers = [(m.start(), m.end(), m.group(1) == "/", m.group(2), m.group(3))
+               for m in MARKER.finditer(text)]
 
     errors, slugs, spans = [], [], []
-    # stack-based pairing: dd-gallery regions nest one level inside deepdive
-    stack = []
-    for s, e, kind, slug in markers:
-        if kind == "edit":
-            if len(stack) >= 2:
-                errors.append("marker %s nests deeper than one level" % slug)
-            stack.append((slug, e))
-        else:
-            if not stack or stack[-1][0] != slug:
-                errors.append("close marker %s does not match open %s" %
-                              (slug, stack[-1][0] if stack else "(none)"))
-                continue
-            oslug, oend = stack.pop()
-            slugs.append(oslug)
-            spans.append((oslug, text[oend:s]))
+    lists = []          # [(name, [item id, ...])] in document order
+    stack = []          # (family, name, end offset) for every open marker
+    for start, end, closing, family, name in markers:
+        if not closing:
+            errors.extend(check_open(stack, lists, family, name))
+            stack.append((family, name, end))
+            continue
+        if not stack or stack[-1][0] != family or stack[-1][1] != name:
+            top = "%s %s" % (stack[-1][0], stack[-1][1]) if stack else "(none)"
+            errors.append("close marker %s %s does not match open %s"
+                          % (family, name, top))
+            continue
+        ofamily, oname, oend = stack.pop()
+        if ofamily == "edit":
+            slugs.append(oname)
+            spans.append((oname, text[oend:start]))
     if stack:
-        errors.append("unclosed markers: %s" % [x[0] for x in stack])
+        errors.append("unclosed markers: %s" % ["%s %s" % (f, n) for f, n, _ in stack])
 
     dupes = {x for x in slugs if slugs.count(x) > 1}
     if dupes:
@@ -44,7 +56,33 @@ def scan_page(text):
         err = check_span(slug, span)
         if err:
             errors.append(err)
-    return errors, slugs, spans
+    return errors, slugs, spans, lists
+
+def check_open(stack, lists, family, name):
+    """The rules one opening marker has to obey, given what is already open."""
+    errors = []
+    if family == "edit":
+        # dd-gallery regions nest one level inside deepdive; nothing nests deeper
+        if sum(1 for x in stack if x[0] == "edit") >= 2:
+            errors.append("marker %s nests deeper than one level" % name)
+        return errors
+    if family == "list":
+        if any(x[0] == "list" for x in stack):
+            errors.append("list %s opens inside another list" % name)
+        if any(n == name for n, _ in lists):
+            errors.append("duplicate list name: %s" % name)
+        lists.append((name, []))
+        return errors
+    # item: directly inside a list, and named once in it. Lists cannot nest,
+    # so the list being added to is always the last one opened.
+    if not stack or stack[-1][0] != "list":
+        errors.append("item %s is not directly inside a list" % name)
+        return errors
+    ids = lists[-1][1]
+    if name in ids:
+        errors.append("duplicate item id in list %s: %s" % (stack[-1][1], name))
+    ids.append(name)
+    return errors
 
 def check_span(slug, span):
     body = span.strip()
@@ -81,7 +119,7 @@ for page in PAGES:
         failed += 1
         continue
     with io.open(path, "r", encoding="utf-8") as f:
-        errors, slugs, spans = scan_page(f.read())
+        errors, slugs, spans, lists = scan_page(f.read())
     if errors:
         failed += 1
         print("FAIL %s" % page)
@@ -92,6 +130,8 @@ for page in PAGES:
     print("OK %s: %d regions, all pairs matched, unique slugs, one element each, "
           "tags balanced." % (page, len(spans)))
     print("  slugs:", ", ".join(slugs))
+    for name, ids in lists:
+        print("  list %s: %d item(s):" % (name, len(ids)), ", ".join(ids))
 
 if failed:
     sys.exit(1)

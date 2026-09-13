@@ -396,17 +396,32 @@
      the active nav link, and the cull of empty optional blocks.
      ========================================================== */
   /* ---- scroll reveal ---- */
-  var reveals = doc.querySelectorAll(".reveal");
-  if ("IntersectionObserver" in window) {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
-      });
-    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
-    reveals.forEach(function (el) { io.observe(el); });
-  } else {
-    reveals.forEach(function (el) { el.classList.add("in"); });
+  var revealIO = "IntersectionObserver" in window
+    ? new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) { en.target.classList.add("in"); revealIO.unobserve(en.target); }
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" })
+    : null;
+
+  /* Watch the reveals inside one element, or the whole page.
+
+     A block added to the page after load has never been watched, so it
+     would stay at the opacity a reveal starts at: invisible. The editor
+     hands over what it adds, and a browser with no observer shows
+     everything at once, which is what it already did. */
+  function watchReveals(root) {
+    var box = root || doc;
+    var all = box.querySelectorAll(".reveal");
+    if (box !== doc && box.classList && box.classList.contains("reveal")) {
+      all = [box].concat(Array.prototype.slice.call(all));
+    }
+    Array.prototype.forEach.call(all, function (el) {
+      if (revealIO) revealIO.observe(el);
+      else el.classList.add("in");
+    });
   }
+  watchReveals(null);
 
   /* ---- active nav link via section observation ---- */
   /* Only links into a section of THIS page participate. "#" alone is the top
@@ -478,6 +493,7 @@
     requestTick: requestTick,
     setUrl: setUrl,
     paramUrl: paramUrl,
-    cameFromHere: cameFromHere
+    cameFromHere: cameFromHere,
+    watchReveals: watchReveals
   };
 })();

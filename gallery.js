@@ -50,8 +50,13 @@
    Section 7 loads after tool.js and claims the trains as image
    regions. It reimplements nothing: the drop, the file check, the
    caption modal and the delete confirm are all the editor's, reached
-   through AMH.tool. What it adds is the two numbers a tile carries
-   and the controls for them.
+   through AMH.tool. What it adds is the two numbers a tile carries,
+   the controls for them, and the band a section wears.
+
+   The trains are a list, which is the editor's word for a run of
+   blocks it may add to, remove from and reorder. This file says what
+   one section looks like; tool.js owns the list itself and never
+   learns what a gallery is.
    ============================================================ */
 /* ==========================================================
    1. HEADER AND SETUP
@@ -604,14 +609,61 @@
     };
   }
 
-  /* One tile, as authored markup, for the export splice.
+  /* The band: what a section is, beyond its photographs.
+
+     The number is not read, because it is not a value. The stylesheet
+     counts it, so a section that moves is renumbered by the browser and
+     never by a rewrite. The image count is not read either: the serializer
+     writes it from the photographs it is writing. */
+  function readHead(el) {
+    var band = el.querySelector(".gal-train__head");
+    function txt(sel) {
+      var n = band && band.querySelector(sel);
+      return n ? n.textContent.trim() : "";
+    }
+    return { label: txt(".gal-train__n"), title: txt(".gal-train__title"),
+             year: txt(".gal-train__year") };
+  }
+
+  /* How many photographs the section shows, which is also how many the
+     export writes: the model when it holds any, the seed filler when it
+     does not. An unfilled slot is scaffolding and counts as nothing. */
+  function shownCount(region) {
+    var list = region.model.length ? region.model : region.seeds;
+    return list.filter(function (e) { return !e.empty; }).length;
+  }
+  function countWords(n) {
+    return n === 1 ? "1 image" : (n ? n + " images" : "no images");
+  }
+
+  /* One whole train, as authored markup, for the export splice: the band
+     first, then one figure for each photograph.
+
+     THE BAND IS WRITTEN, NOT KEPT. The region the export replaces holds the
+     band as well as the tiles, so a serializer that wrote only figures
+     dropped the section's own title on the first published tile edit.
+
+     Two things in the band are never typed. The number is a CSS counter and
+     is not in the file at all. The count is written here, from the entries
+     being written, so the two cannot disagree.
 
      data-span is written as the tile's PREFERENCE, not as whatever the
      packer drew it at. Widening and reordering are decisions about one
      viewport; the file keeps what the author asked for. A reader with no
      script then gets the preference, which is the honest fallback. */
-  function serializeTiles(entries, indent) {
-    if (!entries.length) return "\n" + indent;
+  function serializeTrain(entries, indent, head) {
+    var h = head || { label: "Section", title: "", year: "" };
+    var esc = TOOL.escAttr;
+    var band =
+      indent + '  <header class="gal-train__head">\n' +
+      indent + '    <span class="gal-train__n"><i class="gal-train__i"></i>' +
+        esc(h.label || "") + "</span>\n" +
+      indent + '    <h3 class="gal-train__title">' + esc(h.title || "") + "</h3>\n" +
+      indent + '    <span class="gal-train__rule" aria-hidden="true"></span>\n' +
+      indent + '    <span class="gal-train__meta"><span class="gal-train__year">' +
+        esc(h.year || "") + '</span><span class="gal-train__count">' +
+        countWords(entries.length) + "</span></span>\n" +
+      indent + "  </header>";
     var lines = entries.map(function (e) {
       var w = e.prefer || 2, p = e.priority || 0;
       var cap = e.caption || "";
@@ -623,7 +675,7 @@
         TOOL.escAttr(cap) + "</figcaption>\n" +
         indent + "  </figure>";
     });
-    return "\n" + lines.join("\n") + "\n" + indent;
+    return "\n" + [band].concat(lines).join("\n") + "\n" + indent;
   }
 
   /* ---------------- drawing one tile ---------------- */
@@ -745,10 +797,46 @@
   /* Rebuild the tiles from the model, then pack them. One path: the packer
      is not a second pass over someone else's markup, it is the last step of
      drawing. */
+  /* Draw the band from the region's head, and its count from the model, so
+     a change made in the section form is on screen the moment it is
+     applied. The number is left to the stylesheet. */
+  function renderHead(region) {
+    var head = region.head;
+    var band = region.el.querySelector(".gal-train__head");
+    if (!head || !band) return;
+    /* the editor's own controls come off first: they are scaffolding, and
+       the band is drawn again from the model every time */
+    var was = band.querySelector(".ced-pills");
+    if (was) band.removeChild(was);
+    var n = band.querySelector(".gal-train__n");
+    if (n) {
+      n.textContent = "";
+      var mark = doc.createElement("i");
+      mark.className = "gal-train__i";
+      n.appendChild(mark);
+      n.appendChild(doc.createTextNode(head.label || ""));
+    }
+    var title = band.querySelector(".gal-train__title");
+    if (title) title.textContent = head.title || "";
+    var year = band.querySelector(".gal-train__year");
+    if (year) year.textContent = head.year || "";
+    var count = band.querySelector(".gal-train__count");
+    if (count) count.textContent = countWords(shownCount(region));
+    /* Open this section, and move it. The editor draws them and knows what
+       they do; this file only says where they sit. They go inside the band
+       because the band is drawn from the model, so nothing here is ever
+       serialized. */
+    var pills = TOOL && TOOL.listPills
+      ? TOOL.listPills("gallery", region.el.getAttribute("data-section") || "")
+      : null;
+    if (pills) band.appendChild(pills);
+  }
+
   function render(region, viewEntries) {
     var list = viewEntries ||
       (region.model.length ? region.model : region.seeds);
     var train = region.el;
+    renderHead(region);
     Array.prototype.slice.call(train.querySelectorAll(".gal-tile"))
       .forEach(function (el) { train.removeChild(el); });
     list.forEach(function (en, i) { train.appendChild(tileFigure(region, en, i)); });
@@ -787,21 +875,89 @@
 
   /* The kind. Every field the core reads about this consumer is here, which
      is what keeps tool.js from knowing what a gallery is. */
+  /* One whole section as markup, markers and all, written at no indent.
+
+     The export writes this same string, so what lands on the page and what
+     lands in the file cannot differ. The band comes from the serializer, so
+     there is one description of what a section looks like and not two. */
+  function makeSection(head, id, entries) {
+    var inner = serializeTrain(entries || [], "", head);
+    return "<!--[item:" + id + "]-->\n" +
+      "<!--[edit:gal-" + id + "]-->\n" +
+      '<div class="gal-train" data-section="' + TOOL.escAttr(id) + '">' + inner + "</div>\n" +
+      "<!--[/edit:gal-" + id + "]-->\n" +
+      "<!--[/item:" + id + "]-->";
+  }
+
+  /* What one section is, for the editor's list engine.
+
+     A section is not tied to a project. It is a label, a title, a year and
+     its photographs, so a set of travel pictures is as much a section as a
+     piece of work is. tool.js owns the list and draws the controls; this is
+     everything it has to be told. */
+  var SECTION_LIST = {
+    name: "gallery",
+    noun: "section",
+    nameKey: "title",
+    fields: [
+      { key: "label", label: "Label", start: "Section",
+        hint: "Project, Travel, Sketches" },
+      { key: "title", label: "Title", hint: "what this section is called" },
+      { key: "year", label: "Year", hint: "2026, or 2011-2016" }
+    ],
+    slugFor: function (id) { return "gal-" + id; },
+    make: makeSection,
+    countNote: function (region) {
+      return countWords(shownCount(region)) +
+        ", counted for you. The section number is counted too.";
+    }
+  };
+
+  /* A train the editor put on the page after this file looked at it: wire
+     it, draw it, and take it into the layout.
+
+     A train the file was served with is already in the packer's records, so
+     this leaves its authored markup exactly as it is. That is what keeps a
+     scan from redrawing eight tiles that are already correct. */
+  function adoptTrain(region) {
+    if (trainSlugs.indexOf(region.slug) === -1) trainSlugs.push(region.slug);
+    wireTrain(region.el);
+    var known = trains.some(function (e) { return e.el === region.el; });
+    if (known) { markOpenable(region.el); return; }
+    render(region);
+    relayoutIfChanged();
+  }
+  /* The inverse, before the editor forgets the region. */
+  function dropTrain(region) {
+    var at = trainSlugs.indexOf(region.slug);
+    if (at !== -1) trainSlugs.splice(at, 1);
+    for (var i = 0; i < trains.length; i++) {
+      if (trains[i].el === region.el) { trains.splice(i, 1); return; }
+    }
+  }
+
   var TILES_KIND = {
     name: "gallery tiles",
     readImgs: function (el) { return el.querySelectorAll(".gal-tile img"); },
     readEntry: readTile,
+    readHead: readHead,
     fields: TILE_FIELDS,
     /* what a brand new tile asks for: the middle width, and no priority */
     defaults: { prefer: 2, priority: 0 },
-    serialize: serializeTiles,
+    serialize: serializeTrain,
     render: function (g, list) { render(g, list); },
+    adopt: adoptTrain,
+    drop: dropTrain,
     deferLive: false,
     onScreen: function () { return true; },
     syncSource: false,
     dropWhenEmpty: false,
     seedFallback: true,
-    mayBeEmpty: false,
+    /* A section with no photographs is legitimate: a new one starts that
+       way, and it is filled by dropping on it. The seed filler belongs to
+       the one section the site was built with, and a new section has none
+       to fall back to. */
+    mayBeEmpty: true,
     rowNote: ' <span class="ced-hidden">(tiles)</span>',
     modalNote: ' <span class="ced-hidden" style="color:var(--dim);font-size:.7rem">(gallery tile)</span>',
     lastImageNote: function (r) {
@@ -829,6 +985,9 @@
     TOOL.imageRegion.claim(function (el) {
       return !!(el.classList && el.classList.contains("gal-train"));
     }, TILES_KIND, slugs);
+    /* the trains are a list: the editor may add one, remove one and reorder
+       them, which no other region on the site allows */
+    if (TOOL.listKind) TOOL.listKind(SECTION_LIST);
     TOOL.addStyles(EDIT_CSS);
   }
 
@@ -836,8 +995,11 @@
      8. ENTRY POINT AND EXPORTS
      ========================================================== */
   function start() {
+    /* Is this the gallery page, which is not the same question as whether it
+       holds any sections. Every one of them can be deleted now, and a page
+       with none still has to offer a way to make the next. */
+    if (!doc.querySelector(".gal .wrap")) return;
     var els = doc.querySelectorAll(".gal-train");
-    if (!els.length) return;                  /* not the gallery page */
     trains = Array.prototype.slice.call(els).map(readTrain);
 
     var imgs = [];

@@ -1285,7 +1285,9 @@ body.nav-open { overflow: hidden; }
    data-span is the width a tile is DRAWN at. data-w, on the same
    element, is the width the image PREFERS. They are equal in authored
    markup; the packer changes only the first. */
-.gal { padding: 0 0 var(--section-pad); }
+/* The section number is counted, never typed. A train moved or added by the
+   editor numbers itself, and so does one moved by hand in the source. */
+.gal { padding: 0 0 var(--section-pad); counter-reset: train; }
 .gal-intro { padding: var(--section-pad) 0 clamp(1.6rem, 3vw, 2.6rem); }
 .gal-note { margin-top: 1rem; color: var(--muted); font-size: .88rem; }
 
@@ -1298,6 +1300,7 @@ body.nav-open { overflow: hidden; }
   --gal-cols: 6;
   grid-template-columns: repeat(6, 1fr);
   gap: var(--gal-gap, 14px);
+  counter-increment: train;
   margin-bottom: clamp(2rem, 4vw, 3.2rem);
   /* One height for every tile in the grid. It is set on the tile and not as
      grid-auto-rows, because the title band is a grid item too and has to size
@@ -1317,9 +1320,21 @@ body.nav-open { overflow: hidden; }
   font-size: .66rem; letter-spacing: .2em; text-transform: uppercase;
   color: var(--accent); font-weight: 700;
 }
+/* The counter prints here. It is not hidden from assistive technology:
+   generated content is part of the band's name, and the number is one of
+   the two facts the band carries that nobody types. */
+.gal-train__i { font-style: normal; }
+.gal-train__i::before { content: counter(train, decimal-leading-zero) " / "; }
 .gal-train__title { margin: 0; font-size: clamp(1.3rem, 2.4vw, 2rem); letter-spacing: -.02em; }
 .gal-train__rule { flex: 1; height: 1px; background: var(--line); }
-.gal-train__meta { flex: none; font-size: .72rem; color: var(--muted); letter-spacing: .05em; }
+/* The year and the image count are one phrase, so they sit closer to each
+   other than to the rule. The dot between them is drawn, not typed: the
+   count is written at export and a separator in the markup would be too. */
+.gal-train__meta {
+  flex: none; display: flex; align-items: baseline; gap: .45rem;
+  font-size: .72rem; color: var(--muted); letter-spacing: .05em;
+}
+.gal-train__count::before { content: "\00B7"; margin-right: .45rem; color: var(--dim); }
 
 /* A tile. The figure is the slot; the image fills it. */
 .gal-tile {
@@ -1653,12 +1668,24 @@ figure.dd-figure figcaption {
 figure.dd-figure figcaption:empty { display: none; }
 
 /* bullet block — mirrors the card .highlights diamond markers */
-ul.dd-points { margin-top: 1.2rem; display: grid; gap: .6rem; list-style: none; padding: 0; }
-ul.dd-points li {
+/* The renderer writes a plain <ul> and a heading at whichever level the
+   heading tool stopped on, so the drawer styles all of them the same rather
+   than asking the writer to remember which one it wants. */
+.dd__body h2, .dd__body h3 {
+  font-size: .78rem; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--dim); margin-top: 1.9rem;
+}
+/* The title and the subtitle live inside the template now, because a
+   splice writes what is between two markers and an attribute on the
+   template is outside them. work.js lifts them into the drawer head and
+   they are never shown in the body. */
+.dd-lead, .dd-lead__sub { display: none; }
+ul.dd-points, .dd__body ul { margin-top: 1.2rem; display: grid; gap: .6rem; list-style: none; padding: 0; }
+ul.dd-points li, .dd__body ul li {
   position: relative; padding-left: 1.4rem;
   color: var(--text-soft); font-size: .92rem; line-height: 1.55;
 }
-ul.dd-points li::before {
+ul.dd-points li::before, .dd__body ul li::before {
   content: ""; position: absolute; left: 0; top: .55em;
   width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
   transform: rotate(45deg);
@@ -2467,18 +2494,12 @@ figure.bp-fig figcaption {
    This one is a solid YELLOW pill and it opens the whole post. Filled
    against hollow, and yellow against blue, so the two can be told apart at
    a glance rather than by reading them. Yellow is the editor's own colour
-   for blog work, which the panel already uses. */
-.bs-retry {
-  display: inline-flex; align-items: center; gap: .35rem;
-  padding: .3rem .7rem; border-radius: 999px;
-  border: 1px solid var(--c-yellow); background: var(--c-yellow);
-  color: var(--bg-deep);
-  font: 700 .74rem var(--font); cursor: pointer;
-  transition: filter .2s var(--ease-soft), box-shadow .2s var(--ease-soft);
-}
-.bs-retry:hover { filter: brightness(1.08); box-shadow: 0 0 0 3px rgba(242,193,78,.28); }
-.bs-retry:focus-visible { outline: 2px solid var(--c-yellow); outline-offset: 2px; }
-/* the pencil takes its colour from the text, so it stays black on yellow */
+   for blog work, which the panel already uses.
+
+   THE PAINT IS NOT HERE. A pill exists only while the editor is on, and the
+   gallery's own pills wear the same one, so it lives in the editor's
+   stylesheet as .ced-pill and this file keeps only the placement. blog.js
+   puts both classes on the button. */
 .bs-retry__i { width: 13px; height: 13px; flex: none; }
 
 /* MONTH FILES WRITTEN BEFORE V051 keep their own post markup until one
