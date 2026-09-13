@@ -156,11 +156,11 @@ here before they exist on disk.
 | `site.js` | Shared page behavior for every page. |
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
 | `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
-| `markdown.js` | The Markdown renderer for a post body. `blog.html` only. |
+| `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
-| `tool.js` | The copy editor, image editing, and the export. |
+| `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
 | `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |

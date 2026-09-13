@@ -84,7 +84,7 @@
   var HL_COUNT = 4;
   var bcPanel = null, bcScrim = null, bcBody = null, bcDate = null, bcTitle = null;
   var bcAdv = null, bcAdvSum = null, bcAdvBody = null;   /* the advanced section */
-  var bcSpecBtn = null, bcSpecPanel = null;              /* the special commands */
+  var bcSpec = null;                     /* the special-commands flyout, from TOOL */
   var bcTime = null, bcZone = null, bcTags = null, bcCountsEl = null;
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
@@ -457,41 +457,9 @@
     ".bc-write,.bc-images,.bc-preview{flex:1;min-height:0;display:none;flex-direction:column;" +
     "margin:0 1.1rem;}" +
     ".bc-write{position:relative;}" +
-    /* THE SPECIAL COMMANDS.
-       The control sits after a divider at the end of the toolbar, so it
-       reads as a different kind of thing from the buttons that write text.
-       It is scoped to .bc-write, which is the composer's own toolbar: the
-       region editor uses the same .ced-modal__tools class and must not
-       gain either of these. */
-    ".bc-write .ced-tool__sep{width:1px;align-self:stretch;margin:.15rem .35rem;" +
-    "background:var(--line);flex:none;}" +
-    ".bc-write .bc-spec__btn{display:inline-flex;align-items:center;gap:.3rem;}" +
-    ".bc-write .bc-spec__btn svg{width:12px;height:12px;flex:none;}" +
-    ".bc-write .bc-spec__btn.on{border-color:var(--accent);color:var(--accent-bright);}" +
-    /* Above the toolbar, not below it: the toolbar sits at the top of the
-       write view, so a panel under it would cover the words being written. */
-    /* top is set when it opens, from the row's own foot. This is only what
-       it starts at before the first open. */
-    ".bc-spec{position:absolute;left:0;right:0;top:2.4rem;z-index:4;" +
-    "background:var(--panel);border:1px solid var(--line);border-radius:10px;" +
-    "box-shadow:0 24px 60px -24px rgba(0,0,0,.9);padding:.6rem .8rem;" +
-    "max-height:60%;overflow:auto;}" +
-    ".bc-spec[hidden]{display:none;}" +
-    ".bc-spec__head{font:700 .66rem var(--font);letter-spacing:.12em;" +
-    "text-transform:uppercase;color:var(--dim);padding-bottom:.4rem;" +
-    "border-bottom:1px solid var(--line-soft);margin-bottom:.5rem;}" +
-    ".bc-spec__list{display:grid;grid-template-columns:max-content 1fr;" +
-    "gap:.5rem .8rem;align-items:baseline;}" +
-    ".bc-spec__write{flex:none;font:12px Consolas,'Courier New',monospace;" +
-    "color:var(--accent-bright);white-space:nowrap;}" +
-    ".bc-spec__of{min-width:0;display:flex;flex-direction:column;gap:.1rem;}" +
-    ".bc-spec__where{font-size:.66rem;color:var(--dim);}" +
-    ".bc-spec__does{font-size:.74rem;color:var(--text-soft);line-height:1.45;}" +
-    ".bc-spec__foot{margin:.5rem 0 0;padding-top:.45rem;" +
-    "border-top:1px solid var(--line-soft);font-size:.7rem;color:var(--dim);}" +
-    /* a phone has no room for the code beside the words */
-    "@media (max-width:560px){.bc-spec__list{grid-template-columns:1fr;gap:.1rem;}" +
-    ".bc-spec__list .bc-spec__of{padding-bottom:.4rem;}}" +
+    /* The special commands, the divider before them and the marks on every
+       button are the editor's: more than one surface wears that bar now,
+       and a second copy of its paint here would be a second answer. */
     ".bc-panel[data-tab=write] .bc-write{display:flex;}" +
     ".bc-panel[data-tab=images] .bc-images{display:flex;}" +
     ".bc-panel[data-tab=preview] .bc-preview{display:flex;}" +
@@ -939,79 +907,6 @@
       c.words.toLocaleString("en-US") + (c.words === 1 ? " word" : " words");
   }
 
-  /* ---------------- the Markdown toolbar ----------------
-
-     The composer's own list. The region modal keeps the editor's HTML
-     list, because its surfaces hold HTML; this list writes Markdown into
-     the body through the same wrap and insert, so the modal gains nothing
-     it does not want. Every button is by click: the ring is title, body,
-     images, Publish, Close, and a keyboard writer types the marks. */
-
-  /* The current line's bounds in the body. */
-  function bcLineAt() {
-    var v = bcBody.value, s = bcBody.selectionStart;
-    var a = v.lastIndexOf("\n", s - 1) + 1;
-    var b = v.indexOf("\n", s);
-    if (b === -1) b = v.length;
-    return { a: a, b: b, text: v.slice(a, b) };
-  }
-  function bcSetLine(line, text) {
-    var v = bcBody.value;
-    bcBody.value = v.slice(0, line.a) + text + v.slice(line.b);
-    bcBody.focus();
-    bcBody.selectionStart = bcBody.selectionEnd = line.a + text.length;
-    bcRefreshCounts();
-  }
-  /* H2 to H4 as a cycle, then back to plain text. */
-  function bcHeadingCycle() {
-    var line = bcLineAt();
-    var m = /^(#{1,3}) (.*)$/.exec(line.text);
-    var rest = m ? m[2] : line.text;
-    var hashes = !m ? "#" : m[1].length < 3 ? m[1] + "#" : "";
-    bcSetLine(line, hashes ? hashes + " " + rest : rest);
-  }
-  /* "- " or "1. " on the line, off again when it is there. */
-  function bcListToggle(marker) {
-    var line = bcLineAt();
-    var m = /^( *)(?:[-*]|\d+\.) (.*)$/.exec(line.text);
-    if (m) {
-      var has = /^ *[-*] /.test(line.text) ? "- " : "1. ";
-      bcSetLine(line, has === marker ? m[1] + m[2] : m[1] + marker + m[2]);
-    } else {
-      bcSetLine(line, marker + line.text);
-    }
-  }
-  /* A flag stands alone on its own line, or it is text. */
-  function bcInsertFlag(flag) {
-    var v = bcBody.value, s = bcBody.selectionStart;
-    var before = s === 0 || v.charAt(s - 1) === "\n" ? "" : "\n";
-    var after = s >= v.length || v.charAt(s) === "\n" ? "" : "\n";
-    TOOL.insert(before + flag + after);
-    bcRefreshCounts();
-  }
-  function bcInsertTable() {
-    var v = bcBody.value, s = bcBody.selectionStart;
-    var before = s === 0 || v.charAt(s - 1) === "\n" ? "" : "\n";
-    TOOL.insert(before + "| Column | Column |\n| --- | --- |\n| cell | cell |\n");
-    bcRefreshCounts();
-  }
-  /* The marks of the set, removed from the selection: bold, italic,
-     strikethrough, code, a link to its text, a heading or list prefix. */
-  function bcClearMarks() {
-    var s = bcBody.selectionStart, e = bcBody.selectionEnd, v = bcBody.value;
-    if (s === e) { var line = bcLineAt(); s = line.a; e = line.b; }
-    var t = v.slice(s, e)
-      .replace(/\*\*([^*]+)\*\*/g, "$1").replace(/~~([^~]+)~~/g, "$1")
-      .replace(/\*([^*\n]+)\*/g, "$1").replace(/(^|[^\w])_([^_\n]+)_(?=[^\w]|$)/g, "$1$2")
-      .replace(/`([^`\n]+)`/g, "$1")
-      .replace(/\[([^\]\n]+)\]\((?:[^()\s]|\([^()\s]*\))+\)/g, "$1")
-      .replace(/^ *(?:#{1,3} |[-*] |\d+\. )/gm, "");
-    bcBody.value = v.slice(0, s) + t + v.slice(e);
-    bcBody.focus();
-    bcBody.selectionStart = s;
-    bcBody.selectionEnd = s + t.length;
-    bcRefreshCounts();
-  }
   /* THE SPECIAL COMMANDS.
 
      Things a post body can carry that plain Markdown does not know. The
@@ -1031,10 +926,13 @@
        bcPublish resolves it whichever mode the post is in. Listing a
        command that cannot work is worse than listing none. */
     var md = bcMode !== "html";
-    var out = md ? ((AMH.markdown && AMH.markdown.flags) || []).map(function (f) {
-      return { write: "{" + f.name + "}", where: "anywhere on a line",
-               does: f.does + " The line splits where you write it." };
-    }) : [];
+    /* a flag names the surfaces that offer it, and a post is one of them */
+    var out = md ? ((AMH.markdown && AMH.markdown.flags) || [])
+      .filter(function (f) { return (f.for || ["post"]).indexOf("post") !== -1; })
+      .map(function (f) {
+        return { write: "{" + f.name + "}", where: "anywhere on a line",
+                 does: f.does + " The line splits where you write it." };
+      }) : [];
     out.push({ write: "[img0001,caption|alt]", where: "on its own line",
                does: "Places an image from the Images view. Use png0001 for a .png. " +
                      "The caption and the alt text are both optional." });
@@ -1051,94 +949,6 @@
                      "write about a command without using one." });
     return out;
   }
-  /* One toolbar button that writes one flag. The word and the sentence are
-     the renderer's, so the hover and the panel can never disagree. */
-  function bcFlagTool(label, name) {
-    var flags = (AMH.markdown && AMH.markdown.flags) || [];
-    var f = null, i;
-    for (i = 0; i < flags.length; i++) if (flags[i].name === name) f = flags[i];
-    var word = "{" + name + "}";
-    return [label, word + " - " + (f ? f.does : ""), function () { bcInsertFlag(word); }];
-  }
-
-  var BC_TOOLS = [
-    ["H", "heading: H2, H3, H4, then plain", bcHeadingCycle],
-    ["• list", "bullet list", function () { bcListToggle("- "); }],
-    ["1. list", "numbered list", function () { bcListToggle("1. "); }],
-    ["B", "bold", function () { TOOL.wrap("**", "**"); bcRefreshCounts(); }],
-    ["I", "italic", function () { TOOL.wrap("*", "*"); bcRefreshCounts(); }],
-    ["S", "strikethrough", function () { TOOL.wrap("~~", "~~"); bcRefreshCounts(); }],
-    ["Link", "link", function () {
-      var url = window.prompt("Link URL:", "https://");
-      if (url) { TOOL.wrap("[", "](" + url + ")"); bcRefreshCounts(); }
-    }],
-    ["Table", "table: a two by two skeleton", bcInsertTable],
-    bcFlagTool("Expand", "expandformore"),
-    bcFlagTool("Break", "pagebreak"),
-    ["Clear", "clear formatting in the selection", bcClearMarks]
-  ];
-
-  /* ---------------- the special-commands flyout ----------------
-     Filled from bcSpecials each time it opens, so a flag added to the
-     renderer is in the list without this file being touched. */
-  function bcSpecIsOpen() { return !!(bcSpecPanel && !bcSpecPanel.hidden); }
-  function bcSpecOpen(open) {
-    if (!bcSpecPanel) return;
-    if (open) {
-      bcSpecFill();
-      /* The toolbar wraps to two lines on a phone, so a fixed offset would
-         lay the panel over its second line. It hangs from where the row
-         actually ends. offsetTop is inside .bc-write, which is the panel's
-         own containing block. */
-      var row = bcSpecPanel.parentNode &&
-        bcSpecPanel.parentNode.querySelector(".ced-modal__tools");
-      if (row) bcSpecPanel.style.top = (row.offsetTop + row.offsetHeight + 4) + "px";
-    }
-    bcSpecPanel.hidden = !open;
-    bcSpecBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    bcSpecBtn.classList.toggle("on", !!open);
-  }
-  function bcSpecFill() {
-    var rows = bcSpecials().map(function (s) {
-      /* two cells of one grid, not a row that lays itself out: the widest
-         command sizes the first column and every description then starts in
-         the same place, which a per-row flex cannot do. */
-      return '<code class="bc-spec__write">' + TOOL.escAttr(s.write) + "</code>" +
-        '<div class="bc-spec__of"><span class="bc-spec__where">' +
-        TOOL.escAttr(s.where) + "</span>" +
-        '<span class="bc-spec__does">' + TOOL.escAttr(s.does) + "</span></div>";
-    }).join("");
-    bcSpecPanel.innerHTML =
-      '<div class="bc-spec__head">Special commands</div>' +
-      '<div class="bc-spec__list">' + rows + "</div>" +
-      '<p class="bc-spec__foot">Everything else in this post is ' +
-      (bcMode === "html" ? "HTML" : "Markdown") + ".</p>";
-  }
-  /* Escape closes it, and so does a press anywhere that is not the panel or
-     the control that opened it. Both listeners are on the document and are
-     put on once, with the panel, and go with it. */
-  function bcSpecWire() {
-    doc.addEventListener("keydown", bcSpecKey, true);
-    doc.addEventListener("pointerdown", bcSpecAway, true);
-  }
-  function bcSpecUnwire() {
-    doc.removeEventListener("keydown", bcSpecKey, true);
-    doc.removeEventListener("pointerdown", bcSpecAway, true);
-  }
-  function bcSpecKey(e) {
-    if (e.key !== "Escape" || !bcSpecIsOpen()) return;
-    /* it is in front of the composer, so it answers the key first */
-    e.preventDefault();
-    e.stopPropagation();
-    bcSpecOpen(false);
-    bcSpecBtn.focus();
-  }
-  function bcSpecAway(e) {
-    if (!bcSpecIsOpen()) return;
-    if (bcSpecPanel.contains(e.target) || bcSpecBtn.contains(e.target)) return;
-    bcSpecOpen(false);
-  }
-
   /* ---------------- the tag dropdown ----------------
 
      The tags the blog already uses, offered as you type, each with the
@@ -1256,9 +1066,7 @@
   }
   function bcClose() {
     bcStopTicker();
-    bcSpecUnwire();
-    bcSpecBtn = null;
-    bcSpecPanel = null;
+    if (bcSpec) { bcSpec.destroy(); bcSpec = null; }
     bcImages.forEach(function (im) { if (im.previewURL) URL.revokeObjectURL(im.previewURL); });
     bcImages = [];
     if (bcScrim && bcScrim.parentNode) bcScrim.parentNode.removeChild(bcScrim);
@@ -1459,61 +1267,10 @@
     var tools = doc.createElement("div");
     tools.className = "ced-modal__tools";
     tools.style.padding = "0 0 .55rem";
-    /* the HTML mode keeps the editor's HTML list, the set an old post was
-       written with; the Markdown mode has the composer's own */
-    var toolList = bcMode === "html"
-      ? TOOL.toolbar.concat([
-          ["H3", "subheading", function () { TOOL.wrap("<h3>", "</h3>"); bcRefreshCounts(); }],
-          ["P", "paragraph", function () { TOOL.wrap("<p>", "</p>"); bcRefreshCounts(); }]
-        ])
-      : BC_TOOLS;
-    toolList.forEach(function (t) {
-      var b = doc.createElement("button");
-      b.type = "button"; b.className = "ced-tool";
-      b.tabIndex = -1;             /* by click: the ring is title, body, images, Publish, Close */
-      b.textContent = t[0]; b.title = t[1];
-      b.addEventListener("click", t[2]);
-      tools.appendChild(b);
-    });
-    /* THE SPECIAL COMMANDS, BEHIND AN (i).
-
-       The toolbar writes two of them and never names the third or the
-       fourth, and the two it does write are called things nobody guesses:
-       the flags are {expandformore} and {pagebreak}, not the shorter words
-       a reader reaches for. A row of buttons cannot carry that, so the row
-       carries a way to ask.
-
-       A flyout and not a box: a second box over the composer is the thing
-       this editor has spent its design removing, and a title cannot hold
-       four commands with their syntax. It is anchored to the control, it
-       closes on Escape or a click outside, and it needs no new layer. */
-    var sep = doc.createElement("span");
-    sep.className = "ced-tool__sep";
-    sep.setAttribute("aria-hidden", "true");
-    tools.appendChild(sep);
-
-    bcSpecBtn = doc.createElement("button");
-    bcSpecBtn.type = "button";
-    bcSpecBtn.className = "ced-tool bc-spec__btn";
-    bcSpecBtn.tabIndex = -1;
-    bcSpecBtn.setAttribute("aria-expanded", "false");
-    bcSpecBtn.title = "The commands a post body can carry that Markdown does not know";
-    bcSpecBtn.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-      'stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/>' +
-      '<line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.6"/></svg>' +
-      "<span>Special commands</span>";
-    bcSpecBtn.addEventListener("click", function () { bcSpecOpen(!bcSpecIsOpen()); });
-    tools.appendChild(bcSpecBtn);
-
-    bcSpecPanel = doc.createElement("div");
-    bcSpecPanel.className = "bc-spec";
-    bcSpecPanel.hidden = true;
-    bcSpecPanel.setAttribute("role", "dialog");
-    bcSpecPanel.setAttribute("aria-label", "Special commands");
-
-    writeEl.appendChild(tools);
-    writeEl.appendChild(bcSpecPanel);
+    /* THE BODY IS MADE FIRST. A toolbar writes into a surface, and the
+       editor's bar is handed the one it writes into rather than asking
+       which is open. So the textarea exists before the row that acts on
+       it, and is put on screen after it. */
     bcBody = doc.createElement("textarea");
     bcBody.spellcheck = true;
     bcBody.placeholder = bcMode === "html"
@@ -1525,8 +1282,51 @@
     /* the first heading is the name, so the section that says so has to
        keep up with the line that decides it */
     bcBody.addEventListener("input", bcAdvSync);
+
+    /* The HTML mode keeps the editor's HTML list, the set an old post was
+       written with. The Markdown mode asks the editor for its Markdown bar,
+       which the deep dive asks for too: one set of tools, one set of marks,
+       and every one of them writing into the surface it was handed.
+
+       Both are by click. The ring is title, body, images, Publish, Close,
+       and a keyboard writer types the marks. */
+    if (bcMode === "html") {
+      TOOL.toolbar.concat([
+        ["H3", "subheading", function () { TOOL.wrap("<h3>", "</h3>"); bcRefreshCounts(); }],
+        ["P", "paragraph", function () { TOOL.wrap("<p>", "</p>"); bcRefreshCounts(); }]
+      ]).forEach(function (t) {
+        var b = doc.createElement("button");
+        b.type = "button"; b.className = "ced-tool";
+        b.tabIndex = -1;
+        b.textContent = t[0]; b.title = t[1];
+        b.addEventListener("click", t[2]);
+        tools.appendChild(b);
+      });
+    } else {
+      TOOL.mdToolbar(tools, bcBody, {
+        surface: "post", tabbable: false, onChange: bcRefreshCounts
+      });
+    }
+
+    /* THE SPECIAL COMMANDS, BEHIND AN (i).
+
+       The toolbar writes the flags and never names the image tag, the
+       heading rule or the escape, and the two it does write are called
+       things nobody guesses. A row of buttons cannot carry that, so the row
+       carries a way to ask. The editor owns the control and the panel; this
+       says what goes in them. */
+    writeEl.appendChild(tools);
+    bcSpec = TOOL.specialsFlyout(tools, writeEl, {
+      rows: bcSpecials,
+      foot: function () {
+        return "Everything else in this post is " +
+          (bcMode === "html" ? "HTML" : "Markdown") + ".";
+      },
+      hover: "The commands a post body can carry that Markdown does not know",
+      tabbable: false
+    });
     writeEl.appendChild(bcBody);
-    bcCountsEl = doc.createElement("span");
+    bcCountsEl = doc.createElement("span");    bcCountsEl = doc.createElement("span");
     bcCountsEl.className = "bc-counts";
     writeEl.appendChild(bcCountsEl);
     bcPanel.appendChild(writeEl);
@@ -1650,7 +1450,6 @@
     bcPanel.appendChild(bcAdv);
     /* shut, and already saying what is in it */
     bcAdvOpen(false);
-    bcSpecWire();
 
     bcStatus = doc.createElement("div");
     bcStatus.className = "bc-status";
@@ -1767,7 +1566,7 @@
     /* A flyout left open would be hidden with the composer and still answer
        Escape from in front of the wizard, so the key would close a panel
        nobody can see instead of the step in front. */
-    bcSpecOpen(false);
+    if (bcSpec) bcSpec.open(false);
     bcPanelHid = true;
     bcPanelWas = doc.activeElement;
     bcPanel.classList.add("ced-box--past");

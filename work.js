@@ -431,7 +431,9 @@
      3. DEEP-DIVE DRAWER
      ----------------------------------------------------------
      The "Learn more" slide-over. Its content comes from the project's
-     <template class="deepdive" data-title data-subtitle>.
+     <template class="deepdive">. The head is two elements inside the
+     template, .dd-lead and .dd-lead__sub, and the drawer lifts them out
+     of the body. data-title and data-subtitle are the older shape.
 
      A single photo (figure.dd-figure img) opens in the lightbox above,
      on click or on Enter or Space. Esc, the scrim and the close button
@@ -440,6 +442,13 @@
      The shell is built on first open, not at load: most visitors never
      open a drawer.
      ========================================================== */
+  /* Which template the open drawer was cloned from, or null.
+
+     The editor has to find the clone of the gallery it holds, and the clone
+     carries nothing that names its source. This is the answer, from the one
+     place that knows it. */
+  var openTpl = null;
+
   (function () {
     var triggers = doc.querySelectorAll(".project__more");
     if (!triggers.length) return;
@@ -536,17 +545,39 @@
       var project = trigger.closest ? trigger.closest(".project") : null;
       var tpl = project ? project.querySelector("template.deepdive") : null;
       if (!tpl) return;
-
-      var titleAttr = tpl.getAttribute("data-title");
-      if (!titleAttr && project) {
-        var h = project.querySelector(".project__title");
-        titleAttr = h ? h.textContent : "";
-      }
-      titleEl.textContent = titleAttr || "";
-      subEl.textContent = tpl.getAttribute("data-subtitle") || "";
+      openTpl = tpl;
 
       bodyEl.innerHTML = "";
       bodyEl.appendChild(tpl.content.cloneNode(true));
+
+      /* THE HEAD COMES FROM INSIDE THE TEMPLATE.
+
+         The editor writes what is between two markers, and an attribute on
+         the template is outside them, so a title kept there could never be
+         edited. It is two elements in the content instead, lifted into the
+         drawer's head and taken out of the body.
+
+         data-title and data-subtitle are still read, for a template written
+         before that and not yet converted. */
+      var lead = bodyEl.querySelector(".dd-lead");
+      var leadSub = bodyEl.querySelector(".dd-lead__sub");
+      var titleText = lead ? lead.textContent : tpl.getAttribute("data-title");
+      if (!titleText && project) {
+        var h = project.querySelector(".project__title");
+        titleText = h ? h.textContent : "";
+      }
+      titleEl.textContent = titleText || "";
+      subEl.textContent = leadSub ? leadSub.textContent
+        : (tpl.getAttribute("data-subtitle") || "");
+      if (lead && lead.parentNode) lead.parentNode.removeChild(lead);
+      if (leadSub && leadSub.parentNode) leadSub.parentNode.removeChild(leadSub);
+
+      /* The Markdown the body was written from travels with it, so the form
+         can open what was typed rather than what it rendered to. It is a
+         script of a type no browser runs, and it is taken out here so
+         nothing downstream has to know it was ever there. */
+      var mdSrc = bodyEl.querySelector("script.dd-source");
+      if (mdSrc && mdSrc.parentNode) mdSrc.parentNode.removeChild(mdSrc);
       /* deep-dive galleries: a dd can carry the same .gallery block as the
          project cards. The clone arrives un-built (template content is inert),
          so build it now; an empty gallery (no photos) is removed entirely -
@@ -592,6 +623,7 @@
 
     function close() {
       if (!root) return;
+      openTpl = null;
       root.classList.remove("is-open");
       doc.body.classList.remove("dd-open");
       if (lastFocus && lastFocus.focus) lastFocus.focus();
@@ -947,5 +979,10 @@
   /* the editor rebuilds a gallery after an image edit by restoring the
      plain <img> list and re-running the builder. buildGalleries skips
      anything already built, so a repeat call is safe. */
-  AMH.work = { buildGalleries: buildGalleries, lightbox: lightbox };
+  AMH.work = {
+    buildGalleries: buildGalleries,
+    lightbox: lightbox,
+    /* The template the open deep-dive drawer was cloned from, or null. */
+    openTemplate: function () { return openTpl; }
+  };
 })();

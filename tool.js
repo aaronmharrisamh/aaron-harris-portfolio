@@ -14,7 +14,7 @@
    Sections:
      1. SETUP                    5. EDITOR UI
      2. CONSTANTS AND KEYS       6. EXPORT AND SPLICING
-     3. REGION SCANNING          7. PUBLIC API
+     3. REGIONS AND LISTS        7. PUBLIC API
      4. IMAGE REGIONS
 
    Two public surfaces, both listed in section 7: window.edit is the
@@ -153,12 +153,17 @@
 
   var regions = [];          /* {slug, badge, el, original, current, edited, visible, chip, row} */
   var gals = [];             /* gallery (image) regions - see IMAGE / GALLERY EDITING below */
+  /* Lists, by the name in their [list:name] markers. A list is a run of
+     blocks the editor may add to, remove from and reorder. See section 3. */
+  var lists = {};
+  var badgeSeq = 0;          /* badges only ever go up, so none is reused */
   var imgSeq = 0;            /* running IMG## counter */
   var scanned = false;
   var active = false;        /* editor mode on/off */
   var viewing = "after";     /* "after" = with edits, "before" = as published */
   var exportedClean = true;  /* false once an edit exists that hasn't been exported */
-  var overlay = null, panel = null, panelList = null, viewBtn = null, imgRowsEl = null;
+  var overlay = null, panel = null, panelList = null, viewBtn = null;
+  var regRowsEl = null, imgRowsEl = null;
   var modal = null, scrim = null, ta = null, modalTitle = null, modalStatus = null;
   var altIn = null, srcLine = null;
   var pendingChip = null;
@@ -174,10 +179,15 @@
   var styleEl = null;
 
   /* ==========================================================
-     3. REGION SCANNING
+     3. REGIONS AND LISTS
      ----------------------------------------------------------
-     Find the [edit:slug] marker pairs and build the region model
-     the rest of the file works from.
+     Find the marker pairs a page holds and build the models the
+     rest of the file works from: one region for each [edit:slug],
+     and one list for each [list:name] with the blocks inside it.
+
+     Both are read here because both are read the same way, off the
+     comments in the page, and because a list adds and removes
+     regions: the two models change together or not at all.
      ========================================================== */
   function badgeFor(i) {
     var letter = String.fromCharCode(65 + Math.floor(i / 99));   /* A01–A99, B01… */
@@ -185,17 +195,34 @@
     return letter + (n < 10 ? "0" + n : String(n));
   }
 
-  function scan() {
-    if (scanned) return;
-    scanned = true;
-    var walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_COMMENT, null, false);
-    var open = [];
-    var c;
-    while ((c = walker.nextNode())) {
+  /* Every [edit:slug] opening comment among these nodes and inside them.
+
+     A node may be a comment itself, because a block added while the editor
+     is on arrives as a run of siblings: its own markers, then its element. */
+  function regionComments(nodes) {
+    var out = [];
+    function take(c) {
       var m = /^\[edit:([\w-]+)\]$/.exec(c.nodeValue.trim());
-      if (m) open.push({ slug: m[1], node: c });
+      if (m) out.push({ slug: m[1], node: c });
     }
-    open.forEach(function (o) {
+    nodes.forEach(function (n) {
+      if (n.nodeType === 8) { take(n); return; }
+      if (n.nodeType !== 1) return;
+      var w = doc.createTreeWalker(n, NodeFilter.SHOW_COMMENT, null, false);
+      var c;
+      while ((c = w.nextNode())) take(c);
+    });
+    return out;
+  }
+
+  /* Register the regions these nodes hold. Returns how many were made.
+
+     scan() hands it the page. A list hands it the nodes one new item put
+     into the page, so a block added in a sitting is registered exactly as
+     one the file was served with. */
+  function scanNodes(nodes) {
+    var made = 0;
+    regionComments(nodes).forEach(function (o) {
       var el = o.node.nextSibling;
       while (el && !(el.nodeType === 1)) {
         if (el.nodeType === 3 && el.nodeValue.trim() !== "") break;
@@ -228,41 +255,273 @@
          consumer claims its own, see imageRegion.claim(). */
       var claimed = imageRegion.claimFor(el);
       if (claimed) {
-        imageRegion.register({ slug: o.slug, el: el, kind: claimed });
+        var g = imageRegion.register({ slug: o.slug, el: el, kind: claimed });
+        /* the trunk that owns the kind wires its own element. This file
+           learns nothing about what the element is. */
+        if (claimed.adopt) claimed.adopt(g);
+        made++;
         return;
       }
       var html = el.innerHTML;
       regions.push({
-        slug: o.slug, badge: badgeFor(regions.length), el: el,
+        slug: o.slug, badge: badgeFor(badgeSeq++), el: el,
         original: html, current: html, edited: false,
         generated: owner === "generated",
         visible: el.getClientRects().length > 0,
         chip: null, row: null
       });
+      made++;
     });
-    /* deep-dive galleries: template content is a separate fragment the body
-       walker never enters, so walk each deepdive template explicitly */
-    regions.forEach(function (r) {
-      if (!r.el || r.el.tagName !== "TEMPLATE") return;
-      var w2 = doc.createTreeWalker(r.el.content, NodeFilter.SHOW_COMMENT, null, false);
-      var c2;
-      while ((c2 = w2.nextNode())) {
-        var m2 = /^\[edit:([\w-]+)\]$/.exec(c2.nodeValue.trim());
-        if (!m2) continue;
-        var el2 = c2.nextSibling;
-        while (el2 && el2.nodeType !== 1) el2 = el2.nextSibling;
-        if (el2 && el2.classList && el2.classList.contains("gallery")) {
-          imageRegion.register({ slug: m2[1], el: el2, kind: KIND.deepdive, tpl: r.el });
-        }
+    return made;
+  }
+
+  /* The galleries inside one deep-dive template.
+
+     Template content is a separate fragment the body walker never enters,
+     so it is walked on its own: at the first scan, and again whenever a
+     template is rewritten, because a deep dive that gained photographs
+     gained a region with them. */
+  function scanTemplate(r) {
+    if (!r.el || r.el.tagName !== "TEMPLATE") return;
+    var w = doc.createTreeWalker(r.el.content, NodeFilter.SHOW_COMMENT, null, false);
+    var c;
+    while ((c = w.nextNode())) {
+      var m = /^\[edit:([\w-]+)\]$/.exec(c.nodeValue.trim());
+      if (!m) continue;
+      var el = c.nextSibling;
+      while (el && el.nodeType !== 1) el = el.nextSibling;
+      if (!el || !el.classList || !el.classList.contains("gallery")) continue;
+      var had = null;
+      gals.forEach(function (g) { if (g.slug === m[1]) had = g; });
+      if (had) { had.el = el; had.tpl = r.el; continue; }
+      var made = imageRegion.register({ slug: m[1], el: el, kind: KIND.deepdive, tpl: r.el });
+      galChipsFor(made);
+    }
+  }
+
+  /* Drop one region: the editor stops holding it, and its furniture goes.
+
+     Called for every region inside a block a list removes. The bytes are
+     already gone from the page; this is the model catching up. */
+  function forget(slug) {
+    var i;
+    for (i = 0; i < regions.length; i++) {
+      if (regions[i].slug !== slug) continue;
+      var r = regions[i];
+      if (r.chip && r.chip.parentNode) r.chip.parentNode.removeChild(r.chip);
+      if (r.row && r.row.parentNode) r.row.parentNode.removeChild(r.row);
+      regions.splice(i, 1);
+      pendingDrop(currentPage(), "text", slug);
+      return true;
+    }
+    for (i = 0; i < gals.length; i++) {
+      if (gals[i].slug !== slug) continue;
+      var g = gals[i];
+      if (g.kind.drop) g.kind.drop(g);
+      if (g.chip && g.chip.parentNode) g.chip.parentNode.removeChild(g.chip);
+      if (g.plusChip && g.plusChip.parentNode) g.plusChip.parentNode.removeChild(g.plusChip);
+      if (g.observer) { g.observer.disconnect(); g.observer = null; }
+      g.model.forEach(imageRegion.revokePreview);
+      gals.splice(i, 1);
+      pendingDrop(currentPage(), "gallery", slug);
+      pendingDrop(currentPage(), "heads", slug);
+      pendingDrop(currentPage(), "bytes", slug);
+      return true;
+    }
+    return false;
+  }
+
+  /* ------------------------------------------------------------
+     THE LISTS
+
+     Every other edit replaces what is between one pair of markers, so
+     nothing can add a pair. A list is the answer: a run of blocks, each
+     fenced by [item:id] inside a [list:name], that the editor may add to,
+     remove from and reorder.
+
+     An item id is permanent. A rename, a reorder or the deletion of a
+     sibling never changes it, which is the rule post ids already follow.
+
+     What the trunk that owns a list supplies is in section 5; this is the
+     model and the page it is read from.
+     ------------------------------------------------------------ */
+
+  /* Read the lists the page holds, and the ids in each, in document order.
+     source is the order the served file holds; order is the order now. */
+  function scanLists() {
+    var walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_COMMENT, null, false);
+    var c, now = null;
+    while ((c = walker.nextNode())) {
+      var m = /^\[(\/?)(list|item):([\w-]+)\]$/.exec(c.nodeValue.trim());
+      if (!m) continue;
+      var closing = m[1] === "/", family = m[2], name = m[3];
+      if (family === "list") {
+        if (closing) { if (lists[name]) lists[name].close = c; now = null; continue; }
+        lists[name] = { name: name, source: [], order: [], added: {}, removed: [],
+                        close: null, at: {} };
+        now = lists[name];
+        continue;
       }
+      if (!now || closing) continue;
+      now.source.push(name);
+      now.order.push(name);
+      now.at[name] = c;      /* the item's opening comment, for moving it */
+    }
+  }
+
+  function listDirty(st) {
+    return st.order.join(",") !== st.source.join(",") ||
+           Object.keys(st.added).length > 0 || st.removed.length > 0;
+  }
+  function listsDirty() {
+    return Object.keys(lists).some(function (n) { return listDirty(lists[n]); });
+  }
+
+  /* One item's nodes, from its opening marker to its closing one. */
+  function itemNodes(st, id) {
+    var out = [], n = st.at[id];
+    if (!n) return out;
+    var stop = "[/item:" + id + "]";
+    while (n) {
+      out.push(n);
+      if (n.nodeType === 8 && n.nodeValue.trim() === stop) break;
+      n = n.nextSibling;
+    }
+    return out;
+  }
+
+  /* Put one new item into the page and into the list.
+
+     The markup is the one source of truth: the same string becomes the DOM
+     here and the bytes at export, so what is on screen cannot drift from
+     what a publish writes. It carries no indent; the splice adds the file's
+     own. beforeId places it, and nothing places it last. */
+  function listInsert(st, id, markup, beforeId) {
+    var anchor = (beforeId && st.at[beforeId]) || st.close;
+    if (!anchor || !anchor.parentNode) return false;
+    var tpl = doc.createElement("template");
+    tpl.innerHTML = markup;
+    var nodes = Array.prototype.slice.call(tpl.content.childNodes);
+    if (!nodes.length) return false;
+    var frag = doc.createDocumentFragment();
+    nodes.forEach(function (n) { frag.appendChild(n); });
+    anchor.parentNode.insertBefore(frag, anchor);
+    anchor.parentNode.insertBefore(doc.createTextNode("\n"), anchor);
+    st.added[id] = markup;
+    st.at[id] = nodes[0];
+    var was = st.removed.indexOf(id);
+    if (was !== -1) st.removed.splice(was, 1);
+    /* A block that arrives after load has never been watched, and a reveal
+       starts invisible. The page owns that animation, so it is asked. */
+    if (AMH.site && AMH.site.watchReveals) {
+      nodes.forEach(function (n) { if (n.nodeType === 1) AMH.site.watchReveals(n); });
+    }
+    var to = beforeId ? st.order.indexOf(beforeId) : -1;
+    if (to < 0) st.order.push(id);
+    else st.order.splice(to, 0, id);
+    scanNodes(nodes);
+    return true;
+  }
+
+  /* Take one item out of the page, with every region it held. */
+  /* Every slug these nodes hold, INSIDE a template as well as outside one.
+
+     A tree walker does not enter template content, which is right for the
+     scanner: a region in there is claimed by the trunk that owns the
+     template, not registered as text. It is wrong for a removal, because a
+     block that leaves takes those regions with it and the editor would go
+     on holding one whose element is no longer on the page. */
+  function heldSlugs(nodes) {
+    var out = regionComments(nodes).map(function (o) { return o.slug; });
+    nodes.forEach(function (n) {
+      if (n.nodeType !== 1) return;
+      var tpls = n.tagName === "TEMPLATE" ? [n] :
+        Array.prototype.slice.call(n.querySelectorAll("template"));
+      tpls.forEach(function (t) {
+        if (!t.content) return;
+        var w = doc.createTreeWalker(t.content, NodeFilter.SHOW_COMMENT, null, false);
+        var c, m;
+        while ((c = w.nextNode())) {
+          m = /^\[edit:([\w-]+)\]$/.exec(c.nodeValue.trim());
+          if (m) out.push(m[1]);
+        }
+      });
     });
-    console.info("[site editor] " + regions.length + " text regions and " +
-      gals.length + " galleries registered.");
+    return out;
+  }
+
+  function listRemove(st, id) {
+    var kill = itemNodes(st, id);
+    if (!kill.length) return false;
+    heldSlugs(kill).forEach(forget);
+    kill.forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+    delete st.at[id];
+    if (st.added[id]) delete st.added[id];
+    else if (st.removed.indexOf(id) === -1) st.removed.push(id);
+    var at = st.order.indexOf(id);
+    if (at !== -1) st.order.splice(at, 1);
+    return true;
+  }
+
+  /* Put the items in this order, on the page and in the model. Each item's
+     nodes are moved, not rebuilt, so nothing inside one is disturbed. */
+  function listReorder(st, order) {
+    var anchor = st.close;
+    if (!anchor || !anchor.parentNode) return false;
+    var parent = anchor.parentNode;
+    order.forEach(function (id) {
+      itemNodes(st, id).forEach(function (n) { parent.insertBefore(n, anchor); });
+    });
+    st.order = order.slice();
+    return true;
+  }
+
+  /* Put one list back to the membership and the order the file holds.
+
+     A block that was ADDED comes off the page. A block that was MOVED goes
+     back where it was. A block that was DELETED cannot be rebuilt from here:
+     its bytes went with it and the file is the only copy. The list is marked
+     clean either way, so the export writes the file's own list and the block
+     is in it; the page catches up on the next load, which the console says. */
+  function listRevert(st) {
+    Object.keys(st.added).forEach(function (id) { listRemove(st, id); });
+    var here = st.source.filter(function (id) { return st.at[id]; });
+    var lost = st.source.filter(function (id) { return !st.at[id]; });
+    listReorder(st, here);
+    st.order = st.source.slice();
+    st.added = {};
+    st.removed = [];
+    if (lost.length) {
+      console.info("[site editor] reload the page to see " + lost.join(", ") +
+        " again. The export already has them: their bytes are in the file, " +
+        "and this tab no longer holds a copy.");
+    }
+  }
+
+  function listMove(st, id, by) {
+    var at = st.order.indexOf(id), to = at + by;
+    if (at < 0 || to < 0 || to >= st.order.length) return false;
+    var next = st.order.slice();
+    next.splice(at, 1);
+    next.splice(to, 0, id);
+    return listReorder(st, next);
+  }
+
+  function scan() {
+    if (scanned) return;
+    scanned = true;
+    scanLists();
+    scanNodes([doc.body]);
+    regions.forEach(scanTemplate);
+    var ls = Object.keys(lists).length;
+    console.info("[site editor] " + regions.length + " text regions, " +
+      gals.length + " galleries and " + ls + " list(s) registered.");
   }
 
   function dirty() {
     return !exportedClean &&
-      (regions.some(function (r) { return r.edited; }) || gals.some(galDirty));
+      (regions.some(function (r) { return r.edited; }) || gals.some(galDirty) ||
+       listsDirty());
   }
 
   /* ==========================================================
@@ -475,9 +734,9 @@
 
        A kind that is not a list of <img> supplies its own; this is the
        default, and the two carousel kinds use it. */
-    serializeFor: function (entries, indent, kind) {
+    serializeFor: function (entries, indent, kind, head) {
       return (kind && kind.serialize)
-        ? kind.serialize(entries, indent)
+        ? kind.serialize(entries, indent, head)
         : imageRegion.serialize(entries, indent);
     },
 
@@ -511,10 +770,21 @@
         seeds: entries.filter(function (e) { return e.isSeed; }),
         model: entries.filter(function (e) { return !e.isSeed; }),
         original: null,
+        /* The head is what a region holds that is not an image, read off
+           the authored markup by the kind: a gallery train's band. A kind
+           with no readHead has none, and nothing else changes for it. */
+        head: spec.kind.readHead ? spec.kind.readHead(spec.el) : null,
+        headOriginal: null,
         live: spec.kind.deferLive ? null : spec.el,
         chip: null, plusChip: null, observer: null
       };
       r.original = imageRegion.exportForm(r.model, r.kind);
+      r.headOriginal = JSON.stringify(r.head || null);
+      /* A region that may legitimately hold no images still needs somewhere
+         to drop one, and it has no seeds to fall back on. */
+      if (!r.model.length && !r.seeds.length && spec.kind.mayBeEmpty) {
+        r.model.push(imageRegion.emptySlot(spec.kind));
+      }
       gals.push(r);
       return r;
     },
@@ -528,7 +798,8 @@
        holds? Compared through the export form, so a preview URL or an
        IMG## label can never make a region look edited. */
     dirty: function (r) {
-      return JSON.stringify(imageRegion.exportForm(r.model, r.kind)) !== JSON.stringify(r.original);
+      return JSON.stringify(imageRegion.exportForm(r.model, r.kind)) !== JSON.stringify(r.original) ||
+             JSON.stringify(r.head || null) !== r.headOriginal;
     },
 
     /* Model operations. Each returns the entry it displaced, if any. */
@@ -554,6 +825,10 @@
       r.model.forEach(imageRegion.revokePreview);
       r.model = imageRegion.fromExportForm(r.original, r.kind);
       r.model.forEach(function (en) { en.imgId = imageRegion.nextId(); });
+      r.head = JSON.parse(r.headOriginal);
+      if (!r.model.length && !r.seeds.length && r.kind.mayBeEmpty) {
+        r.model.push(imageRegion.emptySlot(r.kind));
+      }
     }
   };
 
@@ -576,6 +851,9 @@
        rowNote        suffix for the region's rows in the panel
        modalNote      suffix for the image modal heading
        lastImageNote(r) warning shown before the last image is deleted
+       readHead(el)   the region's non-image fields, read off the markup
+       adopt(r)       wire an element this trunk did not see at load
+       drop(r)        the inverse, before the region is forgotten
      ------------------------------------------------------------ */
   var KIND = {
 
@@ -833,6 +1111,35 @@
     g.chip.classList.toggle("ced-edited", galDirty(g));
   }
 
+  /* One row per text region, drawn again whenever the set of them changes.
+
+     A block a list adds brings its regions with it, so the rows cannot be
+     written once at build time: the panel would go on describing the page
+     as it was while its own count said otherwise. */
+  function refreshRegionRows() {
+    if (!regRowsEl) return;
+    regRowsEl.innerHTML = "";
+    regions.forEach(function (r) {
+      var row = doc.createElement("button");
+      row.type = "button";
+      row.className = "ced-panel__row" + (r.edited ? " ced-edited" : "");
+      row.innerHTML = '<span class="ced-b">' + r.badge + "</span><span>" + r.slug + "</span>" +
+        (r.generated ? ' <span class="ced-hidden">(generated)</span>' : "") +
+        (r.visible ? "" : ' <span class="ced-hidden">(hidden)</span>') +
+        '<span class="ced-dot"></span>';
+      /* A deep dive is written from Markdown the template carries, so its
+         own box would be editing the half that follows. The row opens the
+         project's form on the view that owns it. */
+      row.addEventListener("click", function () {
+        var owner = ddOwner(r.slug);
+        if (owner) projectForm("projects", owner, 2);
+        else openModal(r);
+      });
+      r.row = row;
+      regRowsEl.appendChild(row);
+    });
+  }
+
   function refreshImageRows() {
     if (!imgRowsEl) return;
     imgRowsEl.innerHTML = "";
@@ -873,9 +1180,15 @@
     var body2 = doc.querySelector(".dd__body");
     if (!t || !body2) return;
     var liveG = body2.querySelector(".gallery");
+    /* The drawer names the template it cloned. A title match was the older
+       way, and it broke as soon as a head moved from an attribute into the
+       markup the editor writes. */
+    var from = AMH.work && AMH.work.openTemplate ? AMH.work.openTemplate() : null;
     gals.forEach(function (g) {
       if (!g.kind.deferLive || !g.tpl) return;
-      if ((g.tpl.getAttribute("data-title") || "") === t.textContent) {
+      var mine = from ? g.tpl === from
+        : (g.tpl.getAttribute("data-title") || "") === t.textContent;
+      if (mine) {
         g.live = liveG;
         if (g.live) attachGalleryRuntime(g);
       }
@@ -887,18 +1200,18 @@
      orphans our reference to the gallery inside it - re-resolve it */
   function relinkTplGalleries(r) {
     if (!r.el || r.el.tagName !== "TEMPLATE") return;
+    scanTemplate(r);                     /* re-point, and take up a new one */
     gals.forEach(function (g) {
       if (g.tpl !== r.el) return;
-      g.el = r.el.content.querySelector(".gallery");
-      if (!g.el) {
+      if (!g.el || !r.el.content.contains(g.el)) {
         console.warn("[site editor] " + g.slug +
           " gallery markup was removed by a text edit - image edits for it are disabled until revert.");
         return;
       }
-      /* the text apply reset the template to its snapshot; if the image model
-         is dirty it is the source of truth - write it back into the template
-         so preview, drawer, and export all agree */
-      if (galDirty(g)) renderGallery(g);
+      /* The apply replaced the template's children, so the gallery inside
+         it is the empty one the new markup carried. The model is what fills
+         it, dirty or not, or the drawer would open on nothing. */
+      renderGallery(g);
     });
   }
 
@@ -1205,10 +1518,140 @@
     ".ced-btn--danger:hover{border-color:var(--c-orange);color:#fff;background:rgba(240,136,62,.15);}" +
     ".ced-modal--image .ced-modal__tools{display:none;}" +
     ".ced-modal--image textarea{min-height:84px;}" +
-    ".ced-modal:not(.ced-modal--image) .ced-modal__alt{display:none;}" +
-    ".ced-modal:not(.ced-modal--image) .ced-modal__src{display:none;}" +
-    ".ced-modal:not(.ced-modal--image) .ced-btn--danger{display:none;}" +
-    ".ced-panel__row--img .ced-b{color:var(--c-yellow);}";
+    /* ONE BOX, TWO JOBS, AND ONLY THAT BOX.
+       The region editor is built once and reused for a text region and for
+       an image, so it carries the controls of both and hides the ones the
+       job on screen does not want. The scope is that box: every other box
+       the editor opens has its own buttons, and a delete on one of those is
+       a delete it means. */
+    ".ced-modal--region:not(.ced-modal--image) .ced-modal__alt{display:none;}" +
+    ".ced-modal--region:not(.ced-modal--image) .ced-modal__src{display:none;}" +
+    ".ced-modal--region:not(.ced-modal--image) .ced-btn--danger{display:none;}" +
+    ".ced-panel__row--img .ced-b{color:var(--c-yellow);}" +
+    /* THE PILL.
+       A copy chip is a small hollow blue circle and edits one field. A pill
+       is solid yellow and opens a whole thing: a blog post, a gallery
+       section. Filled against hollow and yellow against blue, so the two
+       are told apart at a glance rather than by reading them.
+       The blog's post pill wears this too, and site.css keeps only where
+       that one sits. */
+    ".ced-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .7rem;" +
+    "border-radius:999px;border:1px solid var(--c-yellow);background:var(--c-yellow);" +
+    "color:var(--bg-deep);font:700 .74rem var(--font);cursor:pointer;" +
+    "transition:filter .2s var(--ease-soft),box-shadow .2s var(--ease-soft);}" +
+    ".ced-pill:hover{filter:brightness(1.08);box-shadow:0 0 0 3px rgba(242,193,78,.28);}" +
+    ".ced-pill:focus-visible{outline:2px solid var(--c-yellow);outline-offset:2px;}" +
+    /* a move that cannot be made must not look like one that can */
+    ".ced-pill:disabled{opacity:.38;cursor:default;filter:none;box-shadow:none;}" +
+    ".ced-pill svg{width:13px;height:13px;flex:none;}" +
+    /* Up and Down are arrows only. The band they sit on has a title to fit. */
+    ".ced-pill--icon{padding:.3rem .45rem;}" +
+    ".ced-pills{display:inline-flex;align-items:center;gap:.3rem;flex:none;}" +
+    /* The new-block control, after the list's own close marker: outside
+       every item, and outside every region, so it can reach no file. */
+    ".ced-listfoot{display:flex;justify-content:center;padding:1.1rem 0 .2rem;" +
+    "border-top:1px dashed var(--line);margin-top:.4rem;}" +
+    /* the block form: one field to a row, the way the image modal reads */
+    ".ced-listform{width:min(560px,92vw);}" +
+    ".ced-listform__body{display:grid;gap:.6rem;padding:.8rem 1.1rem .2rem;}" +
+    ".ced-field{display:grid;gap:.25rem;min-width:0;}" +
+    ".ced-field__label{font-size:.62rem;font-weight:800;letter-spacing:.14em;" +
+    "text-transform:uppercase;color:var(--dim);}" +
+    ".ced-field input,.ced-field textarea{background:var(--bg-deep);color:var(--text);" +
+    "border:1px solid var(--line);border-radius:8px;padding:.45rem .7rem;" +
+    "font:12.5px/1.5 Consolas,'Courier New',monospace;}" +
+    ".ced-field textarea{resize:vertical;white-space:pre-wrap;}" +
+    ".ced-field input:focus-visible,.ced-field textarea:focus-visible{outline:2px solid var(--accent);}" +
+    /* a row whose region does not parse says so, and takes the region as
+       it stands rather than pretending to understand it */
+    ".ced-field__why{font-size:.68rem;color:var(--c-orange);line-height:1.4;}" +
+    /* a named row: the name is short and the value takes the rest */
+    ".ced-pair{display:flex;gap:.4rem;min-width:0;}" +
+    ".ced-pair__name{flex:none;width:5.5rem;}" +
+    ".ced-pair input:last-child{flex:1;min-width:0;}" +
+    /* THE PROJECT FORM.
+       More fields than a box can show at once, so the views scroll and the
+       head, the tabs and the buttons hold still. */
+    ".ced-projform{width:min(880px,94vw);}" +
+    ".ced-projform__body{flex:1 1 auto;min-height:0;overflow:auto;" +
+    "padding:.8rem 1.1rem .2rem;}" +
+    ".ced-pane{display:grid;gap:.6rem;}" +
+    ".ced-pane[hidden]{display:none;}" +
+    ".ced-tabs{display:flex;gap:.2rem;padding:.5rem 1.1rem 0;" +
+    "border-bottom:1px solid var(--line-soft);flex:none;}" +
+    ".ced-tab{padding:.4rem .7rem;border:0;background:none;cursor:pointer;" +
+    "font:700 .72rem var(--font);color:var(--muted);border-bottom:2px solid transparent;}" +
+    ".ced-tab.on{color:var(--text);border-bottom-color:var(--accent);}" +
+    ".ced-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}" +
+    ".ced-empty{margin:.2rem 0;color:var(--text-soft);font-size:.86rem;line-height:1.6;}" +
+    ".ced-drop{margin:0 0 .2rem;}" +
+    ".ced-imglist{list-style:none;margin:0;padding:0;display:grid;gap:.3rem;}" +
+    ".ced-imglist li{display:flex;align-items:center;gap:.5rem;min-width:0;" +
+    "font:12px Consolas,'Courier New',monospace;color:var(--text-soft);}" +
+    ".ced-imglist code{color:var(--accent-bright);white-space:nowrap;overflow:hidden;" +
+    "text-overflow:ellipsis;}" +
+    ".ced-imglist__cap{color:var(--dim);min-width:0;overflow:hidden;" +
+    "text-overflow:ellipsis;white-space:nowrap;margin-left:auto;}" +
+    ".ced-chip--inline{position:static;transform:none;flex:none;}" +
+    ".ced-chip--inline:hover{transform:none;}" +
+    /* A button that belongs to a view rather than to the box's button row
+       sits where it was put, at the size of the row's own buttons. */
+    ".ced-btn--own{justify-self:start;}" +
+    /* the bar over a body inside a view: no side padding of its own, since
+       the view already has the box's */
+    ".ced-tools--own{padding:0 0 .4rem;position:relative;}" +
+    ".ced-field--md{position:relative;}" +
+    ".ced-field--md textarea{min-height:11rem;}" +
+    ".ced-empty--warn{color:var(--c-orange);}" +
+    /* the head's tag is blue on every other box; a list's own form is
+       yellow, for the same reason its pill is */
+    ".ced-modal__head .ced-b--y{color:var(--c-yellow);}" +
+    /* THE MARKDOWN TOOLBAR.
+       The sprite is in the page and drawn from, never seen. A name is kept
+       for a screen reader on every icon button, because a mark says nothing
+       out loud; .ced-sr is site.css's, where the blog's search pill already
+       uses it, and a second copy here would be a second answer. */
+    ".ced-sprite{position:absolute;width:0;height:0;overflow:hidden;}" +
+    ".ced-tool--icon{display:inline-flex;align-items:center;justify-content:center;" +
+    "min-width:30px;padding:.28rem .42rem;}" +
+    ".ced-tool__i{width:16px;height:16px;display:block;flex:none;}" +
+    /* The (i) keeps its words: it is the one control on the row whose name
+       a reader has to see, because nothing about a circle says what is
+       behind it. */
+    ".ced-spec__btn{display:inline-flex;align-items:center;gap:.35rem;}" +
+    ".ced-spec__btn .ced-tool__i{width:14px;height:14px;}" +
+    ".ced-spec__btn.on{border-color:var(--accent);color:var(--accent-bright);}" +
+    /* The (i) sits after a divider at the end of the row, so it reads as a
+       different kind of thing from the buttons that write text. */
+    ".ced-tool__sep{width:1px;align-self:stretch;margin:.15rem .35rem;" +
+    "background:var(--line);flex:none;}" +
+    /* Above the surface it belongs to, not below it: the row sits at the
+       top, so a panel under it would cover the words being written. top is
+       set when it opens, from the row's own foot; this is where it starts
+       before the first open. */
+    /* The cap is the SCREEN'S, not the host's. The row this hangs from is a
+       whole composer on one surface and one field of a form on another, and a
+       cap in percent made the panel short exactly where the field was. */
+    ".ced-spec{position:absolute;left:0;right:0;top:2.4rem;z-index:4;" +
+    "background:var(--panel);border:1px solid var(--line);border-radius:10px;" +
+    "box-shadow:0 24px 60px -24px rgba(0,0,0,.9);padding:.6rem .8rem;" +
+    "max-height:min(70vh,40rem);overflow:auto;}" +
+    ".ced-spec[hidden]{display:none;}" +
+    ".ced-spec__head{font:700 .66rem var(--font);letter-spacing:.12em;" +
+    "text-transform:uppercase;color:var(--dim);padding-bottom:.4rem;" +
+    "border-bottom:1px solid var(--line-soft);margin-bottom:.5rem;}" +
+    ".ced-spec__list{display:grid;grid-template-columns:max-content 1fr;" +
+    "gap:.5rem .8rem;align-items:baseline;}" +
+    ".ced-spec__write{flex:none;font:12px Consolas,'Courier New',monospace;" +
+    "color:var(--accent-bright);white-space:nowrap;}" +
+    ".ced-spec__of{min-width:0;display:flex;flex-direction:column;gap:.1rem;}" +
+    ".ced-spec__where{font-size:.66rem;color:var(--dim);}" +
+    ".ced-spec__does{font-size:.74rem;color:var(--text-soft);line-height:1.45;}" +
+    ".ced-spec__foot{margin:.5rem 0 0;padding-top:.45rem;" +
+    "border-top:1px solid var(--line-soft);font-size:.7rem;color:var(--dim);}" +
+    /* a phone has no room for the code beside the words */
+    "@media (max-width:560px){.ced-spec__list{grid-template-columns:1fr;gap:.1rem;}" +
+    ".ced-spec__list .ced-spec__of{padding-bottom:.4rem;}}";
 
   /* Rules from a trunk that extends the editor. They go into the same
      <style>, after the editor's own, so a tie resolves the way source order
@@ -1733,6 +2176,42 @@
   var REBUILD_GIVEUP_MS = 120000;
   var rebuildBtn = null;
 
+  var SAVE_LABEL = "Save to repo";
+  var SAVE_SAY_MS = 3000;      /* long enough to read a result */
+  var SAVE_GIVEUP_MS = 60000;  /* the folder picker stays open for as long as it does */
+
+  /* The button carries the outcome for a moment, because the folder picker
+     covers the panel while the save runs and a reader who comes back to a
+     button that looks untouched has no idea whether it worked.
+
+     A count and not a list: the console holds the file names, and the button
+     is 250px of panel. */
+  /* One timer for the button, not one for each press. A timer made inside
+     the press could not be cleared by the next one, and the first press's
+     three seconds would then put the name back over the second's result. */
+  var saveTimer = 0;
+
+  function runSave(btn) {
+    function say(html, ms) {
+      window.clearTimeout(saveTimer);
+      btn.innerHTML = html;
+      saveTimer = window.setTimeout(function () { btn.textContent = SAVE_LABEL; }, ms);
+    }
+    say("Saving...", SAVE_GIVEUP_MS);
+    saveToFolder().then(function (out) {
+      if (out.fellBack) {
+        say("Downloaded", SAVE_SAY_MS);
+        console.warn("[site editor] " + out.fellBack);
+        return;
+      }
+      say(CED_TICK + "Saved " + out.wrote.length +
+        (out.wrote.length === 1 ? " file" : " files"), SAVE_SAY_MS);
+    }, function (err) {
+      say("Nothing to save", SAVE_SAY_MS);
+      console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
+    });
+  }
+
   function armRebuildSay(btn) {
     var timer = 0;
     function say(html, ms) {
@@ -1814,18 +2293,9 @@
 
     panelList = doc.createElement("div");
     panelList.className = "ced-panel__list";
-    regions.forEach(function (r) {
-      var row = doc.createElement("button");
-      row.type = "button";
-      row.className = "ced-panel__row";
-      row.innerHTML = '<span class="ced-b">' + r.badge + "</span><span>" + r.slug + "</span>" +
-        (r.generated ? ' <span class="ced-hidden">(generated)</span>' : "") +
-        (r.visible ? "" : ' <span class="ced-hidden">(hidden)</span>') +
-        '<span class="ced-dot"></span>';
-      row.addEventListener("click", function () { openModal(r); });
-      r.row = row;
-      panelList.appendChild(row);
-    });
+    regRowsEl = doc.createElement("div");
+    panelList.appendChild(regRowsEl);
+    refreshRegionRows();
     imgRowsEl = doc.createElement("div");
     panelList.appendChild(imgRowsEl);
     refreshImageRows();
@@ -1854,6 +2324,26 @@
       return b;
     }
     footBtn("Export", "ced-btn--accent", function () { api.export(); });
+    /* THE SITE'S SAVE, BESIDE THE SITE'S EXPORT.
+
+       Export hands over a download that the person then has to find and
+       copy. This writes the same bytes into the repo folder. It is on every
+       page, because every page can be edited and every page is a file.
+
+       The blog's Rebuild below is a different job and keeps its own button:
+       it renders what the manifest generates. Updating the site and updating
+       the blog are two things a person does, and they stay two buttons. */
+    /* A class and not a label, because the label is what changes: the button
+       reads "Saving..." and then what happened, and anything looking for it
+       by its words would lose it for those seconds. */
+    var saveBtn = footBtn(SAVE_LABEL, "ced-btn--save", function () { runSave(saveBtn); });
+    if (!hasPicker()) {
+      /* On screen and dead, with the reason on it. A hidden option teaches
+         nobody what the tool can do. Export is the way out, and it is the
+         button beside this one. */
+      saveBtn.disabled = true;
+      saveBtn.title = "This browser has no folder picker. Use Export instead.";
+    }
     /* Rebuild renders every month file again with the current chrome. It
        runs the same wizard a publish runs, so the route pick, the bundle
        and the checklist are shared and not copied.
@@ -1870,43 +2360,8 @@
     footBtn("Exit", "", function () { api(); });
     panel.appendChild(foot);
 
-    regions.forEach(function (r) {
-      if (!r.visible) return;
-      var chip = doc.createElement("button");
-      chip.type = "button";
-      chip.className = "ced-chip";
-      chip.textContent = r.badge;
-      chip.title = r.slug;
-      chip.addEventListener("click", function (e) { e.stopPropagation(); openModal(r); });
-      r.chip = chip;
-      overlay.appendChild(chip);
-    });
-
-    /* gallery chips: IMG## (opens the image modal for the visible photo)
-       and (+) (adds an empty slot) */
-    gals.forEach(function (g) {
-      var chip = doc.createElement("button");
-      chip.type = "button";
-      chip.className = "ced-chip ced-chip--img";
-      chip.textContent = "IMG";
-      chip.addEventListener("click", function (e) {
-        e.stopPropagation();
-        var i = activeIndex(g), en = displayedEntries(g)[i];
-        if (!en || en.isSeed) return;   /* seeds aren't editable - drop to replace */
-        openImageModal(g, i);
-      });
-      g.chip = chip;
-      overlay.appendChild(chip);
-      var plus = doc.createElement("button");
-      plus.type = "button";
-      plus.className = "ced-chip ced-chip--plus";
-      plus.textContent = "+";
-      plus.title = g.slug + " - add an image slot";
-      plus.addEventListener("click", function (e) { e.stopPropagation(); addSlot(g); });
-      g.plusChip = plus;
-      overlay.appendChild(plus);
-      attachGalleryRuntime(g);
-    });
+    regions.forEach(chipFor);
+    gals.forEach(galChipsFor);
 
     if (!drawerHooked) {
       drawerHooked = true;
@@ -1940,6 +2395,49 @@
     redrawSelfDrawn();
   }
 
+  /* One region's badge. Drawn when the editor opens, and again for a region
+     that arrives after that: a block added to a list brings regions with it,
+     and they earn their badges the same way. Idempotent, so the pass that
+     draws them all may run as often as it likes. */
+  function chipFor(r) {
+    if (!overlay || r.chip || !r.visible) return;
+    var chip = doc.createElement("button");
+    chip.type = "button";
+    chip.className = "ced-chip";
+    chip.textContent = r.badge;
+    chip.title = r.slug;
+    chip.addEventListener("click", function (e) { e.stopPropagation(); openModal(r); });
+    r.chip = chip;
+    overlay.appendChild(chip);
+  }
+
+  /* An image region's two: IMG##, which opens the modal for the photo on
+     screen, and (+), which adds an empty slot. */
+  function galChipsFor(g) {
+    if (!overlay || g.chip) return;
+    var chip = doc.createElement("button");
+    chip.type = "button";
+    chip.className = "ced-chip ced-chip--img";
+    chip.textContent = "IMG";
+    chip.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var i = activeIndex(g), en = displayedEntries(g)[i];
+      if (!en || en.isSeed) return;   /* seeds aren't editable - drop to replace */
+      openImageModal(g, i);
+    });
+    g.chip = chip;
+    overlay.appendChild(chip);
+    var plus = doc.createElement("button");
+    plus.type = "button";
+    plus.className = "ced-chip ced-chip--plus";
+    plus.textContent = "+";
+    plus.title = g.slug + " - add an image slot";
+    plus.addEventListener("click", function (e) { e.stopPropagation(); addSlot(g); });
+    g.plusChip = plus;
+    overlay.appendChild(plus);
+    attachGalleryRuntime(g);
+  }
+
   /* A region that draws itself keeps its scaffolding inside its own markup:
      the chips, the controls, the drop targets. The carousels get theirs from
      buildUI(), which draws over the live element, so nothing has to be
@@ -1947,6 +2445,1413 @@
      to add the scaffolding, and on the way out to take it away. */
   function redrawSelfDrawn() {
     gals.forEach(function (g) { if (g.kind.render) renderGallery(g); });
+    Object.keys(lists).forEach(function (n) {
+      listFoot(lists[n]);
+      listItemPills(lists[n]);
+    });
+  }
+
+  /* ------------------------------------------------------------
+     A PROJECT, AS FIELDS
+
+     A card on the home page is nine regions, and a chip edits one of them.
+     The form edits all of them at once, so it has to read each region back
+     into a control and write it out again in the same shape.
+
+     THE ROUND TRIP RULE. A field is offered as its control only when its
+     region parses into it and nothing is lost. A region written by hand
+     into a shape these readers do not know is offered as raw HTML with a
+     note instead, so opening the form can never flatten it.
+
+     A field that was not changed writes nothing, so opening the form and
+     pressing Apply leaves every byte where it was.
+
+     WHY THIS IS IN THIS FILE. A gallery train has a kind of its own, so
+     gallery.js describes it. A project card has no kind: it is nine plain
+     regions and one image region, all of them this file's own machinery.
+     There is no trunk that owns a card, so the description lives with the
+     machinery that reads it.
+     ------------------------------------------------------------ */
+
+  /* Text, escaped for a text node. Not escAttr: that also escapes a quote,
+     and a lead with a quotation mark in it would come back changed. */
+  function escText(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  }
+  function parseHtml(html) {
+    var box = doc.createElement("div");
+    box.innerHTML = html;
+    return box;
+  }
+  /* Every child that carries content. A whitespace-only text node is
+     layout; anything else is something a reader has to be able to hold. */
+  function realKids(box) {
+    return Array.prototype.filter.call(box.childNodes, function (n) {
+      return !(n.nodeType === 3 && n.nodeValue.trim() === "");
+    });
+  }
+  function onlyClass(el, name) {
+    return el.nodeType === 1 && el.classList.contains(name) && el.classList.length === 1 &&
+      el.attributes.length === 1;
+  }
+  /* A card's own indent, and its children's. Every card in the page is laid
+     out this way, and the generator writes the same. */
+  var CARD_IND = "            ";
+
+  /* Each kind reads one region's inner HTML into a value, or returns null
+     to say it cannot hold what is there. write() is the inverse. */
+  var FIELD_KINDS = {
+    /* a line of words, no markup */
+    text: {
+      read: function (html) {
+        var box = parseHtml(html);
+        return box.querySelector("*") ? null : box.textContent;
+      },
+      write: function (v) { return escText(v); }
+    },
+    /* markup, kept as it is: a lead holds <em> and &nbsp; today, and a
+       second format for the same field would need a converter that loses
+       exactly those */
+    html: {
+      read: function (html) { return html; },
+      write: function (v) { return v; }
+    },
+    /* one stat a line, as  bold | the rest */
+    stats: {
+      read: function (html) {
+        var out = [], ok = true;
+        realKids(parseHtml(html)).forEach(function (n) {
+          if (!onlyClass(n, "stat") || n.tagName !== "SPAN") { ok = false; return; }
+          var b = n.childNodes[0];
+          if (!b || b.nodeType !== 1 || b.tagName !== "B" || b.attributes.length) { ok = false; return; }
+          var rest = n.innerHTML.slice(b.outerHTML.length);
+          out.push(b.innerHTML + " | " + rest.replace(/^\s+/, ""));
+        });
+        return ok ? out.join("\n") : null;
+      },
+      write: function (v) {
+        var rows = String(v).split("\n").map(function (l) { return l.trim(); })
+          .filter(function (l) { return l !== ""; })
+          .map(function (l) {
+            var at = l.indexOf("|");
+            var bold = at < 0 ? l : l.slice(0, at).trim();
+            var rest = at < 0 ? "" : l.slice(at + 1).trim();
+            return CARD_IND + '  <span class="stat"><b>' + bold + "</b>" +
+              (rest ? " " + rest : "") + "</span>";
+          });
+        return rows.length ? "\n" + rows.join("\n") + "\n" + CARD_IND : "";
+      }
+    },
+    /* one point a line */
+    lines: {
+      read: function (html) {
+        var out = [], ok = true;
+        realKids(parseHtml(html)).forEach(function (n) {
+          if (n.nodeType !== 1 || n.tagName !== "LI" || n.attributes.length) { ok = false; return; }
+          out.push(n.innerHTML);
+        });
+        return ok ? out.join("\n") : null;
+      },
+      write: function (v) {
+        var rows = String(v).split("\n").map(function (l) { return l.trim(); })
+          .filter(function (l) { return l !== ""; })
+          .map(function (l) { return CARD_IND + "  <li>" + l + "</li>"; });
+        return rows.length ? "\n" + rows.join("\n") + "\n" + CARD_IND : "";
+      }
+    },
+    /* a named row: the name is kept as the file has it, the value is edited */
+    spec: {
+      read: function (html) {
+        var kids = realKids(parseHtml(html));
+        if (kids.length !== 2) return null;
+        if (kids[0].nodeType !== 1 || kids[0].tagName !== "DT" || kids[0].attributes.length) return null;
+        if (kids[1].nodeType !== 1 || kids[1].tagName !== "DD" || kids[1].attributes.length) return null;
+        if (kids[0].querySelector("*")) return null;
+        return { label: kids[0].textContent, value: kids[1].innerHTML };
+      },
+      write: function (v) {
+        return "<dt>" + escText(v.label) + "</dt><dd>" + v.value + "</dd>";
+      }
+    },
+    /* a named row of chips, written as a comma list */
+    chips: {
+      read: function (html) {
+        var kids = realKids(parseHtml(html));
+        if (kids.length !== 2) return null;
+        if (kids[0].nodeType !== 1 || kids[0].tagName !== "DT" || kids[0].attributes.length) return null;
+        if (kids[1].nodeType !== 1 || kids[1].tagName !== "DD" || kids[1].attributes.length) return null;
+        if (kids[0].querySelector("*")) return null;
+        var inner = realKids(kids[1]);
+        if (inner.length !== 1 || !onlyClass(inner[0], "chips") || inner[0].tagName !== "SPAN") return null;
+        var out = [], ok = true;
+        realKids(inner[0]).forEach(function (c) {
+          if (!onlyClass(c, "chip") || c.tagName !== "SPAN" || c.querySelector("*")) { ok = false; return; }
+          if (c.textContent.indexOf(",") !== -1) { ok = false; return; }
+          out.push(c.textContent);
+        });
+        return ok ? { label: kids[0].textContent, value: out.join(", ") } : null;
+      },
+      write: function (v) {
+        var chips = String(v.value).split(",").map(function (c) { return c.trim(); })
+          .filter(function (c) { return c !== ""; })
+          .map(function (c) { return '<span class="chip">' + escText(c) + "</span>"; });
+        return "<dt>" + escText(v.label) + '</dt><dd><span class="chips">' +
+          chips.join("") + "</span></dd>";
+      }
+    }
+  };
+
+  /* One card, field by field, in the order the card itself reads.
+
+     key is the slug after the card's own prefix. A card has one of
+     spec-stack or spec-tech, never both, so the second spec names the two
+     and takes whichever the card carries. */
+  var PROJECT_FIELDS = [
+    { key: "title", label: "Title", kind: "text", line: true },
+    { key: "meta", label: "Meta", kind: "text", line: true,
+      hint: "Company - Role - Dates" },
+    { key: "lead", label: "Lead", kind: "html", rows: 3,
+      hint: "one sentence that hooks the reader" },
+    { key: "desc", label: "Description", kind: "html", rows: 6 },
+    { key: "stats", label: "Stats, one a line as  bold | the rest", kind: "stats", rows: 3 },
+    { key: "highlights", label: "Highlights, one a line", kind: "lines", rows: 3 },
+    { key: "spec-role", label: "Role", kind: "spec", line: true },
+    { key: ["spec-stack", "spec-tech"], label: "Stack or Tech", kind: "chips", line: true,
+      hint: "one name, then the next, separated by commas" }
+  ];
+
+  /* The slug a field has on one card, or null when the card has neither. */
+  function fieldSlug(id, f) {
+    var keys = typeof f.key === "string" ? [f.key] : f.key;
+    for (var i = 0; i < keys.length; i++) {
+      if (regionBySlug(id + "-" + keys[i])) return id + "-" + keys[i];
+    }
+    return null;
+  }
+  function regionBySlug(slug) {
+    for (var i = 0; i < regions.length; i++) if (regions[i].slug === slug) return regions[i];
+    return null;
+  }
+
+  /* ------------------------------------------------------------
+     THE PROJECT BLOCK
+
+     One template, and the only thing that writes a whole card. New and
+     Duplicate use it; every other move on the list carries the bytes the
+     file already had.
+     ------------------------------------------------------------ */
+
+  /* The decoration a card wears in the source. It is not read by anything;
+     it is there so a person opening the file sees where a block starts. */
+  function cardBanner(name) {
+    var bar = new Array(64).join("=").replace(/=/g, "\u2550");
+    var head = "  PROJECT \u2014 " + name;
+    var pad = Math.max(1, 64 - head.length);
+    return "<!-- \u2554" + bar + "\u2557\n" +
+      "             \u2551" + head + new Array(pad + 1).join(" ") + "\u2551\n" +
+      "             \u255a" + bar + "\u255d -->";
+  }
+  function cardEnd(name) {
+    var bar = new Array(16).join("=").replace(/=/g, "\u2550");
+    return "<!-- \u255a" + bar + " END \u00b7 " + name + " " + bar + "\u255d -->";
+  }
+
+  /* What each field's region is wrapped in. The pair is the element the
+     markers fence, which the splice never touches. */
+  var CARD_TAGS = {
+    title: ['<h3 class="project__title">', "</h3>"],
+    meta: ['<p class="project__meta">', "</p>"],
+    lead: ['<p class="project__lead">', "</p>"],
+    desc: ['<p class="project__desc">', "</p>"],
+    stats: ['<div class="stats">', "</div>"],
+    highlights: ['<ul class="highlights">', "</ul>"],
+    "spec-role": ['<div class="spec">', "</div>"],
+    "spec-stack": ['<div class="spec">', "</div>"],
+    "spec-tech": ['<div class="spec">', "</div>"]
+  };
+
+  /* A whole project, as the markup the page and the file both get. The
+     string is the one source of truth: it becomes the DOM here and the
+     bytes at export, so the two cannot drift.
+
+     Written at no indent; the list splice adds the file's own. */
+  function makeProject(head, id, entries) {
+    var name = head.title || "New project";
+    var L = [];
+    function put(slug, note, markup) {
+      if (note) L.push(note);
+      L.push("<!--[edit:" + id + "-" + slug + "]-->");
+      L.push(markup);
+      L.push("<!--[/edit:" + id + "-" + slug + "]-->");
+    }
+    var imgs = (entries || []).map(function (e) {
+      return '      <img src="' + escAttr(e.src) + '" loading="lazy"\n' +
+        '           alt="' + escAttr(e.alt) + '"' +
+        (e.caption ? '\n           data-caption="' + escAttr(e.caption) + '"' : "") +
+        " />";
+    });
+    L.push("<!--[item:" + id + "]-->");
+    L.push(cardBanner(name));
+    L.push('<article class="project">');
+    L.push('  <div class="project__media reveal">');
+    L.push("");
+    L.push("    <!-- GALLERY \u00b7 one <img> per photo (src, alt, optional data-caption).");
+    L.push("         Add or remove a photo = add or remove one <img> line below. -->");
+    L.push("    <!--[edit:" + id + "-gallery]-->");
+    L.push('    <div class="gallery">' + (imgs.length ? "\n" + imgs.join("\n") + "\n    " : "\n    ") + "</div>");
+    L.push("    <!--[/edit:" + id + "-gallery]-->");
+    L.push("");
+    L.push("  </div>");
+    L.push('  <div class="project__body reveal d1">');
+    L.push("");
+    L.push("    <!-- NUMBER \u00b7 automatic (01, 02\u2026) \u00b7 leave this span empty -->");
+    L.push('    <span class="project__index"></span>');
+    L.push("");
+    /* The two spec rows sit inside one wrapper, the way every card has
+       them, so they are gathered rather than written where they fall. */
+    var body = [], specs = [];
+    PROJECT_FIELDS.forEach(function (f) {
+      var key = typeof f.key === "string" ? f.key : f.key[0];
+      var kind = FIELD_KINDS[f.kind];
+      var isSpec = f.kind === "spec" || f.kind === "chips";
+      var value = head[key];
+      var inner = isSpec
+        ? kind.write(value || { label: key === "spec-role" ? "Role" : "Stack", value: "" })
+        : kind.write(value || "");
+      var tag = CARD_TAGS[key];
+      var into = isSpec ? specs : body;
+      var pad = isSpec ? "      " : "    ";
+      if (!isSpec) into.push("");
+      into.push(pad + "<!--[edit:" + id + "-" + key + "]-->");
+      into.push(pad + tag[0] + inner + tag[1]);
+      into.push(pad + "<!--[/edit:" + id + "-" + key + "]-->");
+    });
+    L = L.concat(body);
+    L.push("");
+    L.push("    <!-- SPECS / chips (required) -->");
+    L.push('    <div class="specs">');
+    L = L.concat(specs);
+    L.push("    </div>");
+    /* The drawer and the button that opens it, written only for a card
+       that has one. A new project starts without, and gains both from the
+       form's third view. */
+    if (head.deepdive) {
+      var dd = ddBuild(head.deepdive, id + "-dd-gallery",
+        head.deepdive.photos || [], "      ");
+      L.push("");
+      L.push("    <!-- LEARN MORE \u00b7 opens the deep-dive drawer from the template below -->");
+      L.push("    <!--[edit:" + id + "-more]-->");
+      L.push('    <button class="project__more" type="button">' +
+        escText(head.deepdive.label || "Learn more"));
+      L.push('      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>');
+      L.push("    </button>");
+      L.push("    <!--[/edit:" + id + "-more]-->");
+      L.push("");
+      L.push("    <!-- DEEP DIVE \u00b7 written in Markdown; the source travels with it -->");
+      L.push("    <!--[edit:" + id + "-deepdive]-->");
+      L.push('    <template class="deepdive">' + dd.html + "</template>");
+      L.push("    <!--[/edit:" + id + "-deepdive]-->");
+    }
+    L.push("");
+    L.push("  </div>");
+    L.push("</article>");
+    L.push(cardEnd(name));
+    L.push("<!--[/item:" + id + "]-->");
+    return L.join("\n");
+  }
+
+  /* Which project a deep-dive region belongs to, or null.
+
+     The slug is the card's id and then the word, which is how every region
+     on a card is named, so the id is what comes before it. */
+  function ddOwner(slug) {
+    var m = /^([\w-]+)-deepdive$/.exec(slug || "");
+    if (!m) return null;
+    var st = lists.projects;
+    return st && st.order.indexOf(m[1]) !== -1 ? m[1] : null;
+  }
+
+  /* ------------------------------------------------------------
+     A DEEP DIVE, AS MARKDOWN
+
+     The drawer behind Learn more holds paragraphs, one heading, a list of
+     points, a closing note and one carousel. Markdown writes the first
+     three. The last two are flags the renderer leaves a sign for, and this
+     is the surface that decides what those signs mean.
+
+     THE SOURCE IS THE TRUTH. What was typed travels inside the template as
+     a script of a type no browser runs, and the rendered HTML follows it.
+     So the form opens what was written rather than what it rendered to, and
+     a hand edit to the rendered half would be lost at the next Apply. That
+     is why the raw box refuses this region and names the form instead.
+     ------------------------------------------------------------ */
+
+  /* The source block can hold no tag and no closing script, because every
+     < and & is written as an entity. Script content is raw text, so nothing
+     decodes it on the way back in and the form does it here.
+
+     It also keeps both tag checkers happy: each walks every < in a region,
+     and a body that mentions <b> would fail them. */
+  function ddEncode(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  }
+  function ddDecode(s) {
+    return String(s).replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+  }
+  function ddSource(tpl) {
+    var s = tpl && tpl.content && tpl.content.querySelector("script.dd-source");
+    return s ? ddDecode(s.textContent) : null;
+  }
+  function nextEl(n) {
+    while ((n = n.nextSibling)) { if (n.nodeType === 1) return n; }
+    return null;
+  }
+  function prevEl(n) {
+    while ((n = n.previousSibling)) { if (n.nodeType === 1) return n; }
+    return null;
+  }
+
+  /* What the renderer's marks mean in a deep dive.
+
+       note      the paragraph the mark sits with becomes the closing note,
+                 whether the flag was written before it or after it
+       gallery   the first one becomes the photographs, and a second is
+                 dropped, because a deep dive has one carousel
+
+     Photographs with no mark go last, which is where a reader expects them
+     when nothing said otherwise. Returns the body and what it had to drop. */
+  function ddResolve(html, slug, photos) {
+    var box = doc.createElement("div");
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-mark="note"]'), function (m) {
+      var p = nextEl(m) || prevEl(m);
+      if (p && p.tagName === "P") p.className = "dd-note";
+      m.parentNode.removeChild(m);
+    });
+    var marks = Array.prototype.slice.call(box.querySelectorAll('[data-mark="gallery"]'));
+    var spare = marks.length > 1 ? marks.length - 1 : 0;
+    for (var i = 1; i < marks.length; i++) marks[i].parentNode.removeChild(marks[i]);
+    var where = marks[0] || null;
+
+    /* The container is written when there are photographs to put in it, and
+       also when the body asked for one and has none yet. An empty region is
+       what a first drop lands on: without it, a deep dive added in a sitting
+       could never gain a photograph. The drawer takes an empty gallery out of
+       its clone, so a reader never sees one. */
+    if ((photos && photos.length) || where) {
+      var holder = doc.createElement("div");
+      holder.className = "gallery";
+      /* THE PHOTOGRAPHS GO INTO THE MARKUP, not only into the region.
+
+         A gallery region corrects its list at export only when it has been
+         edited. This writes the template, so a container left empty here
+         would export empty and the drawer would open on nothing. */
+      (photos || []).forEach(function (en) {
+        var im = doc.createElement("img");
+        im.setAttribute("src", en.src);
+        im.setAttribute("loading", "lazy");
+        im.setAttribute("alt", en.alt || "");
+        if (en.caption) im.setAttribute("data-caption", en.caption);
+        holder.appendChild(im);
+      });
+      if (where) where.parentNode.replaceChild(holder, where);
+      else box.appendChild(holder);
+      /* the pair the export splices the photograph list between */
+      holder.parentNode.insertBefore(doc.createComment("[edit:" + slug + "]"), holder);
+      holder.parentNode.insertBefore(doc.createComment("[/edit:" + slug + "]"),
+        holder.nextSibling);
+    }
+    return { html: box.innerHTML, spare: spare };
+  }
+
+  /* A whole deep dive as the template's inner markup: the source, the head
+     that the drawer lifts, and the body the renderer wrote. */
+  function ddBuild(dd, slug, photos, indent) {
+    var ind = indent === undefined ? "              " : indent;
+    var md = (window.AMH.markdown && window.AMH.markdown.render)
+      ? window.AMH.markdown.render(dd.body || "")
+      : "<p>" + escText(dd.body || "") + "</p>";
+    var got = ddResolve(md, slug, photos);
+    var lines = got.html.split("\n").map(function (l) { return l ? ind + l : l; });
+    return {
+      html: "\n" + ind + '<script type="text/markdown" class="dd-source">' +
+        ddEncode(dd.body || "") + "</" + "script>\n" +
+        ind + '<h2 class="dd-lead">' + escText(dd.title || "") + "</h2>\n" +
+        ind + '<p class="dd-lead__sub">' + escText(dd.subtitle || "") + "</p>\n" +
+        lines.join("\n") + "\n" + ind.slice(2),
+      spare: got.spare
+    };
+  }
+
+  /* ------------------------------------------------------------
+     THE PROJECT FORM
+
+     A chip edits one field of a card. This edits the whole card, and both
+     write the same regions through applyRegion, so the two doors can never
+     disagree about what a card says.
+
+     A field the person did not touch writes nothing, so opening this and
+     pressing Apply changes no byte of the page.
+     ------------------------------------------------------------ */
+
+  function projectForm(name, id, startAt) {
+    var st = lists[name], spec = listKinds[name];
+    if (!st || !spec) return;
+    var making = !id;
+    if (!making && !itemElement(st, id)) return;
+    injectStyles();
+
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-projform";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    var tag = doc.createElement("span");
+    tag.className = "ced-b ced-b--y";
+    tag.textContent = "PROJECT";
+    var who = doc.createElement("span");
+    who.className = "ced-slug";
+    headEl.appendChild(tag);
+    headEl.appendChild(who);
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    /* the three views, as tabs, the way the composer has them */
+    var tabs = doc.createElement("div");
+    tabs.className = "ced-tabs";
+    tabs.setAttribute("role", "tablist");
+    var panes = doc.createElement("div");
+    panes.className = "ced-projform__body";
+    var cardPane = doc.createElement("div");
+    cardPane.className = "ced-pane";
+    var imgPane = doc.createElement("div");
+    imgPane.className = "ced-pane";
+    imgPane.hidden = true;
+    var ddPane = doc.createElement("div");
+    ddPane.className = "ced-pane";
+    ddPane.hidden = true;
+    panes.appendChild(cardPane);
+    panes.appendChild(imgPane);
+    panes.appendChild(ddPane);
+    var tabBtns = [];
+    function tab(label, pane) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-tab";
+      b.setAttribute("role", "tab");
+      b.textContent = label;
+      b.addEventListener("click", function () {
+        tabBtns.forEach(function (x) {
+          x.b.classList.toggle("on", x.b === b);
+          x.b.setAttribute("aria-selected", x.b === b ? "true" : "false");
+          x.pane.hidden = x.b !== b;
+        });
+        if (pane === imgPane) drawImages();
+        if (pane === ddPane) drawDeep();
+      });
+      tabs.appendChild(b);
+      tabBtns.push({ b: b, pane: pane });
+      return b;
+    }
+    tab("Card", cardPane);
+    tab("Images", imgPane);
+    tab("Deep dive", ddPane);
+    tabBtns.forEach(function (x, i) {
+      x.b.classList.toggle("on", i === (startAt || 0));
+      x.b.setAttribute("aria-selected", i === (startAt || 0) ? "true" : "false");
+      x.pane.hidden = i !== (startAt || 0);
+    });
+
+    var note = doc.createElement("div");
+    note.className = "ced-modal__status";
+
+    /* ---------------- the Card view ---------------- */
+
+    /* One row per field. A field whose region does not parse into its own
+       control is offered as raw HTML instead, so a hand-written region is
+       never flattened by opening this. */
+    var rows = {};
+    PROJECT_FIELDS.forEach(function (f) {
+      var key = typeof f.key === "string" ? f.key : f.key[0];
+      var slug = making ? null : fieldSlug(id, f);
+      if (!making && !slug) return;
+      var kind = FIELD_KINDS[f.kind];
+      var r = slug ? regionBySlug(slug) : null;
+      var value = r ? kind.read(r.current) : null;
+      var raw = !!r && value === null;
+      if (making) {
+        value = (f.kind === "spec") ? { label: "Role", value: "" }
+              : (f.kind === "chips") ? { label: "Stack", value: "" } : "";
+      }
+
+      var row = doc.createElement("label");
+      row.className = "ced-field";
+      var lab = doc.createElement("span");
+      lab.className = "ced-field__label";
+      lab.textContent = raw ? f.label + " - as HTML" : f.label;
+      row.appendChild(lab);
+
+      var nameIn = null, valIn;
+      if (!raw && f.kind === "chips") {
+        var pair = doc.createElement("span");
+        pair.className = "ced-pair";
+        nameIn = doc.createElement("input");
+        nameIn.type = "text";
+        nameIn.className = "ced-pair__name";
+        nameIn.value = value.label;
+        nameIn.setAttribute("aria-label", "The name of this row");
+        valIn = doc.createElement("input");
+        valIn.type = "text";
+        valIn.value = value.value;
+        pair.appendChild(nameIn);
+        pair.appendChild(valIn);
+        row.appendChild(pair);
+      } else if (!raw && (f.line || f.kind === "spec")) {
+        valIn = doc.createElement("input");
+        valIn.type = "text";
+        valIn.value = f.kind === "spec" ? value.value : value;
+        row.appendChild(valIn);
+      } else {
+        valIn = doc.createElement("textarea");
+        valIn.rows = raw ? 4 : (f.rows || 3);
+        valIn.spellcheck = f.kind !== "html";
+        valIn.value = raw ? r.current : value;
+        row.appendChild(valIn);
+      }
+      valIn.spellcheck = false;
+      if (f.hint && !raw) valIn.placeholder = f.hint;
+      if (raw) {
+        var why = doc.createElement("span");
+        why.className = "ced-field__why";
+        why.textContent = "This region is not in the shape this field reads, " +
+          "so it is offered as it stands. What you write here is written as it stands.";
+        row.appendChild(why);
+      }
+      cardPane.appendChild(row);
+      rows[key] = {
+        f: f, slug: slug, raw: raw, kind: kind, nameIn: nameIn, valIn: valIn,
+        was: raw ? r.current : JSON.stringify(value),
+        read: function () {
+          if (this.raw) return this.valIn.value;
+          if (this.f.kind === "chips") return { label: nameIn.value, value: valIn.value };
+          if (this.f.kind === "spec") {
+            var had = regionBySlug(this.slug);
+            var old = had ? this.kind.read(had.current) : null;
+            return { label: old ? old.label : "Role", value: this.valIn.value };
+          }
+          return this.valIn.value;
+        }
+      };
+    });
+    who.textContent = making ? "New project"
+      : ((rows.title && rows.title.valIn.value) || id);
+
+    /* ---------------- the Images view ---------------- */
+
+    function gallery() { return making ? null : galBySlug(id + "-gallery"); }
+    function drawImages() {
+      imgPane.innerHTML = "";
+      drawPhotos(imgPane, gallery(), making
+        ? "Photographs go on once the project is on the page. Apply first, then open it again."
+        : "This project has no gallery region.");
+    }
+
+    /* One photograph list, drawn for the card's carousel and again for the
+       deep dive's. A drop here is the editor's own drop, so a photograph
+       added in this box is the same photograph the page shows. */
+    function drawPhotos(host, g, whenNone) {
+      if (!g) {
+        var soon = doc.createElement("p");
+        soon.className = "ced-empty";
+        soon.textContent = whenNone;
+        host.appendChild(soon);
+        return;
+      }
+      var zone = doc.createElement("div");
+      zone.className = "ced-handoff__zone ced-drop";
+      zone.setAttribute("role", "button");
+      zone.tabIndex = 0;
+      zone.textContent = "Drop photographs here. They are recorded as img/work/<name>, " +
+        "so copy the file there too.";
+      ["dragover", "dragleave", "drop"].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) {
+          e.preventDefault(); e.stopPropagation();
+          zone.classList.toggle("ced-dropping", ev === "dragover");
+          if (ev !== "drop") return;
+          var files = Array.prototype.filter.call(
+            (e.dataTransfer && e.dataTransfer.files) || [],
+            function (x) { return /^image\//.test(x.type); });
+          if (files.length) { handleDrop(g, files, -1); redrawTabs(); }
+        });
+      });
+      host.appendChild(zone);
+
+      var list = doc.createElement("ul");
+      list.className = "ced-imglist";
+      imageRegion.displayed(g).forEach(function (en, i) {
+        var li = doc.createElement("li");
+        var chip = doc.createElement("button");
+        chip.type = "button";
+        chip.className = "ced-chip ced-chip--img ced-chip--inline" +
+          (en.isSeed ? " ced-chip--seed" : "");
+        chip.textContent = en.empty ? "DROP" : (en.isSeed ? "SEED" : (en.imgId || "IMG"));
+        chip.addEventListener("click", function () {
+          if (en.isSeed || en.empty) return;
+          openImageModal(g, i);
+        });
+        var path = doc.createElement("code");
+        path.textContent = en.empty ? "(no file yet)" : en.src;
+        var cap = doc.createElement("span");
+        cap.className = "ced-imglist__cap";
+        cap.textContent = en.caption || "";
+        li.appendChild(chip);
+        li.appendChild(path);
+        li.appendChild(cap);
+        list.appendChild(li);
+      });
+      host.appendChild(list);
+
+      var plus = doc.createElement("button");
+      plus.type = "button";
+      plus.className = "ced-btn ced-btn--own";
+      plus.textContent = "Add a slot";
+      plus.addEventListener("click", function () { addSlot(g); redrawTabs(); });
+      host.appendChild(plus);
+    }
+    /* whichever of the two is on screen */
+    function redrawTabs() {
+      if (!imgPane.hidden) drawImages();
+      if (!ddPane.hidden) drawDeep();
+    }
+
+    /* ---------------- the Deep dive view ---------------- */
+
+    function ddRegion() { return making ? null : regionBySlug(id + "-deepdive"); }
+    function ddGallery() { return making ? null : galBySlug(id + "-dd-gallery"); }
+    function moreRegion() { return making ? null : regionBySlug(id + "-more"); }
+
+    /* The words on the Learn more button, without the arrow beside them.
+       Writing one back keeps the whitespace it was written with, so a
+       button nobody touched is not reflowed. */
+    function moreLabel(r) {
+      return Array.prototype.filter.call(parseHtml(r.current).childNodes, function (n) {
+        return n.nodeType === 3;
+      }).map(function (n) { return n.nodeValue; }).join("").trim();
+    }
+    function moreWrite(r, label) {
+      var box = parseHtml(r.current);
+      var did = false;
+      Array.prototype.forEach.call(box.childNodes, function (n) {
+        if (did || n.nodeType !== 3 || !n.nodeValue.trim()) return;
+        var m = /^(\s*)[\s\S]*?(\s*)$/.exec(n.nodeValue);
+        n.nodeValue = m[1] + label + m[2];
+        did = true;
+      });
+      return did ? box.innerHTML : escText(label);
+    }
+    /* the indent the template's own children are written at */
+    function ddIndent(r) {
+      var m = /\n([ \t]*)</.exec(r.original || r.current || "");
+      return m ? m[1] : "              ";
+    }
+    function says(words, cls) {
+      var p = doc.createElement("p");
+      p.className = cls || "ced-empty";
+      p.textContent = words;
+      return p;
+    }
+    function textRow(host, label, value) {
+      var row = doc.createElement("label");
+      row.className = "ced-field";
+      var lab = doc.createElement("span");
+      lab.className = "ced-field__label";
+      lab.textContent = label;
+      var inp = doc.createElement("input");
+      inp.type = "text";
+      inp.spellcheck = false;
+      inp.value = value;
+      row.appendChild(lab);
+      row.appendChild(inp);
+      host.appendChild(row);
+      return inp;
+    }
+    /* What a deep dive can carry that Markdown does not name. The two flags
+       are the renderer's, so this list cannot disagree with what it obeys. */
+    function ddSpecials() {
+      var out = ((AMH.markdown && AMH.markdown.flags) || [])
+        .filter(function (f) { return (f.for || ["post"]).indexOf("deepdive") !== -1; })
+        .map(function (f) {
+          return { write: "{" + f.name + "}", where: "anywhere on a line", does: f.does };
+        });
+      out.push({ write: "{!command}", where: "in place of the command",
+                 does: "Writes the command as text instead of obeying it." });
+      return out;
+    }
+
+    var ddFields = null;
+    function ddValues() {
+      return {
+        title: ddFields.title.value.trim(),
+        subtitle: ddFields.sub.value.trim(),
+        label: ddFields.label.value.trim(),
+        body: ddFields.body.value
+      };
+    }
+
+    function drawDeep() {
+      ddPane.innerHTML = "";
+      ddFields = null;
+      if (making) {
+        ddPane.appendChild(says("A deep dive goes on once the project is on the " +
+          "page. Apply first, then open the project again."));
+        return;
+      }
+      var r = ddRegion();
+      if (!r) {
+        ddPane.appendChild(says("This project has no deep dive. A deep dive is the " +
+          "drawer behind Learn more: a title, a subtitle, a body in Markdown, and " +
+          "photographs of its own."));
+        var add = doc.createElement("button");
+        add.type = "button";
+        add.className = "ced-btn ced-btn--accent ced-btn--own";
+        add.textContent = "Add a deep dive";
+        add.addEventListener("click", function () { reshape(true); });
+        ddPane.appendChild(add);
+        return;
+      }
+
+      var tpl = r.el;
+      var lead = tpl.content.querySelector(".dd-lead");
+      var leadSub = tpl.content.querySelector(".dd-lead__sub");
+      var body = ddSource(tpl);
+      var mr = moreRegion();
+      var f = {
+        title: textRow(ddPane, "Title",
+          lead ? lead.textContent : (tpl.getAttribute("data-title") || "")),
+        sub: textRow(ddPane, "Subtitle",
+          leadSub ? leadSub.textContent : (tpl.getAttribute("data-subtitle") || "")),
+        label: textRow(ddPane, "The button that opens it",
+          mr ? moreLabel(mr) : "Learn more")
+      };
+
+      /* the body, with the editor's own Markdown bar over it */
+      var row = doc.createElement("label");
+      row.className = "ced-field ced-field--md";
+      var lab = doc.createElement("span");
+      lab.className = "ced-field__label";
+      lab.textContent = "Body, in Markdown";
+      row.appendChild(lab);
+      var bar = doc.createElement("div");
+      bar.className = "ced-modal__tools ced-tools--own";
+      row.appendChild(bar);
+      var ta = doc.createElement("textarea");
+      ta.rows = 9;
+      ta.spellcheck = true;
+      ta.value = body === null ? "" : body;
+      row.appendChild(ta);
+      ddPane.appendChild(row);
+      mdToolbar(bar, ta, { surface: "deepdive" });
+      specialsFlyout(bar, row, {
+        rows: ddSpecials,
+        foot: function () { return "Everything else in this deep dive is Markdown."; },
+        hover: "The commands a deep dive can carry that Markdown does not know"
+      });
+      f.body = ta;
+
+      if (body === null) {
+        ddPane.appendChild(says("This deep dive was written before the form " +
+          "existed, so there is nothing to open in the box above. Write it in " +
+          "Markdown and Apply, and the drawer is written from what you typed. " +
+          "Leave the box as it is and nothing about it is changed.",
+          "ced-empty ced-empty--warn"));
+      }
+
+      var photos = doc.createElement("div");
+      photos.className = "ced-field";
+      var plab = doc.createElement("span");
+      plab.className = "ced-field__label";
+      plab.textContent = "Photographs";
+      photos.appendChild(plab);
+      ddPane.appendChild(photos);
+      drawPhotos(photos, ddGallery(), "This deep dive has no photographs yet. " +
+        "Write {gallery} where you want them, Apply, then drop one here.");
+
+      var gone = doc.createElement("button");
+      gone.type = "button";
+      gone.className = "ced-btn ced-btn--danger ced-btn--own";
+      gone.textContent = "Remove deep dive";
+      gone.addEventListener("click", function () { reshape(false); });
+      ddPane.appendChild(gone);
+
+      ddFields = f;
+      ddFields.was = JSON.stringify(ddValues());
+    }
+
+    /* Adding a deep dive and removing one both change WHICH regions the
+       card has, so both write the card again from the form's own values.
+       Every other move on a card carries the bytes the file already had. */
+    function reshape(want) {
+      var raw = Object.keys(rows).filter(function (k) { return rows[k].raw; });
+      if (raw.length) {
+        note.textContent = "This card holds a field the form reads as HTML, so it " +
+          "cannot be written again. Put that field back into its own shape first.";
+        return;
+      }
+      if (!want) {
+        var g0 = ddGallery();
+        var n = g0 ? imageRegion.exportForm(imageRegion.displayed(g0), g0.kind).length : 0;
+        if (!window.confirm("Remove the deep dive from this project?\n\nIt takes " +
+            "its " + (n === 1 ? "1 photograph" : n + " photographs") + " and its " +
+            "Learn more button with it.")) return;
+      }
+      var head = readAll();
+      head.deepdive = want
+        ? { title: head.title || id, subtitle: head.meta || "",
+            label: "Learn more", body: "", photos: [] }
+        : null;
+      var g = gallery();
+      var keep = g ? imageRegion.exportForm(imageRegion.displayed(g), g.kind) : [];
+      var at = st.order.indexOf(id);
+      var after = st.order[at + 1] || null;
+      listRemove(st, id);
+      listInsert(st, id, makeProject(head, id, keep), after);
+      listChanged(st);
+      done();
+      projectForm(name, id, 2);
+    }
+
+    /* ---------------- the moves ---------------- */
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    function btn(label, cls, fn) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn" + (cls ? " " + cls : "");
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      btns.appendChild(b);
+      return b;
+    }
+    if (!making) btn("Remove project", "ced-btn--danger", removeIt);
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    if (!making) btn("Duplicate", "", duplicate);
+    btn("Cancel", "", function () { done(); });
+    btn("Apply", "ced-btn--accent", apply);
+
+    var shut = false;
+    function done() {
+      if (shut) return;
+      shut = true;
+      dialogDown(done);
+      scrimDown();
+      if (box.parentNode) box.parentNode.removeChild(box);
+    }
+    xBtn.addEventListener("click", function () { done(); });
+
+    /* every field's value, as the generator wants them */
+    function readAll() {
+      var head = {};
+      Object.keys(rows).forEach(function (k) { head[k] = rows[k].read(); });
+      return head;
+    }
+    function same(a, b) { return JSON.stringify(a) === b; }
+
+    function apply() {
+      var head = readAll();
+      if (!head.title || !String(head.title).trim()) {
+        note.textContent = "Give the project a title first.";
+        if (rows.title) rows.title.valIn.focus();
+        return;
+      }
+      if (making) {
+        var newId = freshId(st, spec, head);
+        if (!listInsert(st, newId, makeProject(head, newId, []), null)) {
+          note.textContent = "This page could not take a new project.";
+          return;
+        }
+        listChanged(st);
+        done();
+        return;
+      }
+      var wrote = 0;
+      Object.keys(rows).forEach(function (k) {
+        var row = rows[k];
+        if (!row.slug) return;
+        var now = row.read();
+        if (row.raw ? now === row.was : same(now, row.was)) return;
+        var r = regionBySlug(row.slug);
+        if (!r) return;
+        applyRegion(r, row.raw ? now : row.kind.write(now));
+        wrote++;
+      });
+      wrote += applyDeep();
+      refreshDirtyUI();
+      requestReposition();
+      armGuard();
+      if (!ddHeld) done();
+      if (!wrote) console.info("[site editor] nothing in that project had changed.");
+    }
+
+    /* The drawer is written from the Markdown, every time. The source is
+       what was typed and the rendered half follows it, so the two can never
+       drift; that is why the raw box refuses this region. */
+    var ddHeld = false;
+    function applyDeep() {
+      ddHeld = false;
+      if (!ddFields) return 0;
+      var now = ddValues();
+      if (JSON.stringify(now) === ddFields.was) return 0;
+      var r = ddRegion();
+      if (!r) return 0;
+      var g = ddGallery();
+      var photos = g ? imageRegion.exportForm(imageRegion.displayed(g), g.kind) : [];
+      var built = ddBuild(now, id + "-dd-gallery", photos, ddIndent(r));
+      applyRegion(r, built.html);
+      var mr = moreRegion();
+      if (mr) applyRegion(mr, moreWrite(mr, now.label || "Learn more"));
+      if (built.spare) {
+        note.textContent = "A deep dive has one carousel, so " + built.spare +
+          " more {gallery} " + (built.spare === 1 ? "was" : "were") + " dropped.";
+        ddHeld = true;          /* the box stays open, so the words are read */
+        ddFields.was = JSON.stringify(now);
+        drawDeep();
+      }
+      return 1;
+    }
+
+    function duplicate() {
+      var head = readAll();
+      head.title = (head.title || "untitled") + " copy";
+      var newId = freshId(st, spec, head);
+      var g = gallery();
+      var entries = g ? imageRegion.exportForm(imageRegion.displayed(g), g.kind) : [];
+      var at = st.order.indexOf(id);
+      var after = st.order[at + 1] || null;
+      if (!listInsert(st, newId, makeProject(head, newId, entries), after)) {
+        note.textContent = "This page could not take another project.";
+        return;
+      }
+      listChanged(st);
+      done();
+      projectForm(name, newId);
+    }
+
+    function removeIt() {
+      var g = gallery();
+      var n = g ? imageRegion.exportForm(imageRegion.displayed(g), g.kind).length : 0;
+      var dd = regionBySlug(id + "-deepdive");
+      if (!window.confirm("Remove the project \"" +
+          ((rows.title && rows.title.valIn.value) || id) + "\"?\n\nIt takes its " +
+          (n === 1 ? "1 photograph" : n + " photographs") +
+          (dd ? " and its deep dive" : "") + " with it.\n\nRevert all puts it back " +
+          "in the export; reload the page to see it again.")) return;
+      listRemove(st, id);
+      listChanged(st);
+      done();
+    }
+
+    note.textContent = making
+      ? "The number and the left-right side are written for you."
+      : "A field you do not touch is not written.";
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(tabs);
+    box.appendChild(panes);
+    box.appendChild(note);
+    box.appendChild(btns);
+    gripAdd(box);
+    scrimUp();
+    doc.body.appendChild(box);
+    dialogUp(done);
+    /* a view is drawn when it is opened, and the one opened with the box
+       has had no click to draw it */
+    if (!imgPane.hidden) drawImages();
+    if (!ddPane.hidden) drawDeep();
+    if (!startAt && rows.title) { rows.title.valIn.focus(); rows.title.valIn.select(); }
+  }
+
+  /* The home page's projects, as a list.
+
+     slugFor names the region that proves an id is taken. Every card has a
+     title, and so would "brand-title": an id may not collide with a slug
+     that is not a project's either. */
+  var PROJECT_LIST = {
+    name: "projects",
+    noun: "project",
+    nameKey: "title",
+    slugFor: function (pid) { return pid + "-title"; },
+    make: makeProject,
+    form: projectForm,
+    anchor: function (el) { return el.querySelector(".project__body"); },
+    after: function (where) { return where.querySelector(".project__index"); }
+  };
+
+  /* ------------------------------------------------------------
+     LIST FURNITURE
+
+     The model and the page a list is read from are in section 3. This is
+     what a person sees of one: three controls on each block, one control
+     under the list, and the form behind the first of them.
+
+     What a block IS stays with the trunk that owns it. A trunk registers a
+     descriptor and places the controls; this file draws them and knows what
+     they do. That is what keeps a gallery out of this file.
+
+       name      the list's [list:name]
+       noun      the word the controls use: "section"
+       nameKey   which field names the block
+       fields    [{key, label, hint, start}], in order
+       slugFor(id)          the region slug a block's markers carry
+       make(head, id, entries)  the block's markup, markers included, at no
+                                indent, which is also what the export writes
+       countNote(region)    one line the form shows under the fields
+     ------------------------------------------------------------ */
+  var listKinds = {};
+
+  /* The projects list is this file's own, for the reason given above
+     PROJECT_FIELDS: a card is nine plain regions and one image region, and
+     there is no trunk that owns one. A page with no [list:projects] markers
+     has no list, so this draws nothing on the other two pages. */
+  listKinds.projects = PROJECT_LIST;
+
+  /* The list's own marks. One drawing each, inlined, taking currentColor so
+     they stay black on a yellow pill. */
+  var ICON = {
+    pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>',
+    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>',
+    down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
+      'stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M12 5v14" /><path d="M5 12h14" /></svg>'
+  };
+
+  function pillBtn(label, icon, fn, iconOnly) {
+    var b = doc.createElement("button");
+    b.type = "button";
+    b.className = "ced-pill" + (iconOnly ? " ced-pill--icon" : "");
+    if (icon) b.innerHTML = icon;
+    if (iconOnly) { b.setAttribute("aria-label", label); b.title = label; }
+    else b.appendChild(doc.createTextNode(label));
+    b.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation(); fn();
+    });
+    return b;
+  }
+
+  /* The image region a block's own markers carry. */
+  function galBySlug(slug) {
+    for (var i = 0; i < gals.length; i++) if (gals[i].slug === slug) return gals[i];
+    return null;
+  }
+
+  /* The three controls a block carries: open it, and move it. The trunk
+     decides where they sit; this decides what they do. */
+  function listPills(name, id) {
+    var st = lists[name], spec = listKinds[name];
+    if (!st || !spec || !active) return null;
+    var wrap = doc.createElement("span");
+    wrap.className = "ced-pills";
+    wrap.setAttribute("data-ced-list", name);
+    wrap.setAttribute("data-ced-item", id);
+    /* the pill names the thing it opens, so it is a title; the buttons that
+       act on one are sentences, so they keep the noun as it is written */
+    wrap.appendChild(pillBtn(spec.noun.charAt(0).toUpperCase() + spec.noun.slice(1),
+      ICON.pencil, function () { listForm(name, id); }));
+    wrap.appendChild(pillBtn("Move up", ICON.up, function () { listStep(name, id, -1); }, true));
+    wrap.appendChild(pillBtn("Move down", ICON.down, function () { listStep(name, id, 1); }, true));
+    listEnds(wrap, st, id);
+    return wrap;
+  }
+  /* A block at an end of the list has nowhere to go in that direction. */
+  function listEnds(wrap, st, id) {
+    var at = st.order.indexOf(id), last = st.order.length - 1;
+    var arrows = wrap.querySelectorAll(".ced-pill--icon");
+    if (arrows[0]) arrows[0].disabled = at <= 0;
+    if (arrows[1]) arrows[1].disabled = at < 0 || at >= last;
+  }
+  function refreshPills(name) {
+    var st = lists[name];
+    if (!st) return;
+    Array.prototype.forEach.call(
+      doc.querySelectorAll('[data-ced-list="' + name + '"]'), function (wrap) {
+        listEnds(wrap, st, wrap.getAttribute("data-ced-item"));
+      });
+  }
+
+  /* The one control that is not on a block. It goes after the list's own
+     close marker: outside every item, and inside no region, so nothing it
+     is can reach a file. */
+  function listFoot(st) {
+    var spec = listKinds[st.name];
+    if (st.footEl && st.footEl.parentNode) st.footEl.parentNode.removeChild(st.footEl);
+    st.footEl = null;
+    if (!spec || !active || !st.close || !st.close.parentNode) return;
+    var wrap = doc.createElement("div");
+    wrap.className = "ced-listfoot";
+    wrap.appendChild(pillBtn("New " + spec.noun, ICON.plus, function () {
+      listForm(st.name, null);
+    }));
+    st.close.parentNode.insertBefore(wrap, st.close.nextSibling);
+    st.footEl = wrap;
+  }
+
+  function listStep(name, id, by) {
+    var st = lists[name];
+    if (!st || !listMove(st, id, by)) return;
+    listChanged(st);
+  }
+  function listChanged(st) {
+    exportedClean = false;
+    pendingSyncList(st);
+    refreshDirtyUI();
+    /* a block that arrived or left takes its regions with it, so the panel's
+       list of them is rebuilt rather than left describing the page before */
+    refreshRegionRows();
+    refreshImageRows();
+    /* a block that arrived brought regions with it, and they have no badge
+       until something draws one */
+    regions.forEach(chipFor);
+    gals.forEach(galChipsFor);
+    /* a block that arrived needs its controls, and one that moved needs
+       its two arrows to say so */
+    listItemPills(st);
+    refreshPills(st.name);
+    requestReposition();
+    armGuard();
+  }
+
+  /* An id from the block's name: its initials, lower case, and a number
+     when that is taken. Permanent from then on, so a rename never moves it.
+     That is the rule a post id already follows. */
+  function freshId(st, spec, head) {
+    var words = String(head[spec.nameKey] || "").toLowerCase().match(/[a-z0-9]+/g) || [];
+    var base = words.map(function (w) { return w.charAt(0); }).join("").slice(0, 4);
+    if (!base || /^[0-9]/.test(base)) base = "s" + base;
+    var id = base, n = 1;
+    while (idTaken(st, spec, id)) { n++; id = base + n; }
+    return id;
+  }
+  function idTaken(st, spec, id) {
+    if (st.order.indexOf(id) !== -1) return true;
+    var slug = spec.slugFor(id);
+    return regions.some(function (r) { return r.slug === slug; }) ||
+           gals.some(function (g) { return g.slug === slug; });
+  }
+
+  /* The first element inside one item: the block itself. */
+  function itemElement(st, id) {
+    var nodes = itemNodes(st, id);
+    for (var i = 0; i < nodes.length; i++) if (nodes[i].nodeType === 1) return nodes[i];
+    return null;
+  }
+
+  /* Put the controls on every block of a list that does not draw its own.
+
+     A trunk that redraws its blocks places them itself, because a redraw
+     would throw them away. A list of plain regions has no redraw, so the
+     editor puts them on when it turns on and takes them off when it does
+     not: listPills answers with nothing while the editor is off. */
+  function listItemPills(st) {
+    var spec = listKinds[st.name];
+    if (!spec || !spec.anchor) return;
+    st.order.forEach(function (id) {
+      var el = itemElement(st, id);
+      var where = el && spec.anchor(el);
+      if (!where) return;
+      var was = where.querySelector(".ced-pills");
+      if (was && was.parentNode === where) where.removeChild(was);
+      var pills = listPills(st.name, id);
+      if (!pills) return;
+      var after = spec.after && spec.after(where);
+      if (after && after.parentNode === where) where.insertBefore(pills, after.nextSibling);
+      else where.insertBefore(pills, where.firstChild);
+    });
+  }
+
+  /* What a block holds beyond what is inside it. New opens the same form
+     with nothing in it, so there is one place a block is named.
+
+     A list whose blocks are more than a few words brings a form of its own
+     and says so; this is the plain one. */
+  function listForm(name, id, startAt) {
+    var st = lists[name], spec = listKinds[name];
+    if (!st || !spec) return;
+    if (spec.form) { spec.form(name, id, startAt); return; }
+    var making = !id;
+    var r = making ? null : galBySlug(spec.slugFor(id));
+    if (!making && !r) return;
+    injectStyles();
+
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-modal--flow ced-listform";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    var tag = doc.createElement("span");
+    tag.className = "ced-b ced-b--y";
+    tag.textContent = spec.noun.toUpperCase();
+    var who = doc.createElement("span");
+    who.className = "ced-slug";
+    who.textContent = making ? "New " + spec.noun
+      : ((r.head && r.head[spec.nameKey]) || "untitled");
+    headEl.appendChild(tag);
+    headEl.appendChild(who);
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    var body = doc.createElement("div");
+    body.className = "ced-listform__body";
+    var inputs = {};
+    spec.fields.forEach(function (f) {
+      var row = doc.createElement("label");
+      row.className = "ced-field";
+      var lab = doc.createElement("span");
+      lab.className = "ced-field__label";
+      lab.textContent = f.label;
+      var inp = doc.createElement("input");
+      inp.type = "text";
+      inp.spellcheck = false;
+      inp.value = making ? (f.start || "") : ((r.head && r.head[f.key]) || "");
+      if (f.hint) inp.placeholder = f.hint;
+      inputs[f.key] = inp;
+      row.appendChild(lab);
+      row.appendChild(inp);
+      body.appendChild(row);
+    });
+
+    var note = doc.createElement("div");
+    note.className = "ced-modal__status";
+    note.textContent = making
+      ? "The number and the image count are written for you."
+      : (spec.countNote ? spec.countNote(r) : "");
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    function btn(label, cls, fn) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn" + (cls ? " " + cls : "");
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      btns.appendChild(b);
+      return b;
+    }
+    if (!making) btn("Delete " + spec.noun, "ced-btn--danger", removeIt);
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    if (!making) btn("Duplicate", "", duplicate);
+    btn("Cancel", "", function () { done(); });
+    btn("Apply", "ced-btn--accent", apply);
+
+    var shut = false;
+    function done() {
+      if (shut) return;
+      shut = true;
+      dialogDown(done);
+      scrimDown();
+      if (box.parentNode) box.parentNode.removeChild(box);
+    }
+    xBtn.addEventListener("click", function () { done(); });
+
+    function readForm() {
+      var out = {};
+      spec.fields.forEach(function (f) { out[f.key] = inputs[f.key].value.trim(); });
+      return out;
+    }
+    function shown(region) {
+      var list = region.model.length ? region.model : region.seeds;
+      return list.filter(function (e) { return !e.empty; });
+    }
+
+    function apply() {
+      var next = readForm();
+      if (!next[spec.nameKey]) {
+        note.textContent = "Give this " + spec.noun + " a name first.";
+        inputs[spec.nameKey].focus();
+        return;
+      }
+      if (making) {
+        var newId = freshId(st, spec, next);
+        if (!listInsert(st, newId, spec.make(next, newId, []), null)) {
+          note.textContent = "This page could not take a new " + spec.noun + ".";
+          return;
+        }
+        listChanged(st);
+        done();
+        return;
+      }
+      r.head = next;
+      renderGallery(r);
+      AMH.tool.changed(r);
+      armGuard();
+      done();
+    }
+
+    function duplicate() {
+      var next = readForm();
+      next[spec.nameKey] = (next[spec.nameKey] || "untitled") + " copy";
+      var newId = freshId(st, spec, next);
+      var entries = imageRegion.exportForm(shown(r), r.kind);
+      var at = st.order.indexOf(id);
+      var after = st.order[at + 1] || null;
+      if (!listInsert(st, newId, spec.make(next, newId, entries), after)) {
+        note.textContent = "This page could not take another " + spec.noun + ".";
+        return;
+      }
+      listChanged(st);
+      done();
+      listForm(name, newId);
+    }
+
+    function removeIt() {
+      var n = shown(r).length;
+      if (!window.confirm("Delete the " + spec.noun + ' "' +
+          ((r.head && r.head[spec.nameKey]) || "untitled") + '"?\n\nIt takes its ' +
+          (n === 1 ? "1 image" : n + " images") + " with it.\n\nRevert all puts " +
+          "it back in the export; reload the page to see it again.")) return;
+      listRemove(st, id);
+      listChanged(st);
+      done();
+    }
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(body);
+    box.appendChild(note);
+    box.appendChild(btns);
+    gripAdd(box);
+    scrimUp();
+    doc.body.appendChild(box);
+    dialogUp(done);
+    inputs[spec.nameKey].focus();
+    inputs[spec.nameKey].select();
   }
 
 
@@ -2052,7 +3957,7 @@
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
       g.chip = null; g.plusChip = null;
     });
-    overlay = panel = panelList = viewBtn = imgRowsEl = null;
+    overlay = panel = panelList = viewBtn = regRowsEl = imgRowsEl = null;
     redrawSelfDrawn();
   }
 
@@ -2066,16 +3971,18 @@
     var alt = altSurface && altSurface();
     return alt || ta;
   }
-  function wrapSelection(before, after) {
-    var t = curTA();
+  /* Both take the surface to write into, and fall back to whichever one is
+     open. A toolbar built for one textarea names it and never has to ask. */
+  function wrapSelection(before, after, into) {
+    var t = into || curTA();
     var s = t.selectionStart, e = t.selectionEnd, v = t.value;
     t.value = v.slice(0, s) + before + v.slice(s, e) + after + v.slice(e);
     t.focus();
     if (s === e) { t.selectionStart = t.selectionEnd = s + before.length; }
     else { t.selectionStart = s; t.selectionEnd = e + before.length + after.length; }
   }
-  function insertAtCursor(txt) {
-    var t = curTA();
+  function insertAtCursor(txt, into) {
+    var t = into || curTA();
     var s = t.selectionStart, v = t.value;
     t.value = v.slice(0, s) + txt + v.slice(t.selectionEnd);
     t.focus();
@@ -2098,13 +4005,356 @@
     ["xl", "size: extra large", function () { wrapSelection('<span class="text-xl">', "</span>"); }]
   ];
 
+  /* ------------------------------------------------------------
+     THE MARKDOWN TOOLBAR
+
+     The HTML list above writes tags into whichever surface is open, which
+     suits the region editor: its surfaces hold HTML. This one writes
+     Markdown into a surface it is handed, because more than one surface
+     wants it and they are not open at the same time.
+
+     Every tool takes its textarea as an argument. Nothing here asks which
+     surface is open, which is the whole difference from the list above.
+
+     The flags are the renderer's, read from AMH.markdown.flags. A flag
+     added there appears on the toolbar and in the help panel without being
+     copied, and a surface is offered only the flags that name it.
+     ------------------------------------------------------------ */
+
+  /* The marks, drawn once into the page and used by reference: a <use>
+     costs no request, and currentColor keeps every stroke the colour of the
+     button's own text. The letters are paths rather than text so they are
+     one shape on every platform's font stack. */
+  var MD_SPRITE = '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<symbol id="ced-i-h" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.2" stroke-linecap="round">' +
+      '<path d="M5 5v14"/><path d="M15 5v14"/><path d="M5 12h10"/>' +
+      '<path d="M18.2 8.4a1.8 1.8 0 0 1 3 1.3c0 1.6-3 2.4-3 4.3h3"/></symbol>' +
+    '<symbol id="ced-i-bullet" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round">' +
+      '<path d="M4.5 6h.01"/><path d="M4.5 12h.01"/><path d="M4.5 18h.01"/>' +
+      '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/></symbol>' +
+    '<symbol id="ced-i-number" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/>' +
+      '<path d="M3.2 5.2 4.6 4.4V8"/><path d="M3.2 15.4a1.3 1.3 0 0 1 2.3.8c0 1-2.3 1.6-2.3 2.8h2.4"/>' +
+      '</symbol>' +
+    '<symbol id="ced-i-bold" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M7 5h5.5a3.5 3.5 0 0 1 0 7H7z"/><path d="M7 12h6.5a3.5 3.5 0 0 1 0 7H7z"/></symbol>' +
+    '<symbol id="ced-i-italic" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.2" stroke-linecap="round">' +
+      '<path d="M15 5h-5"/><path d="M14 19H9"/><path d="M14.5 5 9.5 19"/></symbol>' +
+    '<symbol id="ced-i-strike" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.1" stroke-linecap="round">' +
+      '<path d="M16.5 7.2A3.8 3.8 0 0 0 13 5h-1.6a2.9 2.9 0 0 0-1.2 5.6"/>' +
+      '<path d="M7.5 16.8A3.8 3.8 0 0 0 11 19h1.6a2.9 2.9 0 0 0 1.4-5.4"/>' +
+      '<path d="M4 12h16"/></symbol>' +
+    '<symbol id="ced-i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M10.5 13.5a4.5 4.5 0 0 0 6.8.5l2.2-2.2a4.5 4.5 0 0 0-6.4-6.4l-1.3 1.3"/>' +
+      '<path d="M13.5 10.5a4.5 4.5 0 0 0-6.8-.5l-2.2 2.2a4.5 4.5 0 0 0 6.4 6.4l1.3-1.3"/>' +
+      '</symbol>' +
+    '<symbol id="ced-i-table" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3.5 5h17v14h-17z"/><path d="M3.5 10h17"/><path d="M12 10v9"/></symbol>' +
+    '<symbol id="ced-i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 6h16"/><path d="M4 18h16"/><path d="M8.5 10.5 12 14l3.5-3.5"/></symbol>' +
+    '<symbol id="ced-i-break" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M7 3h10v5"/><path d="M7 21h10v-5"/>' +
+      '<path d="M3 12h3"/><path d="M9.5 12h2.5"/><path d="M15.5 12h2.5"/><path d="M21 12h0"/>' +
+      '</symbol>' +
+    '<symbol id="ced-i-clear" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M7.5 20.5 3 16a1.6 1.6 0 0 1 0-2.3L13.7 3a1.6 1.6 0 0 1 2.3 0l5 5a1.6 1.6 0 0 1 0 2.3L11.5 20.5z"/>' +
+      '<path d="M21.5 20.5H8"/><path d="M8.5 8.5 16 16"/></symbol>' +
+    '<symbol id="ced-i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 21V4"/><path d="M5 4h13l-3 4 3 4H5"/></symbol>' +
+    '<symbol id="ced-i-photos" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="3" y="6" width="14" height="12" rx="1.6"/>' +
+      '<path d="m5.5 15 3.2-3.4 2.4 2.5 2.3-2.4 2.6 2.8"/>' +
+      '<path d="M20 8.5v9"/></symbol>' +
+    '<symbol id="ced-i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 6h16"/><path d="M4 10h16"/><path d="M4 14h10"/>' +
+      '<path d="M15.5 20.5 14 21l.5-1.5 5-5 1 1z"/></symbol>' +
+    '<symbol id="ced-i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round">' +
+      '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5v.1"/></symbol>' +
+    "</svg>";
+
+  /* One flag's mark, by the name the renderer gave it. A flag with no
+     drawing of its own gets the generic one rather than nothing. */
+  var MD_FLAG_ICON = { expandformore: "expand", pagebreak: "break",
+                       gallery: "photos", note: "note" };
+
+  var mdSpriteEl = null;
+  function mdSprite() {
+    if (mdSpriteEl && mdSpriteEl.isConnected) return;
+    mdSpriteEl = doc.createElement("div");
+    mdSpriteEl.className = "ced-sprite";
+    mdSpriteEl.setAttribute("aria-hidden", "true");
+    mdSpriteEl.innerHTML = MD_SPRITE;
+    doc.body.appendChild(mdSpriteEl);
+  }
+  function mdIcon(name) {
+    return '<svg class="ced-tool__i" aria-hidden="true"><use href="#ced-i-' +
+      name + '" /></svg>';
+  }
+
+  /* ---------------- what the tools do ---------------- */
+
+  /* The current line's bounds in a surface. */
+  function mdLineAt(t) {
+    var v = t.value, s = t.selectionStart;
+    var a = v.lastIndexOf("\n", s - 1) + 1;
+    var b = v.indexOf("\n", s);
+    if (b === -1) b = v.length;
+    return { a: a, b: b, text: v.slice(a, b) };
+  }
+  function mdSetLine(t, line, text) {
+    var v = t.value;
+    t.value = v.slice(0, line.a) + text + v.slice(line.b);
+    t.focus();
+    t.selectionStart = t.selectionEnd = line.a + text.length;
+  }
+  /* H2 to H4 as a cycle, then back to plain text. */
+  function mdHeadingCycle(t) {
+    var line = mdLineAt(t);
+    var m = /^(#{1,3}) (.*)$/.exec(line.text);
+    var rest = m ? m[2] : line.text;
+    var hashes = !m ? "#" : m[1].length < 3 ? m[1] + "#" : "";
+    mdSetLine(t, line, hashes ? hashes + " " + rest : rest);
+  }
+  /* "- " or "1. " on the line, off again when it is there. */
+  function mdListToggle(t, marker) {
+    var line = mdLineAt(t);
+    var m = /^( *)(?:[-*]|\d+\.) (.*)$/.exec(line.text);
+    if (m) {
+      var has = /^ *[-*] /.test(line.text) ? "- " : "1. ";
+      mdSetLine(t, line, has === marker ? m[1] + m[2] : m[1] + marker + m[2]);
+    } else {
+      mdSetLine(t, line, marker + line.text);
+    }
+  }
+  /* A flag stands alone on its own line, or it is text. */
+  function mdInsertFlag(t, flag) {
+    var v = t.value, s = t.selectionStart;
+    var before = s === 0 || v.charAt(s - 1) === "\n" ? "" : "\n";
+    var after = s >= v.length || v.charAt(s) === "\n" ? "" : "\n";
+    insertAtCursor(before + flag + after, t);
+  }
+  function mdInsertTable(t) {
+    var v = t.value, s = t.selectionStart;
+    var before = s === 0 || v.charAt(s - 1) === "\n" ? "" : "\n";
+    insertAtCursor(before + "| Column | Column |\n| --- | --- |\n| cell | cell |\n", t);
+  }
+  /* The marks of the set, removed from the selection: bold, italic,
+     strikethrough, code, a link to its text, a heading or list prefix. */
+  function mdClearMarks(t) {
+    var s = t.selectionStart, e = t.selectionEnd, v = t.value;
+    if (s === e) { var line = mdLineAt(t); s = line.a; e = line.b; }
+    var out = v.slice(s, e)
+      .replace(/\*\*([^*]+)\*\*/g, "$1").replace(/~~([^~]+)~~/g, "$1")
+      .replace(/\*([^*\n]+)\*/g, "$1").replace(/(^|[^\w])_([^_\n]+)_(?=[^\w]|$)/g, "$1$2")
+      .replace(/`([^`\n]+)`/g, "$1")
+      .replace(/\[([^\]\n]+)\]\((?:[^()\s]|\([^()\s]*\))+\)/g, "$1")
+      .replace(/^ *(?:#{1,3} |[-*] |\d+\. )/gm, "");
+    t.value = v.slice(0, s) + out + v.slice(e);
+    t.focus();
+    t.selectionStart = s;
+    t.selectionEnd = s + out.length;
+  }
+
+  /* The nine that every surface gets, in the order they are drawn. Each is
+     a name for a reader, a mark, a sentence for the hover, and what it does
+     to a surface. A surface's own flags are put in among them below. */
+  var MD_TOOLS = [
+    ["Heading", "h", "heading: H2, H3, H4, then plain", mdHeadingCycle],
+    ["Bullet list", "bullet", "bullet list", function (t) { mdListToggle(t, "- "); }],
+    ["Numbered list", "number", "numbered list", function (t) { mdListToggle(t, "1. "); }],
+    ["Bold", "bold", "bold", function (t) { wrapSelection("**", "**", t); }],
+    ["Italic", "italic", "italic", function (t) { wrapSelection("*", "*", t); }],
+    ["Strikethrough", "strike", "strikethrough", function (t) { wrapSelection("~~", "~~", t); }],
+    ["Link", "link", "link", function (t) {
+      var url = window.prompt("Link URL:", "https://");
+      if (url) wrapSelection("[", "](" + url + ")", t);
+    }],
+    ["Table", "table", "table: a two by two skeleton", mdInsertTable],
+    ["Clear", "clear", "clear formatting in the selection", mdClearMarks]
+  ];
+  /* Where the flags go: after the table and before Clear, which is the
+     order the composer drew them in. */
+  var MD_FLAGS_AT = 8;
+
+  /* One button. The mark is what is seen; the name is what is heard and is
+     kept out of sight, because eleven words across a toolbar is a wall. */
+  function mdButton(label, icon, hover, fn, tabbable) {
+    var b = doc.createElement("button");
+    b.type = "button";
+    b.className = "ced-tool ced-tool--icon";
+    b.title = hover;
+    if (tabbable === false) b.tabIndex = -1;
+    b.innerHTML = mdIcon(icon) + '<span class="ced-sr"></span>';
+    b.querySelector(".ced-sr").textContent = label;
+    b.addEventListener("click", fn);
+    return b;
+  }
+
+  /* Build the bar into host, writing into ta.
+
+       opts.surface   which flags are offered: "post", "deepdive"
+       opts.tabbable  false keeps the buttons out of the tab ring
+       opts.onChange  called after every press
+
+     Returns host, so a caller that built its own row keeps it. */
+  function mdToolbar(host, ta, opts) {
+    var o = opts || {};
+    mdSprite();
+    injectStyles();
+    var after = function () { if (o.onChange) o.onChange(); };
+    function add(label, icon, hover, fn) {
+      host.appendChild(mdButton(label, icon, hover, function () {
+        fn(ta);
+        after();
+      }, o.tabbable));
+    }
+    MD_TOOLS.forEach(function (t, i) {
+      if (i === MD_FLAGS_AT) mdFlagTools(host, ta, o, add);
+      add(t[0], t[1], t[2], t[3]);
+    });
+    return host;
+  }
+  /* The flags this surface is offered, in the renderer's own order. The
+     word and the sentence are its too, so a hover and a help panel can
+     never disagree with what the renderer accepts. */
+  function mdFlagTools(host, ta, o, add) {
+    var flags = (AMH.markdown && AMH.markdown.flags) || [];
+    flags.forEach(function (f) {
+      var wants = f.for || ["post"];
+      if (wants.indexOf(o.surface || "post") === -1) return;
+      var word = "{" + f.name + "}";
+      add(f.label || f.name, MD_FLAG_ICON[f.name] || "flag", word + " - " + f.does,
+        function (t) { mdInsertFlag(t, word); });
+    });
+  }
+
+  /* ---------------- the special commands, behind an (i) ----------------
+
+     A toolbar carries what fits on a button. The rest - a command with an
+     argument, a rule about a line, the escape that writes one as text -
+     needs a sentence each, so they live behind one control.
+
+     A flyout and not a box: a second box over a surface is the thing this
+     editor has spent its design removing, and a title cannot hold four
+     commands with their syntax. It is anchored to the row it belongs to,
+     closes on Escape or a press outside, and needs no new layer.
+
+       row    the toolbar the (i) is added to
+       host   the element the panel hangs inside; the row is inside it too
+       opts.rows()   the rows, each {write, where, does}
+       opts.foot()   one closing sentence, or nothing
+       opts.label    the panel's name, default "Special commands"
+       opts.tabbable false keeps the (i) out of the tab ring
+
+     Returns { btn, panel, open, isOpen, destroy }. */
+  function specialsFlyout(row, host, opts) {
+    var o = opts || {};
+    var label = o.label || "Special commands";
+    mdSprite();
+    injectStyles();
+
+    var sep = doc.createElement("span");
+    sep.className = "ced-tool__sep";
+    sep.setAttribute("aria-hidden", "true");
+    row.appendChild(sep);
+
+    var btn = doc.createElement("button");
+    btn.type = "button";
+    btn.className = "ced-tool ced-spec__btn";
+    if (o.tabbable === false) btn.tabIndex = -1;
+    btn.setAttribute("aria-expanded", "false");
+    btn.title = o.hover || "The commands this surface can carry that Markdown does not know";
+    btn.innerHTML = mdIcon("info") + "<span>" + label + "</span>";
+
+    var panel = doc.createElement("div");
+    panel.className = "ced-spec";
+    panel.hidden = true;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", label);
+
+    function isOpen() { return !panel.hidden; }
+    function fill() {
+      var rows = (o.rows ? o.rows() : []).map(function (s) {
+        /* two cells of one grid, not a row that lays itself out: the widest
+           command sizes the first column and every description then starts
+           in the same place, which a per-row flex cannot do. */
+        return '<code class="ced-spec__write">' + escAttr(s.write) + "</code>" +
+          '<div class="ced-spec__of"><span class="ced-spec__where">' +
+          escAttr(s.where) + "</span>" +
+          '<span class="ced-spec__does">' + escAttr(s.does) + "</span></div>";
+      }).join("");
+      var foot = o.foot ? o.foot() : "";
+      panel.innerHTML =
+        '<div class="ced-spec__head">' + escAttr(label) + "</div>" +
+        '<div class="ced-spec__list">' + rows + "</div>" +
+        (foot ? '<p class="ced-spec__foot">' + escAttr(foot) + "</p>" : "");
+    }
+    function open(want) {
+      if (want) {
+        fill();
+        /* The row wraps to two lines on a phone, so a fixed offset would
+           lay the panel over its second line. It hangs from where the row
+           ends, measured inside the panel's own container. */
+        panel.style.top = (row.offsetTop + row.offsetHeight + 4) + "px";
+      }
+      panel.hidden = !want;
+      btn.setAttribute("aria-expanded", want ? "true" : "false");
+      btn.classList.toggle("on", !!want);
+    }
+    btn.addEventListener("click", function () { open(!isOpen()); });
+
+    function onKey(e) {
+      if (e.key !== "Escape" || !isOpen()) return;
+      /* it is in front of the surface, so it answers the key first */
+      e.preventDefault();
+      e.stopPropagation();
+      open(false);
+      btn.focus();
+    }
+    function onAway(e) {
+      if (!isOpen()) return;
+      if (panel.contains(e.target) || btn.contains(e.target)) return;
+      open(false);
+    }
+    doc.addEventListener("keydown", onKey, true);
+    doc.addEventListener("pointerdown", onAway, true);
+
+    row.appendChild(btn);
+    host.appendChild(panel);
+    return {
+      btn: btn, panel: panel, open: open, isOpen: isOpen,
+      destroy: function () {
+        doc.removeEventListener("keydown", onKey, true);
+        doc.removeEventListener("pointerdown", onAway, true);
+      }
+    };
+  }
+
   function status(msg) { if (modalStatus) modalStatus.textContent = msg || ""; }
 
   function buildModal() {
     scrim = doc.createElement("div");
     scrim.className = "ced-scrim";
     modal = doc.createElement("div");
-    modal.className = "ced-modal";
+    /* --region says this is the one box that is built once and reused,
+       so the rules that hide a control it is not using apply to it and to
+       nothing else. */
+    modal.className = "ced-modal ced-modal--region";
     modal.setAttribute("role", "dialog");
     modal.setAttribute("aria-modal", "true");
 
@@ -2323,22 +4573,41 @@
       status("Not applied - the publisher owns this block. Edit its source instead.");
       return;
     }
+    /* The refusal is here and not only on the textarea, so turning the
+       read-only flag off in devtools still cannot write the half that is
+       written from something else. */
+    if (ddOwner(openRegion.slug)) {
+      status("Not applied - a deep dive is written from the Markdown it carries. " +
+        "Open the project and use its Deep dive view; what you write here would " +
+        "be lost at the next Apply.");
+      return;
+    }
     var problem = tagCheck(ta.value);
     if (problem && !window.confirm("Tag check: " + problem + "\n\nApply anyway?")) {
       status("Not applied - " + problem);
       return;
     }
     var r = openRegion;
-    r.el.innerHTML = ta.value;
+    applyRegion(r, ta.value);
+    ta.value = r.current;
+    refreshDirtyUI();
+    requestReposition();
+    status(r.edited ? "Applied - page updated. Export when you're done." : "Applied - matches published content.");
+  }
+
+  /* Write one region and record what that means.
+
+     Both doors go through here: a chip's modal, and the project form. A
+     field edited either way lands in exactly the same state, which is what
+     lets a card have two doors without them disagreeing. */
+  function applyRegion(r, html) {
+    r.el.innerHTML = html;
     r.current = r.el.innerHTML;          /* normalized by the browser */
     r.edited = r.current !== r.original;
     if (r.edited) exportedClean = false;
     pendingSyncRegion(r);
-    ta.value = r.current;
     relinkTplGalleries(r);               /* a template rewrite orphans its dd gallery */
-    refreshDirtyUI();
-    requestReposition();
-    status(r.edited ? "Applied - page updated. Export when you're done." : "Applied - matches published content.");
+    return r.edited;
   }
 
   function revertModal() {
@@ -2441,6 +4710,66 @@
   function escAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
+
+  /* Indent a block written at no indent, so a region or an item built in
+     the browser matches the hand-written style of the file it lands in.
+     The first line is left alone: the splice has already placed it. */
+  function indentBlock(text, ind) {
+    if (!ind) return text;
+    return text.split("\n").map(function (ln, i) {
+      return i === 0 ? ln : ind + ln;
+    }).join("\n");
+  }
+
+  /* One list's items, in the order the editor holds, back into the page's
+     own bytes.
+
+     An item the file already had contributes its source span VERBATIM, so a
+     reorder moves bytes and changes none of them. A new item contributes the
+     markup the trunk built, indented to match. A removed one is left out.
+
+     Runs before every region splice, so a region inside a new item finds
+     its markers: the item is in the text by the time they are looked for. */
+  function spliceList(src, name, state) {
+    var open = "<!--[list:" + name + "]-->";
+    var close = "<!--[/list:" + name + "]-->";
+    var a = src.indexOf(open);
+    if (a < 0) return null;
+    var start = a + open.length;
+    var b = src.indexOf(close, start);
+    if (b < 0) return null;
+    var inner = src.slice(start, b);
+
+    var have = {};
+    var re = /<!--\[item:([\w-]+)\]-->/g, m;
+    while ((m = re.exec(inner))) {
+      var id = m[1];
+      var shut = "<!--[/item:" + id + "]-->";
+      var e = inner.indexOf(shut, m.index + m[0].length);
+      if (e < 0) return null;
+      have[id] = inner.slice(m.index, e + shut.length);
+      re.lastIndex = e + shut.length;
+    }
+
+    /* the file's own indents: one for an item, one for the close marker */
+    var ind = (/\n([ \t]*)<!--\[item:/.exec(inner) || [, "        "])[1];
+    var tail = (/\n([ \t]*)$/.exec(inner) || [, ind])[1];
+
+    var out = [];
+    for (var i = 0; i < state.order.length; i++) {
+      var want = state.order[i];
+      /* added first: a block the editor WROTE replaces the one the file
+         holds, which is what lets a card be written again when the set of
+         regions in it changes. Everything else contributes its source span
+         and so moves without changing. */
+      if (state.added[want] !== undefined) out.push(indentBlock(ind + state.added[want], ind));
+      else if (have[want] !== undefined) out.push(ind + have[want]);
+      else return null;
+    }
+    return src.slice(0, start) +
+      (out.length ? "\n" + out.join("\n\n") + "\n" + tail : "\n" + tail) +
+      src.slice(b);
+  }
   /* Six base36 characters from a 32-bit FNV-1a hash of the text. A publish
      writes one into every file it generates, so a file can say which
      publish it came from. Six characters, always: the hash is reduced to
@@ -2478,7 +4807,7 @@
     if (!entries.length && !g.kind.mayBeEmpty) {
       console.warn("[site editor] " + g.slug + " exports EMPTY - no images and no seed fallback.");
     }
-    return spliceRegion(src, g.slug, imageRegion.serializeFor(entries, ind, g.kind));
+    return spliceRegion(src, g.slug, imageRegion.serializeFor(entries, ind, g.kind, g.head));
   }
 
   /* ---------------- pages and their pristine bytes ---------------- */
@@ -3925,7 +6254,8 @@
     /* drop a page whose maps are both empty, so the count stays honest */
     Object.keys(all).forEach(function (path) {
       var pg = all[path] || {};
-      var n = Object.keys(pg.text || {}).length + Object.keys(pg.gallery || {}).length;
+      var n = Object.keys(pg.text || {}).length + Object.keys(pg.gallery || {}).length +
+              Object.keys(pg.list || {}).length;
       if (!n) delete all[path];
     });
     try {
@@ -3935,7 +6265,11 @@
     } catch (err) { pendingWarn(err); return false; }
   }
 
-  /* Record one applied edit. kind is "text" or "gallery". */
+  /* Record one applied edit.
+
+     kind is "text", "gallery" or "list". Two more ride with a gallery and
+     are never counted on their own: "heads", the region's non-image fields,
+     and "bytes", what its own kind serialized. */
   function pendingSet(path, kind, slug, value) {
     var all = pendingRead();
     if (!all[path]) all[path] = {};
@@ -3968,7 +6302,8 @@
     var changes = 0, pages = 0;
     Object.keys(all).forEach(function (path) {
       var pg = all[path] || {};
-      var n = Object.keys(pg.text || {}).length + Object.keys(pg.gallery || {}).length;
+      var n = Object.keys(pg.text || {}).length + Object.keys(pg.gallery || {}).length +
+              Object.keys(pg.list || {}).length;
       if (n) { changes += n; pages++; }
     });
     return { changes: changes, pages: pages, byPage: all };
@@ -4003,10 +6338,32 @@
     var mine = pendingRead()[here];
     if (!mine) return 0;
     var texts = mine.text || {}, galleries = mine.gallery || {};
-    if (!Object.keys(texts).length && !Object.keys(galleries).length) return 0;
+    var listed = mine.list || {};
+    if (!Object.keys(texts).length && !Object.keys(galleries).length &&
+        !Object.keys(listed).length) return 0;
 
     scan();
     var applied = 0, lost = [];
+
+    /* Lists first. A block this puts back carries regions of its own, and a
+       text or gallery edit waiting for one of them has to find it. */
+    Object.keys(listed).forEach(function (name) {
+      var st = lists[name];
+      if (!st) { lost.push("list " + name); pendingDrop(here, "list", name); return; }
+      var saved = listed[name];
+      var want = saved.order || [];
+      want.forEach(function (id) {
+        if (st.order.indexOf(id) !== -1) return;
+        var markup = (saved.added || {})[id];
+        if (markup !== undefined) listInsert(st, id, markup, null);
+      });
+      st.order.slice().forEach(function (id) {
+        if (want.indexOf(id) === -1) listRemove(st, id);
+      });
+      listReorder(st, want.filter(function (id) { return st.at[id]; }));
+      if (listDirty(st)) applied++;
+      else pendingDrop(here, "list", name);
+    });
 
     Object.keys(texts).forEach(function (slug) {
       var r = null;
@@ -4030,8 +6387,12 @@
       /* the blob previews died with the old document, so each entry loads its
          real src from the server; a file not uploaded yet already has the
          missing-file warning, which is the right message */
+      if (mine.heads && mine.heads[slug] !== undefined) g.head = mine.heads[slug];
       g.model = imageRegion.fromExportForm(galleries[slug], g.kind);
       g.model.forEach(function (en) { en.imgId = imageRegion.nextId(); });
+      if (!g.model.length && !g.seeds.length && g.kind.mayBeEmpty) {
+        g.model.push(imageRegion.emptySlot(g.kind));
+      }
       renderGallery(g);
       if (imageRegion.dirty(g)) applied++;
       else pendingDrop(here, "gallery", slug);
@@ -4053,9 +6414,28 @@
   function pendingSyncGallery(g) {
     var path = currentPage();
     if (imageRegion.dirty(g)) {
-      pendingSet(path, "gallery", g.slug, imageRegion.exportForm(g.model, g.kind));
+      var form = imageRegion.exportForm(g.model, g.kind);
+      pendingSet(path, "gallery", g.slug, form);
+      /* What this kind writes, written here, on the page that has the kind.
+         Kept with no indent; the splice adds the target file's own. */
+      pendingSet(path, "bytes", g.slug,
+        imageRegion.serializeFor(form, "", g.kind, g.head));
+      if (g.head) pendingSet(path, "heads", g.slug, g.head);
+    } else {
+      pendingDrop(path, "gallery", g.slug);
+      pendingDrop(path, "bytes", g.slug);
+      pendingDrop(path, "heads", g.slug);
     }
-    else pendingDrop(path, "gallery", g.slug);
+  }
+
+  /* Record one list's shape. The order and what was added are enough: the
+     page the export reads supplies the bytes of everything else. */
+  function pendingSyncList(st) {
+    var path = currentPage();
+    if (listDirty(st)) {
+      pendingSet(path, "list", st.name,
+        { order: st.order, added: st.added, removed: st.removed });
+    } else pendingDrop(path, "list", st.name);
   }
 
   /* Every page this operation must write. A page with nothing changed is
@@ -4063,7 +6443,8 @@
   function changedPages() {
     var seen = {};
     var here = currentPage();
-    if (regions.some(function (r) { return r.edited; }) || gals.some(galDirty)) {
+    if (regions.some(function (r) { return r.edited; }) || gals.some(galDirty) ||
+        listsDirty()) {
       seen[here] = true;
     }
     Object.keys(staged).forEach(function (path) {
@@ -4101,8 +6482,14 @@
   var OPTIONAL_SLUGS = { "blog-highlights": 1 };
   function optionalSlug(slug) { return !!(SHARED_SLUGS[slug] || OPTIONAL_SLUGS[slug]); }
 
-  function spliceStaged(src, edits, galleries) {
+  function spliceStaged(src, edits, galleries, extras) {
     var failed = [], skipped = [];
+    var more = extras || {};
+    Object.keys(more.lists || {}).forEach(function (name) {
+      var out = spliceList(src, name, more.lists[name]);
+      if (out === null) failed.push("list " + name);
+      else src = out;
+    });
     Object.keys(edits || {}).forEach(function (slug) {
       var out = spliceRegion(src, slug, edits[slug]);
       if (out === null) (optionalSlug(slug) ? skipped : failed).push(slug);
@@ -4118,9 +6505,15 @@
       var b = a < 0 ? -1 : src.indexOf("<!--[/edit:" + slug + "]-->", a + open.length);
       if (a < 0 || b < 0) { failed.push(slug); return; }
       var im = /\n([ \t]*)</.exec(src.slice(a + open.length, b));
-      var out = spliceRegion(src, slug,
-        imageRegion.serializeFor(galleries[slug], im ? im[1] : "            ",
-                                 kindForSlug(slug)));
+      var ind = im ? im[1] : "            ";
+      /* The bytes this region's own kind wrote, when they were kept. The
+         trunk that supplies a serializer is loaded on its own page only, so
+         an export made from another page has none to ask. */
+      var kept = (more.bytes || {})[slug];
+      var out = spliceRegion(src, slug, kept !== undefined
+        ? indentBlock(kept, ind)
+        : imageRegion.serializeFor(galleries[slug], ind, kindForSlug(slug),
+                                   (more.heads || {})[slug]));
       if (out === null) failed.push(slug);
       else src = out;
     });
@@ -4138,7 +6531,8 @@
     Object.keys(waiting.text || {}).forEach(function (s) { texts[s] = waiting.text[s]; });
     return pristine(path).then(function (src) {
       if (path === currentPage()) src = spliceAllEdits(src);
-      return { path: path, text: spliceStaged(src, texts, waiting.gallery) };
+      return { path: path, text: spliceStaged(src, texts, waiting.gallery,
+        { lists: waiting.list, heads: waiting.heads, bytes: waiting.bytes }) };
     });
   }
   /* apply every outstanding copy/gallery edit to a pristine source string.
@@ -4146,6 +6540,14 @@
      wholesale, then the nested dd-gallery splice corrects the image list. */
   function spliceAllEdits(src) {
     var failed = [];
+    /* lists first: a region inside an item this adds has no markers to find
+       until the item itself is in the text */
+    Object.keys(lists).forEach(function (name) {
+      if (!listDirty(lists[name])) return;
+      var out = spliceList(src, name, lists[name]);
+      if (out === null) failed.push("list " + name);
+      else src = out;
+    });
     regions.filter(function (r) { return r.edited; }).forEach(function (r) {
       var out = spliceRegion(src, r.slug, r.current);
       if (out === null) failed.push(r.slug);
@@ -4329,7 +6731,13 @@
       imageRegion.revert(g);
       renderGallery(g);
     });
+    Object.keys(lists).forEach(function (n) {
+      if (listDirty(lists[n])) listRevert(lists[n]);
+      refreshPills(n);
+    });
     pendingDropPage(currentPage());
+    refreshRegionRows();
+    refreshImageRows();
     refreshDirtyUI(); requestReposition();
   }
 
@@ -4337,13 +6745,15 @@
     scan();
     var n = regions.filter(function (r) { return r.edited; }).length;
     var gn = gals.filter(galDirty).length;
-    if (!n && !gn) return "nothing to revert";
+    var ln = Object.keys(lists).filter(function (x) { return listDirty(lists[x]); }).length;
+    if (!n && !gn && !ln) return "nothing to revert";
     if (!window.confirm("Revert ALL edits (" + n + " text region(s), " + gn +
-        " gallery/ies) to published content? This cannot be undone.")) {
+        " gallery/ies, " + ln + " list(s)) to published content? This cannot be undone.")) {
       return "cancelled";
     }
     revertThisPage();
-    return "reverted " + n + " text region(s) and " + gn + " gallery/ies";
+    return "reverted " + n + " text region(s), " + gn + " gallery/ies and " +
+      ln + " list(s)";
   };
 
   /* edit.pending() - what is waiting, and on which pages */
@@ -4433,6 +6843,84 @@
     return "export started (check downloads)";
   };
 
+  /* ------------------------------------------------------------
+     SAVE TO REPO
+
+     Export hands the browser a download, and a download is a file the
+     person then has to find and copy. This writes the same bytes straight
+     into the repo folder instead.
+
+     It is the site's save, and it is on every page. The blog's publish is a
+     different job: it renders the month files, the feed, the sitemap and the
+     search index from the manifest, and it owns them. This writes only the
+     managed pages an edit has changed, so the two never reach for the same
+     file. A page is built by buildPage, which is what the export uses, so
+     the bytes are the export's bytes.
+
+     A refused folder falls back to the download. The pages are built by the
+     time the folder is asked for, and losing them to a refused permission
+     would be the worst of both routes.
+     ------------------------------------------------------------ */
+
+  /* What the save did, for the caller that draws it. Resolves with
+     { wrote: [path], fellBack: "reason" or null }, and rejects only when
+     there was nothing to write or a page would not splice. */
+  function saveToFolder() {
+    scan();
+    if (viewing === "before") api.after();
+    var pages = changedPages();
+    if (!pages.length) return Promise.reject(new Error("no edits to save."));
+    return Promise.all(pages.map(buildPage)).then(function (built) {
+      var enc = new TextEncoder();
+      var files = {};
+      built.forEach(function (b) { files[b.path] = enc.encode(b.text); });
+      /* the download, for a browser with no picker and for a refused folder */
+      function asZip(why) {
+        if (built.length === 1) {
+          downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
+        } else {
+          downloadFile("publish.zip", zipStore(built.map(function (b) {
+            return { name: b.path, bytes: files[b.path] };
+          })));
+        }
+        AMH.tool.markExported();
+        return { wrote: [], fellBack: why };
+      }
+      if (!hasPicker()) {
+        return asZip("This browser has no folder picker, so the pages were " +
+          "downloaded instead.");
+      }
+      var pick = repoWriteReady()
+        ? Promise.resolve(true)
+        : pickRepoWrite().then(function (handle) { return !!handle; });
+      return pick.then(function (got) {
+        if (!got) return asZip("The folder was not chosen, so the pages were downloaded instead.");
+        return writeRepo(files).then(function (written) {
+          AMH.tool.savedPages(written);
+          console.info("[site editor] written into the repo folder:\n  " +
+            written.join("\n  ") +
+            "\n\nThe files are on disk and not live yet: the commit and the push " +
+            "are still yours to make.");
+          return { wrote: written, fellBack: null };
+        });
+      }, function (err) {
+        var why = (err && err.message ? err.message : String(err));
+        console.warn("[site editor] folder write refused: " + why);
+        return asZip(why + " The pages were downloaded instead.");
+      });
+    });
+  }
+
+  /* edit.save() - write every changed page into the repo folder */
+  api.save = function () {
+    saveToFolder().then(function (out) {
+      if (out.fellBack) console.warn("[site editor] " + out.fellBack);
+    }, function (err) {
+      console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
+    });
+    return "save started";
+  };
+
   /* The composer is publish.js, and it needs the manifest and the reading
      engine as well as itself. All three are on the blog page and nowhere
      else, so say where to go rather than open something that cannot publish.
@@ -4497,7 +6985,8 @@
     console.info(
       "edit()            toggle editor mode\n" +
       "edit.list()       table of all editable regions\n" +
-      "edit.export()     download index.html with your edits\n" +
+      "edit.export()     download this page with your edits\n" +
+      "edit.save()       write every changed page into the repo folder\n" +
       "edit.blog()       open the blog composer (publishes a zip bundle)\n" +
       "edit.blog.edit(id) edit a published post (also: panel/stream buttons)\n" +
       "edit.blog.rebuild() re-render all month files with current chrome\n" +
@@ -4795,6 +7284,12 @@
   AMH.tool.pristine = function (path) { return pristine(path || currentPage()); };
   AMH.tool.buildPage = buildPage;          /* those bytes, with edits applied */
   AMH.tool.spliceRegion = spliceRegion;    /* one region, into a source string */
+  AMH.tool.listState = function (name) { return lists[name] || null; };
+  AMH.tool.listDirty = listsDirty;         /* any list, changed from the file */
+  /* A trunk says what one block of its list is; this file draws the rest. */
+  AMH.tool.listKind = function (spec) { listKinds[spec.name] = spec; };
+  AMH.tool.listPills = listPills;          /* the controls one block carries */
+  AMH.tool.listForm = listForm;            /* open one block's form, or a new one */
   AMH.tool.spliceAllEdits = spliceAllEdits; /* every outstanding edit at once */
   AMH.tool.changedPages = changedPages;    /* managed pages an export would write */
   AMH.tool.zip = zipStore;                 /* STORE zip writer */
@@ -4804,13 +7299,35 @@
   AMH.tool.error = errObj;                 /* an Error that carries a BLG code */
   AMH.tool.tagCheck = tagCheck;            /* tag-balance check before a publish */
   AMH.tool.age = age;                      /* "12 min ago" */
-  AMH.tool.toolbar = TOOLS;                /* the formatting buttons */
+  AMH.tool.toolbar = TOOLS;                /* the HTML formatting buttons */
+  AMH.tool.mdToolbar = mdToolbar;          /* the Markdown bar, for any surface */
+  AMH.tool.specialsFlyout = specialsFlyout; /* the (i) beside it */
   AMH.tool.wrap = wrapSelection;           /* both write into the open surface */
   AMH.tool.insert = insertAtCursor;
 
   /* An export is clean until an edit happens. A consumer that ships the
      outstanding edits inside its own bundle says so here. */
   AMH.tool.markExported = function () { exportedClean = true; };
+  /* These pages are now bytes on disk, so the record of them is finished.
+
+     The pending record answers one question: what has this tab applied that
+     no file holds yet. A page that was written is no longer an answer to it,
+     and leaving it there would have the panel count work that is done.
+
+     It is not the same as live. The bytes are in the repo folder; the commit
+     and the push are still the person's to make, which is what the button
+     and the console both say. */
+  AMH.tool.savedPages = function (paths) {
+    (paths || []).forEach(function (path) {
+      pendingDropPage(path);
+      /* a trunk's staged bytes are in the file too now. The publisher stages
+         the highlights block again from the entries at every publish, so
+         nothing is lost by clearing what was written. */
+      if (staged[path]) delete staged[path];
+    });
+    exportedClean = true;
+    refreshDirtyUI();
+  };
 
   /* True while the site editor owns the keyboard: a region being edited, an
      image being edited, or one of its own dialogs. A consumer with its own

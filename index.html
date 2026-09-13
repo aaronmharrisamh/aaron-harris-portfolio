@@ -76,9 +76,15 @@
        site.js creates window.AMH, the one namespace the trunks share.
 
        blog.js is not here: the blog lives on blog.html, which loads it. Each
-       page declares the trunks it needs, in the same fixed order. -->
+       page declares the trunks it needs, in the same fixed order.
+
+       markdown.js is here for the deep dives, which are written in Markdown
+       and carry their source. It reads no page and renders nothing on its
+       own, so it costs a reader one small file and nothing else. It comes
+       before tool.js, which is what asks it to render. -->
   <script defer src="site.js"></script>
   <script defer src="work.js"></script>
+  <script defer src="markdown.js"></script>
   <script defer src="tool.js"></script>
 
   <!-- Graceful degradation: without JS the reveal animations never fire, so
@@ -257,26 +263,44 @@
           <!--[/edit:work-intro]-->
         </div>
 
-        <!-- ╔══════════════════════════════════════════════════════════════════╗
-             ║  HOW TO EDIT THIS SECTION   (read me first)                        ║
-             ║                                                                    ║
-             ║  Each project is one PROJECT BLOCK, fenced by a START banner and    ║
-             ║  a matching END banner. Every field you'd change is labeled inline. ║
-             ║                                                                    ║
-             ║   • REORDER → cut a whole block (START banner down to its END        ║
-             ║       banner) and paste it above/below another. The 01, 02, 03…     ║
-             ║       number AND the left/right image side are AUTOMATIC, so        ║
-             ║       nothing else needs touching.                                 ║
-             ║   • ADD ONE → copy any whole block, paste it, then overwrite the     ║
-             ║       labeled fields (title, meta, image, copy, stats, chips).      ║
-             ║   • REMOVE  → delete a whole block (START banner to END banner).     ║
-             ║                                                                    ║
-             ║  IMAGES live in each project's GALLERY (one <img> per photo). Add   ║
-             ║  or remove a photo by adding/removing one <img> line. Arrows, dots, ║
-             ║  captions, and the lightbox build from that list automatically.     ║
-             ║  OPTIONAL bits (stats · highlights) AUTO-HIDE when left empty.      ║
-             ╚══════════════════════════════════════════════════════════════════╝ -->
+        <!-- ╔══════════════════════════════════════════════════════════════════════╗
+             ║  HOW TO EDIT THIS SECTION   (read me first)                          ║
+             ║                                                                      ║
+             ║  Each project is one PROJECT BLOCK, fenced by a START banner and     ║
+             ║  a matching END banner. Every field you'd change is labeled inline.  ║
+             ║                                                                      ║
+             ║  THE EDITOR DOES ALL OF THIS NOW. Turn it on, and each card          ║
+             ║  carries Project, Up and Down; New project sits under the list.      ║
+             ║  Duplicate and Remove are inside the form. By hand still works:      ║
+             ║                                                                      ║
+             ║   • REORDER → cut a whole item ([item:] pair and all) and paste it   ║
+             ║       above/below another. The 01, 02, 03… number AND the            ║
+             ║       left/right image side are AUTOMATIC, so nothing else needs     ║
+             ║       touching.                                                      ║
+             ║   • ADD ONE → copy a whole item, paste it, give it a NEW [item:] id  ║
+             ║       and new [edit:] slugs, then overwrite the labeled fields.      ║
+             ║   • REMOVE  → delete a whole item, its markers with it.              ║
+             ║                                                                      ║
+             ║  New project and Duplicate WRITE a card from one template, so a      ║
+             ║  comment typed inside one of those two is not kept. Everything       ║
+             ║  else - a reorder, a removal, any edit - moves your bytes and        ║
+             ║  changes none of them.                                               ║
+             ║                                                                      ║
+             ║  IMAGES live in each project's GALLERY (one <img> per photo). Add    ║
+             ║  or remove a photo by adding/removing one <img> line. Arrows, dots,  ║
+             ║  captions, and the lightbox build from that list automatically.      ║
+             ║  OPTIONAL bits (stats · highlights) AUTO-HIDE when left empty.       ║
+             ║                                                                      ║
+             ║  THE DEEP DIVE is written from Markdown. Its <template> carries the  ║
+             ║  source in a <script type="text/markdown">, and the HTML under that  ║
+             ║  is written again from the source at every Apply. Edit it in the     ║
+             ║  project's Deep dive view and not here: a hand edit to the HTML      ║
+             ║  half is lost the next time the form writes it. {gallery} places     ║
+             ║  the photographs and {note} makes the closing paragraph.             ║
+             ╚══════════════════════════════════════════════════════════════════════╝ -->
 
+        <!--[list:projects]-->
+        <!--[item:fr3]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — Forerunner 3                                        ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -337,7 +361,9 @@
             <!--[/edit:fr3-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:fr3-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:fr3-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -359,25 +385,37 @@
             <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
                  <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
             <!--[edit:fr3-deepdive]-->
-            <template class="deepdive"
-                      data-title="Forerunner 3"
-                      data-subtitle="HarrisXR LLC, in collaboration with Space Interactions Inc.">
+            <template class="deepdive">
+              <script type="text/markdown" class="dd-source">Forerunner 3 is built and maintained by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I took on the build ourselves to help get the platform off the ground: he leads the engine and systems code as senior developer, while I own the architecture, UI, design, and project direction.
+
+The rebuild was fast-tracked with AI as a genuine collaborator, not a shortcut. We shepherded Claude Code and Codex together across the codebase, migrating a pure WebGL 2.0 renderer onto BabylonJS and TypeScript and modernizing it in weeks rather than months, with everything tuned for clarity under heavy live data.
+
+{gallery}
+
+The goal is to be the definitive place to see where things are in orbit: the "Google Earth" for satellites. It renders 30,000+ tracked objects at 30+ fps on mid-range phones, holds proper SGP4 propagation and real geopositioning accuracy, and feels at home on both phone and desktop. Satellite catalogs are drawn from Space-Track.org and Jonathan's Space Report, layered over live Google Earth terrain.
+
+### What I owned
+
+- Architecture and overall system design.
+- UI and interaction design across phone and desktop.
+- 3D scene and rendering direction on BabylonJS.
+- Project management and the AI-augmented dev workflow (Claude Code and Codex).
+
+{note} Built by HarrisXR LLC in collaboration with Space Interactions Inc. Early working prototype; public demo arriving soon.</script>
+              <h2 class="dd-lead">Forerunner 3</h2>
+              <p class="dd-lead__sub">HarrisXR LLC, in collaboration with Space Interactions Inc.</p>
               <p>Forerunner 3 is built and maintained by HarrisXR LLC in collaboration with Space Interactions Inc. My brother and I took on the build ourselves to help get the platform off the ground: he leads the engine and systems code as senior developer, while I own the architecture, UI, design, and project direction.</p>
               <p>The rebuild was fast-tracked with AI as a genuine collaborator, not a shortcut. We shepherded Claude Code and Codex together across the codebase, migrating a pure WebGL 2.0 renderer onto BabylonJS and TypeScript and modernizing it in weeks rather than months, with everything tuned for clarity under heavy live data.</p>
-              <!--[edit:fr3-dd-gallery]-->
-              <div class="gallery">
-                <img src="img/seed/forerunner-02.jpg" loading="lazy" alt="Forerunner 3 live orbital scene over Google Earth terrain (placeholder)."
-                     data-caption="Live orbital scene over Google Earth terrain (placeholder image)" />
-              </div>
-              <!--[/edit:fr3-dd-gallery]-->
+              <!--[edit:fr3-dd-gallery]--><div class="gallery"><img src="img/seed/forerunner-02.jpg" loading="lazy" alt="Forerunner 3 live orbital scene over Google Earth terrain (placeholder)." data-caption="Live orbital scene over Google Earth terrain (placeholder image)"></div><!--[/edit:fr3-dd-gallery]-->
               <p>The goal is to be the definitive place to see where things are in orbit: the "Google Earth" for satellites. It renders 30,000+ tracked objects at 30+ fps on mid-range phones, holds proper SGP4 propagation and real geopositioning accuracy, and feels at home on both phone and desktop. Satellite catalogs are drawn from Space-Track.org and Jonathan's Space Report, layered over live Google Earth terrain.</p>
               <h4>What I owned</h4>
-              <ul class="dd-points">
-                <li>Architecture and overall system design.</li>
-                <li>UI and interaction design across phone and desktop.</li>
-                <li>3D scene and rendering direction on BabylonJS.</li>
-                <li>Project management and the AI-augmented dev workflow (Claude Code and Codex).</li>
+              <ul>
+              <li>Architecture and overall system design.</li>
+              <li>UI and interaction design across phone and desktop.</li>
+              <li>3D scene and rendering direction on BabylonJS.</li>
+              <li>Project management and the AI-augmented dev workflow (Claude Code and Codex).</li>
               </ul>
+
               <p class="dd-note">Built by HarrisXR LLC in collaboration with Space Interactions Inc. Early working prototype; public demo arriving soon.</p>
             </template>
             <!--[/edit:fr3-deepdive]-->
@@ -385,7 +423,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · Forerunner 3 ═══════════════╝ -->
+        <!--[/item:fr3]-->
 
+        <!--[item:fr2]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — Forerunner 2                                        ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -445,7 +485,9 @@
             <!--[/edit:fr2-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:fr2-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:fr2-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -467,26 +509,39 @@
             <!-- DEEP DIVE · title/subtitle in data-* · body is plain HTML:
                  <p>, <figure class="dd-figure">, <h4>, <ul class="dd-points">, <p class="dd-note"> -->
             <!--[edit:fr2-deepdive]-->
-            <template class="deepdive"
-                      data-title="Forerunner 2"
-                      data-subtitle="Space Interactions Inc. · Technical Lead">
+            <template class="deepdive">
+              <script type="text/markdown" class="dd-source">When we came on, Forerunner 2 was an educational-style tool built on an older codebase. I led its conversion into a modern, developer-friendly TypeScript and Rust base that we cleaned up and modernized over several weeks, and I redesigned the interface from a cartoonish look into a utilitarian, engine-inspired aesthetic. TypeScript and Rust were both new to us at the time; we leaned on early-2024 AI to ramp up fast and met the challenge.
+
+{gallery}
+
+In a later phase, brought in through HarrisXR LLC, I oversaw a full upgrade of the data-traversal engine. The system indexes more than 500,000 historical TLE records dating to the 1980s and lets you jump to any date and pull that moment's full satellite set from server to client in a couple of seconds on consumer hardware. Getting MongoDB traversal fast across a catalog that size was the core technical challenge.
+
+Low hardware requirements were a deliberate specialty. The software cold-loads in under ten seconds and runs well as host or client on light machines like a Surface Pro, and it is designed for local hosting with your own TLE data. I also wrote in-depth developer install and onboarding guides so new engineers could be productive quickly, and ran PM duties on the Jira board to keep the team aligned.
+
+### What I owned
+
+- UI/UX redesign to a modern, utilitarian look.
+- Conversion to a modern TypeScript and Rust codebase, with my brother as senior developer.
+- Data-traversal engine: TLE integration and MongoDB query performance.
+- Blender mesh work and 3D direction.
+- Developer onboarding docs and Jira project management.
+
+{note} A Space Interactions Inc. platform, now shelved. Built for government and commercial space-domain awareness.</script>
+              <h2 class="dd-lead">Forerunner 2</h2>
+              <p class="dd-lead__sub">Space Interactions Inc. · Technical Lead</p>
               <p>When we came on, Forerunner 2 was an educational-style tool built on an older codebase. I led its conversion into a modern, developer-friendly TypeScript and Rust base that we cleaned up and modernized over several weeks, and I redesigned the interface from a cartoonish look into a utilitarian, engine-inspired aesthetic. TypeScript and Rust were both new to us at the time; we leaned on early-2024 AI to ramp up fast and met the challenge.</p>
-              <!--[edit:fr2-dd-gallery]-->
-              <div class="gallery">
-                <img src="img/seed/forerunner-01.jpg" loading="lazy" alt="Forerunner 2 modern utilitarian interface (placeholder)."
-                     data-caption="The redesigned utilitarian interface (placeholder image)" />
-              </div>
-              <!--[/edit:fr2-dd-gallery]-->
+              <!--[edit:fr2-dd-gallery]--><div class="gallery"><img src="img/seed/forerunner-01.jpg" loading="lazy" alt="Forerunner 2 modern utilitarian interface (placeholder)." data-caption="The redesigned utilitarian interface (placeholder image)"></div><!--[/edit:fr2-dd-gallery]-->
               <p>In a later phase, brought in through HarrisXR LLC, I oversaw a full upgrade of the data-traversal engine. The system indexes more than 500,000 historical TLE records dating to the 1980s and lets you jump to any date and pull that moment's full satellite set from server to client in a couple of seconds on consumer hardware. Getting MongoDB traversal fast across a catalog that size was the core technical challenge.</p>
               <p>Low hardware requirements were a deliberate specialty. The software cold-loads in under ten seconds and runs well as host or client on light machines like a Surface Pro, and it is designed for local hosting with your own TLE data. I also wrote in-depth developer install and onboarding guides so new engineers could be productive quickly, and ran PM duties on the Jira board to keep the team aligned.</p>
               <h4>What I owned</h4>
-              <ul class="dd-points">
-                <li>UI/UX redesign to a modern, utilitarian look.</li>
-                <li>Conversion to a modern TypeScript and Rust codebase, with my brother as senior developer.</li>
-                <li>Data-traversal engine: TLE integration and MongoDB query performance.</li>
-                <li>Blender mesh work and 3D direction.</li>
-                <li>Developer onboarding docs and Jira project management.</li>
+              <ul>
+              <li>UI/UX redesign to a modern, utilitarian look.</li>
+              <li>Conversion to a modern TypeScript and Rust codebase, with my brother as senior developer.</li>
+              <li>Data-traversal engine: TLE integration and MongoDB query performance.</li>
+              <li>Blender mesh work and 3D direction.</li>
+              <li>Developer onboarding docs and Jira project management.</li>
               </ul>
+
               <p class="dd-note">A Space Interactions Inc. platform, now shelved. Built for government and commercial space-domain awareness.</p>
             </template>
             <!--[/edit:fr2-deepdive]-->
@@ -494,7 +549,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · Forerunner 2 ═══════════════╝ -->
+        <!--[/item:fr2]-->
 
+        <!--[item:phl]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — Phillips Lifestyles                                 ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -550,7 +607,9 @@
             <!--[/edit:phl-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:phl-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:phl-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -565,7 +624,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · Phillips Lifestyles ═══════════════╝ -->
+        <!--[/item:phl]-->
 
+        <!--[item:aiw]-->
        <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — AI-Augmented Engineering Workflow                   ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -622,7 +683,9 @@
             <!--[/edit:aiw-desc]-->
 
             <!-- OPTIONAL · stats · empty = auto-hidden · row: <span class="stat"><b>5,000+</b> customers</span> -->
+            <!--[edit:aiw-stats]-->
             <div class="stats"></div>
+            <!--[/edit:aiw-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
             <!--[edit:aiw-highlights]-->
@@ -647,7 +710,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · AI-Augmented Engineering Workflow ═══════════════╝ -->
+        <!--[/item:aiw]-->
 
+        <!--[item:cog]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — COGNiTiON Mobile Planetarium                        ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -708,7 +773,9 @@
             <!--[/edit:cog-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:cog-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:cog-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -723,7 +790,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · COGNiTiON Mobile Planetarium ═══════════════╝ -->
+        <!--[/item:cog]-->
 
+        <!--[item:cvr]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — COGNiTiON Commercial VR Program                  ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -783,7 +852,9 @@
             <!--[/edit:cvr-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:cvr-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:cvr-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -798,7 +869,9 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · COGNiTiON Commercial VR Program ═══════════════╝ -->
+        <!--[/item:cvr]-->
 
+        <!--[item:br]-->
         <!-- ╔═══════════════════════════════════════════════════════════════╗
              ║  PROJECT — Blockade Runner                                     ║
              ╚═══════════════════════════════════════════════════════════════╝ -->
@@ -852,7 +925,9 @@
             <!--[/edit:br-stats]-->
 
             <!-- OPTIONAL · highlights · empty = auto-hidden · row: <li>…</li> -->
+            <!--[edit:br-highlights]-->
             <ul class="highlights"></ul>
+            <!--[/edit:br-highlights]-->
 
             <!-- SPECS / chips (required) · edit Role and the chip tags -->
             <div class="specs">
@@ -867,6 +942,8 @@
           </div>
         </article>
         <!-- ╚═══════════════ END · Blockade Runner ═══════════════╝ -->
+        <!--[/item:br]-->
+        <!--[/list:projects]-->
 
  
 

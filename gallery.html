@@ -174,9 +174,22 @@
     <!-- ============================================================
          4. GALLERY
          ------------------------------------------------------------
-         One train per project. A train opens with its title band,
+         One train per section. A train opens with its title band,
          spanning all six columns and exactly one row tall, and then
          its tiles.
+
+         The trains are a LIST: the editor may add one, remove one and
+         reorder them, which no other region allows. Each train is one
+         item, and its id is permanent. Add or remove a train by hand
+         here and its [item:] pair goes with it.
+
+         A section is not tied to a project. It is a label, a title, a
+         year and its tiles, so a set of travel photographs is as much a
+         section as a piece of work is.
+
+         Two things in the band are written for the author and must not
+         be typed here: the number, which is a CSS counter, and the image
+         count, which the editor writes at export.
 
          The invariant the design rests on: every tile is exactly one
          row tall, and the widths in a row add to exactly six. An
@@ -198,13 +211,28 @@
     <section class="gal" id="gallery" aria-label="Project galleries">
       <div class="wrap">
 
-        <!--[edit:gal-br]-->
-        <div class="gal-train" data-project="br">
+        <!--[list:gallery]-->
+        <!--[item:f]-->
+        <!--[edit:gal-f]-->
+        <div class="gal-train" data-section="f">
           <header class="gal-train__head">
-            <span class="gal-train__n">01 / Project</span>
+            <span class="gal-train__n"><i class="gal-train__i"></i>Forerunner</span>
+            <h3 class="gal-train__title">Forerunner</h3>
+            <span class="gal-train__rule" aria-hidden="true"></span>
+            <span class="gal-train__meta"><span class="gal-train__year">2026</span><span class="gal-train__count">no images</span></span>
+          </header>
+        </div>
+        <!--[/edit:gal-f]-->
+        <!--[/item:f]-->
+
+        <!--[item:br]-->
+        <!--[edit:gal-br]-->
+        <div class="gal-train" data-section="br">
+          <header class="gal-train__head">
+            <span class="gal-train__n"><i class="gal-train__i"></i>Project</span>
             <h3 class="gal-train__title">Blockade Runner</h3>
             <span class="gal-train__rule" aria-hidden="true"></span>
-            <span class="gal-train__meta">2024 · 8 images</span>
+            <span class="gal-train__meta"><span class="gal-train__year">2024</span><span class="gal-train__count">8 images</span></span>
           </header>
           <figure class="gal-tile" data-w="2" data-priority="1" data-span="2">
             <img src="img/seed/blockade-01.jpg" alt="Bridge interior" loading="lazy" decoding="async"
@@ -248,6 +276,8 @@
           </figure>
         </div>
         <!--[/edit:gal-br]-->
+        <!--[/item:br]-->
+        <!--[/list:gallery]-->
 
       </div>
     </section>
