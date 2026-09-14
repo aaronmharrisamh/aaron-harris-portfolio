@@ -24,9 +24,11 @@
    AMH.tool.imageRegion, from section 4, is the image-region core. It is
    the largest piece of that kit.
 
-     An entry is a record of strings. The editor never holds image bytes:
-     it records "img/work/<file>" and confirms the file with a HEAD
-     request. Everything except the blob preview survives a navigation.
+     An entry is a record of strings, and "img/work/<file>" is the only
+     one a file gets. A photo added to a carousel is also held as a
+     web-ready JPG until a save writes it there; a drop on the gallery
+     page records the path and confirms it with a HEAD request. Everything
+     except the blob preview survives a navigation.
 
      A consumer registers a region and draws it:
 
@@ -56,7 +58,8 @@
    Console commands:
      edit()            toggle editor mode (badges + panel)
      edit.list()       table of every editable region
-     edit.export()     download index.html with applied edits spliced in
+     edit.export()     download the changed pages, and the photos they show
+     edit.save()       write the same files into the repo folder
      edit.before()     view the page as published (pre-edit)
      edit.after()      view the page with applied edits
      edit.revertAll()  discard every applied edit (confirm)
@@ -64,11 +67,13 @@
      edit.help()       print this list
 
    Images: galleries (project carousels + deep-dive drawers) are
-   image regions. In editor mode, drag & drop a file from img/work/
-   onto a carousel to replace the visible photo, press the (+) chip
-   to add a slot, and click the IMG## chip to caption/alt/delete.
-   Seed images (img/seed/) are placeholder filler: they show only
-   while a gallery has no real images.
+   image regions. In editor mode each carousel has three chips: (+)
+   opens ADD PHOTO, a wizard that takes a dropped or chosen file;
+   IMG## opens PHOTOS, where captions, alt text, order, replacing and
+   deleting wait for Apply; and the trash can deletes the photo on
+   screen after it asks. A file dropped on a carousel opens ADD PHOTO
+   on that file. Seed images (img/seed/) are placeholder filler: they
+   show only while a gallery has no real images.
 
    How it works: copy regions are fenced in the HTML by
    [edit:slug] ... [/edit:slug] comment pairs, each wrapping exactly
@@ -148,6 +153,10 @@
   /* Pending edits live in sessionStorage, not localStorage: they belong to one
      sitting. The tab closing is the signal that the work is abandoned. */
   var PENDING_KEY = "amh-pending-edits";
+  /* The id that marks this tab's held photos in IndexedDB. It lives where
+     the pending edits live, so it has their lifetime: a reload keeps it,
+     and a new tab starts with a new one. See PHOTOS THE EDITOR WRITES. */
+  var PHOTO_TAB_KEY = "amh-photo-tab";
   var VOID_TAGS = { area:1, base:1, br:1, col:1, embed:1, hr:1, img:1,
                     input:1, link:1, meta:1, param:1, source:1, track:1, wbr:1 };
 
@@ -320,6 +329,7 @@
       if (g.kind.drop) g.kind.drop(g);
       if (g.chip && g.chip.parentNode) g.chip.parentNode.removeChild(g.chip);
       if (g.plusChip && g.plusChip.parentNode) g.plusChip.parentNode.removeChild(g.plusChip);
+      if (g.trashChip && g.trashChip.parentNode) g.trashChip.parentNode.removeChild(g.trashChip);
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
       g.model.forEach(imageRegion.revokePreview);
       gals.splice(i, 1);
@@ -531,11 +541,12 @@
   /* ------------------------------------------------------------
      IMAGE / GALLERY EDITING
      Galleries (project cards + deep-dive drawers) are image regions.
-     Drag & drop replaces the visible photo, (+) adds an empty slot,
-     the IMG## chip opens a caption/alt modal with Delete. The editor
-     keeps a clean model per gallery ({src, alt, caption} entries) and
-     both the live preview and the export serialize from that model -
-     runtime gallery markup is never read back after the initial scan.
+     On a carousel, (+) opens the ADD PHOTO wizard, the IMG## chip opens
+     the PHOTOS box, and the trash chip deletes the photo on screen; see
+     PHOTOS, IN BOXES in section 5. The editor keeps a clean model per
+     gallery ({src, alt, caption} entries) and both the live preview and
+     the export serialize from that model - runtime gallery markup is
+     never read back after the initial scan.
      Seeds (img/seed/ paths) are placeholder filler: they show only
      while a gallery has no real images and are never editable.
      ============================================================ */
@@ -548,6 +559,18 @@
     'font-size="66" font-weight="700" text-anchor="middle">Drop image here</text>' +
     '<text x="800" y="505" fill="#969eaa" font-family="Segoe UI,Arial,sans-serif" ' +
     'font-size="34" text-anchor="middle">drag a file from img/work/ onto this frame</text></svg>');
+  /* The same frame for a carousel. A carousel takes a photo from anywhere
+     on the machine, because the editor writes the copy into img/work/, so
+     its words do not send the reader to that folder. */
+  var PHOTO_TILE = "data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900">' +
+    '<rect width="1600" height="900" fill="#101217"/>' +
+    '<rect x="30" y="30" width="1540" height="840" rx="26" fill="rgba(74,165,232,.06)" ' +
+    'stroke="#4aa5e8" stroke-width="5" stroke-dasharray="30 20"/>' +
+    '<text x="800" y="430" fill="#6fbcf2" font-family="Segoe UI,Arial,sans-serif" ' +
+    'font-size="66" font-weight="700" text-anchor="middle">Drop a photo here</text>' +
+    '<text x="800" y="505" fill="#969eaa" font-family="Segoe UI,Arial,sans-serif" ' +
+    'font-size="34" text-anchor="middle">or press + to choose one</text></svg>');
 
   /* ------------------------------------------------------------
      THE CORE
@@ -562,11 +585,15 @@
        empty    true for an unfilled (+) slot
        missing  null while the HEAD check runs, then true or false
        preview  a blob: URL, valid for this document only, never exported
+       photo    the photo the editor holds for src, until a save writes it
 
-     The editor never holds image bytes. It records a path, and a HEAD
-     request confirms the file is on the server; copying the file into
-     img/work/ stays a manual step. Every field except preview survives a
-     page navigation, which is what carries an edit across pages.
+     Two ways in. A dropped file on the gallery page records a path, and a
+     HEAD request confirms the file is on the server; copying it into
+     img/work/ is the reader's step. A photo added to a carousel is held
+     by the editor instead (see PHOTOS THE EDITOR WRITES), and a save
+     writes it. Every field except preview and photo survives a page
+     navigation, which is what carries an edit across pages; the held
+     photo comes back from its own store.
 
      The core owns the model and the export form. A consumer owns its DOM:
      how many images it shows at once is not the core's business.
@@ -660,6 +687,29 @@
       return en;
     },
 
+    /* Build an entry from a photo the editor holds.
+
+       Nothing is left to check. The editor has the bytes that are written
+       to src, so the entry is not missing and needs no HEAD request. carry
+       is taken as it stands: its caption, its alt and a kind's own fields,
+       so an alt the reader emptied stays empty. With no carry the alt is
+       the file's name, as it is for a drop. */
+    fromPhoto: function (photo, carry, kind) {
+      var en = {
+        src: photo.src,
+        alt: carry ? String(carry.alt || "") : imageRegion.humanize(photo.from),
+        caption: carry ? String(carry.caption || "") : "",
+        preview: photo.url, empty: false, missing: false, isSeed: false,
+        imgId: imageRegion.nextId(), orig: null, photo: photo
+      };
+      var defaults = (kind && kind.defaults) || {};
+      imageRegion.fieldsOf(kind).forEach(function (k) {
+        en[k] = (carry && carry[k] !== undefined) ? carry[k] : defaults[k];
+      });
+      en.orig = { caption: en.caption, alt: en.alt };
+      return en;
+    },
+
     /* An unfilled slot: a drop target that is never exported. It carries the
        kind's defaults so the tile it becomes starts where a new tile should,
        rather than with nothing. */
@@ -701,6 +751,10 @@
     /* Release a dropped file's preview URL. Deferred, because an <img> or an
        open lightbox may still be painting it after the entry is replaced. */
     revokePreview: function (en) {
+      /* A held photo's URL belongs to the photo, not to the entry. Another
+         entry or a box may be showing it, and the store lets it go when
+         nothing does. */
+      if (en && en.photo) return;
       if (en && en.preview && en.preview.indexOf("blob:") === 0) {
         var url = en.preview;
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
@@ -776,7 +830,7 @@
         head: spec.kind.readHead ? spec.kind.readHead(spec.el) : null,
         headOriginal: null,
         live: spec.kind.deferLive ? null : spec.el,
-        chip: null, plusChip: null, observer: null
+        chip: null, plusChip: null, trashChip: null, observer: null
       };
       r.original = imageRegion.exportForm(r.model, r.kind);
       r.headOriginal = JSON.stringify(r.head || null);
@@ -848,6 +902,10 @@
        dropWhenEmpty  remove the live container once the model empties
        seedFallback   an empty export falls back to the seed images
        mayBeEmpty     exporting nothing is legitimate, so do not warn
+       photoBoxes     (+), IMG and a drop open the photo boxes, and the
+                      region gets a trash chip. Without it they open the
+                      image modal, which the gallery page's tiles still use.
+       emptyTile      the picture an unfilled slot shows, EMPTY_TILE if none
        rowNote        suffix for the region's rows in the panel
        modalNote      suffix for the image modal heading
        lastImageNote(r) warning shown before the last image is deleted
@@ -871,6 +929,8 @@
       dropWhenEmpty: false,
       seedFallback: true,
       mayBeEmpty: false,
+      photoBoxes: true,
+      emptyTile: PHOTO_TILE,
       rowNote: "",
       modalNote: "",
       lastImageNote: function (r) {
@@ -892,6 +952,8 @@
       dropWhenEmpty: true,
       seedFallback: false,
       mayBeEmpty: true,
+      photoBoxes: true,
+      emptyTile: PHOTO_TILE,
       rowNote: ' <span class="ced-hidden">(dd)</span>',
       modalNote: ' <span class="ced-hidden" style="color:var(--dim);font-size:.7rem">(deep-dive gallery)</span>',
       lastImageNote: function () {
@@ -947,6 +1009,327 @@
     return null;
   };
 
+  /* ------------------------------------------------------------
+     PHOTOS THE EDITOR WRITES
+
+     A carousel does not ask the reader to copy a file by hand. A photo
+     added to one is decoded, made web-ready and held here, and a save
+     writes it into img/work/ beside the page that shows it.
+
+     WEB-READY IS ONE RULE. 1600px on the long edge and a JPG at 0.85,
+     which is the rule img/work/README.txt sets and the blog composer
+     follows. A smaller photo is never made larger.
+
+     EVERY PHOTO IS ENCODED AGAIN, a JPG that already fits included. A
+     photo from a phone carries where it was taken in its metadata, and a
+     copy drawn through a canvas carries none of that onto a public site.
+
+     A NAME IN USE IS NEVER TAKEN. Writing it would change a photo that
+     another carousel shows, so a second "hangar.png" becomes hangar-2.jpg.
+
+     A held photo lives in memory, and in IndexedDB for this tab, so a
+     reload or a walk to another page does not lose it. It stops being
+     held when a save writes it, or when no edit shows it any more.
+     ------------------------------------------------------------ */
+  var PHOTO_TYPES = { "image/jpeg": 1, "image/png": 1, "image/webp": 1 };
+  var PHOTO_ACCEPT = "image/jpeg,image/png,image/webp";
+  var PHOTO_DIR = "img/work/";
+  var PHOTO_EDGE = 1600;
+  var PHOTO_QUALITY = 0.85;
+  var PHOTO_MAX_MB = 40;
+  var PHOTO_MAX_SIDE = 12000;
+  /* A JPG has no transparent pixel, so one is painted on the page's own
+     ground, which is what the blog composer does too. */
+  var PHOTO_GROUND = "#16181d";
+  var PHOTO_DB = "amh-photos", PHOTO_STORE = "photos";
+  /* A record another tab left is kept this long, in case that tab is
+     still open with the edit that shows it. */
+  var PHOTO_STALE_MS = 24 * 60 * 60 * 1000;
+
+  var photos = {};          /* src -> a photo an Add or an Apply put on a page */
+  var photoHeld = {};       /* src -> true while a box holds a photo it has not added */
+  var photoTabId = "";
+
+  /* "Blockade Runner_01.PNG" -> "blockade-runner-01" */
+  function photoBase(fileName) {
+    return String(fileName || "").replace(/\.[a-z0-9]+$/i, "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "photo";
+  }
+
+  /* Every src an edit shows: the regions on this page, and the edits
+     waiting for every page. */
+  function photoUsed() {
+    var used = {};
+    gals.forEach(function (g) {
+      g.model.forEach(function (en) { if (en.src) used[en.src] = true; });
+    });
+    var all = pendingRead();
+    Object.keys(all).forEach(function (path) {
+      var waiting = (all[path] || {}).gallery || {};
+      Object.keys(waiting).forEach(function (slug) {
+        (waiting[slug] || []).forEach(function (o) { if (o && o.src) used[o.src] = true; });
+      });
+    });
+    return used;
+  }
+
+  /* Is a file there already? The repo folder answers when it is in hand,
+     and the server does otherwise. A page opened from disk with no folder
+     can ask neither, and the name in use by an edit is still refused. */
+  function photoOnDisk(src) {
+    if (repoDir) {
+      var parts = src.split("/");
+      var name = parts.pop();
+      var dir = Promise.resolve(repoDir);
+      parts.forEach(function (seg) {
+        dir = dir.then(function (d) { return d.getDirectoryHandle(seg); });
+      });
+      return dir.then(function (d) { return d.getFileHandle(name); })
+        .then(function () { return true; }, function () { return false; });
+    }
+    if (onDisk()) return Promise.resolve(false);
+    return fetch(src, { method: "HEAD", cache: "no-store" })
+      .then(function (res) { return res.ok; }, function () { return false; });
+  }
+
+  /* The first name nothing uses: base.jpg, then base-2.jpg, base-3.jpg.
+     It is held the moment it is found, so two photos prepared at once can
+     never both be given it. */
+  function photoFreeName(base) {
+    function tryN(n) {
+      /* a run of a hundred taken names ends in one that cannot be taken */
+      var tail = n > 99 ? "-" + Date.now().toString(36) : (n > 1 ? "-" + n : "");
+      var src = PHOTO_DIR + base + tail + ".jpg";
+      if (n <= 99 && (photos[src] || photoHeld[src] || photoUsed()[src])) return tryN(n + 1);
+      return photoOnDisk(src).then(function (there) {
+        if (n <= 99 && (there || photos[src] || photoHeld[src])) return tryN(n + 1);
+        photoHeld[src] = true;
+        return src;
+      });
+    }
+    return tryN(1);
+  }
+
+  function photoDecode(file) {
+    if (window.createImageBitmap) {
+      return createImageBitmap(file, { imageOrientation: "from-image" })
+        .catch(function () { return createImageBitmap(file); });
+    }
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function () { URL.revokeObjectURL(url); resolve(im); };
+      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("decode failed")); };
+      im.src = url;
+    });
+  }
+
+  function photoEncode(pic) {
+    var scale = Math.min(1, PHOTO_EDGE / Math.max(pic.width, pic.height));
+    var w = Math.max(1, Math.round(pic.width * scale));
+    var h = Math.max(1, Math.round(pic.height * scale));
+    var cv = doc.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    var cx = cv.getContext("2d");
+    cx.fillStyle = PHOTO_GROUND;
+    cx.fillRect(0, 0, w, h);
+    cx.imageSmoothingQuality = "high";
+    cx.drawImage(pic, 0, 0, w, h);
+    if (pic.close) pic.close();
+    return new Promise(function (resolve, reject) {
+      cv.toBlob(function (blob) {
+        if (blob) resolve({ blob: blob, w: w, h: h });
+        else reject(new Error("encode failed"));
+      }, "image/jpeg", PHOTO_QUALITY);
+    });
+  }
+
+  /* Make one file into a photo the editor can hold. Resolves the photo:
+
+       src    the img/work/ path it is written to, never one in use
+       blob   the web-ready JPG
+       url    a blob: URL of that JPG, for every preview of it
+       w, h   its size after the rule above
+       size   its bytes
+       from   the name the reader's file had
+       saved  true once a save has written it
+
+     Rejects with an Error whose message a box shows as it is. The name
+     stays held until the photo is kept or let go. */
+  function photoIntake(file) {
+    if (!file) return Promise.reject(new Error("No file was given."));
+    var called = '"' + (file.name || "That file") + '"';
+    if (!PHOTO_TYPES[file.type]) {
+      return Promise.reject(new Error("This editor reads JPG, PNG and WebP photos. " +
+        called + " is not one of them."));
+    }
+    if (file.size > PHOTO_MAX_MB * 1024 * 1024) {
+      return Promise.reject(new Error(called + " is over " + PHOTO_MAX_MB + " MB."));
+    }
+    return photoDecode(file).then(function (pic) {
+      if (Math.max(pic.width, pic.height) > PHOTO_MAX_SIDE) {
+        if (pic.close) pic.close();
+        throw new Error(called + " is over " + PHOTO_MAX_SIDE + "px on a side.");
+      }
+      return photoEncode(pic);
+    }, function () {
+      throw new Error(called + " could not be read as a photo.");
+    }).then(function (made) {
+      return photoFreeName(photoBase(file.name)).then(function (src) {
+        return { src: src, blob: made.blob, url: URL.createObjectURL(made.blob),
+                 w: made.w, h: made.h, size: made.blob.size, from: file.name || "photo",
+                 saved: false };
+      });
+    });
+  }
+
+  /* "1600 x 900 · 212 KB" */
+  function photoSize(photo) {
+    return photo.w + " x " + photo.h + " · " +
+      Math.max(1, Math.round(photo.size / 1024)) + " KB";
+  }
+
+  /* The id this tab's records carry, made once and kept for the tab. A
+     browser that refuses sessionStorage gets one for the page load. */
+  function photoTab() {
+    if (photoTabId) return photoTabId;
+    try { photoTabId = window.sessionStorage.getItem(PHOTO_TAB_KEY) || ""; } catch (err) {}
+    if (!photoTabId) {
+      photoTabId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try { window.sessionStorage.setItem(PHOTO_TAB_KEY, photoTabId); } catch (err) {}
+    }
+    return photoTabId;
+  }
+  function photoKey(src) { return photoTab() + "|" + src; }
+  function photoRevokeLater(url) {
+    /* deferred for the reason revokePreview gives: an <img> may still be
+       painting it */
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  }
+
+  /* A photo is on a page now, so it is held until a save writes it. */
+  function photoKeep(photo) {
+    if (!photo || photos[photo.src] === photo) return;
+    photos[photo.src] = photo;
+    delete photoHeld[photo.src];
+    idbDo("readwrite", function (st) {
+      return st.put({ src: photo.src, blob: photo.blob, w: photo.w, h: photo.h,
+                      size: photo.size, from: photo.from, tab: photoTab(),
+                      at: Date.now() }, photoKey(photo.src));
+    }, PHOTO_DB, PHOTO_STORE).then(null, function (err) {
+      console.warn("[site editor] " + photo.src + " is held on this page only (" +
+        (err && err.message ? err.message : "no storage") + "). Save before you " +
+        "leave the page, or the photo has to be added again.");
+    });
+  }
+
+  /* A box let a prepared photo go without adding it. A kept photo is not
+     this function's to release: the store lets that go. */
+  function photoLetGo(photo) {
+    if (!photo || photos[photo.src] === photo) return;
+    delete photoHeld[photo.src];
+    photoRevokeLater(photo.url);
+  }
+
+  /* This tab's held photos, back from IndexedDB after a reload or a walk
+     from another page. Never rejects: a browser that keeps nothing costs
+     the reader those photos, not an error. */
+  function photoRecall() {
+    return idbDo("readonly", function (st) { return st.getAll(); }, PHOTO_DB, PHOTO_STORE)
+      .then(function (rows) {
+        (rows || []).forEach(function (row) {
+          if (!row || row.tab !== photoTab() || photos[row.src]) return;
+          photos[row.src] = { src: row.src, blob: row.blob, url: URL.createObjectURL(row.blob),
+                              w: row.w, h: row.h, size: row.size, from: row.from,
+                              saved: false };
+        });
+      }, function () {});
+  }
+
+  /* Give a region's entries the photos this tab holds for them. An entry
+     rebuilt from the pending store is strings, and its preview would ask
+     the server for a file that is not there yet. True when one changed. */
+  function photoLink(g) {
+    var changed = false;
+    g.model.forEach(function (en) {
+      var photo = photos[en.src];
+      if (!photo || en.photo === photo) return;
+      en.photo = photo;
+      en.preview = photo.url;
+      en.missing = false;
+      changed = true;
+    });
+    return changed;
+  }
+
+  /* Stop holding every photo no edit shows. A record another tab left is
+     removed only once it is old enough that the tab is surely closed. */
+  function photoPrune() {
+    var used = photoUsed();
+    Object.keys(photos).forEach(function (src) {
+      if (used[src]) return;
+      photoRevokeLater(photos[src].url);
+      delete photos[src];
+    });
+    var now = Date.now(), tab = photoTab();
+    idbDo("readwrite", function (st) {
+      var walk = st.openCursor();
+      walk.onsuccess = function () {
+        var at = walk.result;
+        if (!at) return;
+        var row = at.value || {};
+        var gone = row.tab === tab ? !used[row.src] : now - (row.at || 0) > PHOTO_STALE_MS;
+        if (gone) at.delete();
+        at.continue();
+      };
+      return null;
+    }, PHOTO_DB, PHOTO_STORE).then(null, function () {});
+  }
+
+  /* The held photos these pages show, as the bytes a save or a bundle
+     writes: { "img/work/x.jpg": Uint8Array }. A photo a save has already
+     written is not written again. */
+  function photoFiles(paths) {
+    var want = {};
+    var here = currentPage();
+    var all = pendingRead();
+    (paths || []).forEach(function (path) {
+      if (path === here) {
+        gals.forEach(function (g) {
+          g.model.forEach(function (en) { if (en.src) want[en.src] = true; });
+        });
+      }
+      var waiting = (all[path] || {}).gallery || {};
+      Object.keys(waiting).forEach(function (slug) {
+        (waiting[slug] || []).forEach(function (o) { if (o && o.src) want[o.src] = true; });
+      });
+    });
+    return photoRecall().then(function () {
+      var out = {};
+      return Promise.all(Object.keys(want).filter(function (src) {
+        return photos[src] && !photos[src].saved;
+      }).map(function (src) {
+        return photos[src].blob.arrayBuffer().then(function (buf) {
+          out[src] = new Uint8Array(buf);
+        });
+      })).then(function () { return out; });
+    });
+  }
+
+  /* A save wrote these paths. A photo among them is on disk now, so it is
+     not written again and the tab no longer needs a copy. Its URL stays,
+     because the carousel on screen is still painting it. */
+  function photoSaved(paths) {
+    (paths || []).forEach(function (path) {
+      var photo = photos[path];
+      if (!photo) return;
+      photo.saved = true;
+      idbDo("readwrite", function (st) { return st.delete(photoKey(path)); },
+        PHOTO_DB, PHOTO_STORE).then(null, function () {});
+    });
+  }
+
 
 
   /* ------------------------------------------------------------
@@ -972,11 +1355,11 @@
     return 0;
   }
 
-  function setGalleryImgs(el, entries, preview) {
+  function setGalleryImgs(el, entries, preview, tile) {
     el.innerHTML = "";
     entries.forEach(function (en) {
       var im = doc.createElement("img");
-      im.src = en.empty ? EMPTY_TILE : ((preview && en.preview) ? en.preview : en.src);
+      im.src = en.empty ? (tile || EMPTY_TILE) : ((preview && en.preview) ? en.preview : en.src);
       im.alt = en.alt || "";
       im.setAttribute("loading", "lazy");
       if (en.caption) im.setAttribute("data-caption", en.caption);
@@ -1014,7 +1397,7 @@
         if (live.parentNode) live.parentNode.removeChild(live);
         g.live = null;
       } else {
-        setGalleryImgs(live, list, true);
+        setGalleryImgs(live, list, true, g.kind.emptyTile);
         live.classList.remove("is-ready", "gallery--single");
         if (AMH.work) AMH.work.buildGalleries();
         if (showIndex > 0) {
@@ -1051,7 +1434,12 @@
         var files = Array.prototype.filter.call(
           (e.dataTransfer && e.dataTransfer.files) || [],
           function (f) { return /^image\//.test(f.type); });
-        if (files.length) handleDrop(g, files);
+        if (!files.length) return;
+        /* A drop adds a photo, through the same three steps as (+). It does
+           not replace the photo on screen: Replace in PHOTOS does that, on
+           a row that names the photo it means. */
+        if (g.kind.photoBoxes) addPhotoBox(g, { file: files[0] });
+        else handleDrop(g, files);
       });
     }
     var stage = g.live.querySelector(".gallery__stage");
@@ -1105,10 +1493,19 @@
     if (!g.chip) return;
     var en = displayedEntries(g)[activeIndex(g)] || null;
     g.chip.textContent = !en ? "IMG" : (en.empty ? "DROP" : (en.isSeed ? "SEED" : en.imgId));
-    g.chip.title = g.slug + (en && en.isSeed ? " - placeholder; drop a real image to replace" :
-      (en && en.empty ? " - empty slot; drop an image here" : ""));
-    g.chip.classList.toggle("ced-chip--seed", !!(en && en.isSeed));
+    if (g.kind.photoBoxes) {
+      /* every state opens the same box, so a seed chip is a live chip */
+      g.chip.title = "Edit the photos in this carousel";
+    } else {
+      g.chip.title = g.slug + (en && en.isSeed ? " - placeholder; drop a real image to replace" :
+        (en && en.empty ? " - empty slot; drop an image here" : ""));
+      g.chip.classList.toggle("ced-chip--seed", !!(en && en.isSeed));
+    }
     g.chip.classList.toggle("ced-edited", galDirty(g));
+    /* the photo on screen changed, and the trash can follows it */
+    if (g.trashChip && g.chip.style.display !== "none") {
+      g.trashChip.style.display = trashable(g) ? "" : "none";
+    }
   }
 
   /* One row per text region, drawn again whenever the set of them changes.
@@ -1154,7 +1551,8 @@
           '<span class="ced-dot"></span>';
         row.addEventListener("click", function () {
           revealGallery(g, i);
-          if (openable) openImageModal(g, i);
+          if (g.kind.photoBoxes) photosBox(g, i);
+          else if (openable) openImageModal(g, i);
         });
         imgRowsEl.appendChild(row);
       }
@@ -1342,6 +1740,27 @@
     "color:var(--bg-deep);transition:background .2s,border-color .2s;}" +
     ".ced-panel__foot .ced-btn:hover{border-color:var(--accent-bright);" +
     "background:var(--accent-bright);color:var(--bg-deep);}" +
+    /* SAVE IS YELLOW. The panel's banner says "unsaved change" in yellow, so
+       the one button that settles it wears the same colour, and a reader
+       finds it from the banner without reading the row. Every other move
+       stays blue. Same specificity as the rule above and later, so it wins. */
+    ".ced-panel__foot .ced-btn--save{border-color:var(--c-yellow);background:var(--c-yellow);" +
+    "color:var(--bg-deep);}" +
+    ".ced-panel__foot .ced-btn--save:hover{border-color:var(--c-yellow);background:var(--c-yellow);" +
+    "color:var(--bg-deep);filter:brightness(1.08);box-shadow:0 0 0 3px rgba(242,193,78,.28);}" +
+    ".ced-panel__foot .ced-btn--save:focus-visible{outline:2px solid var(--c-yellow);outline-offset:2px;}" +
+    ".ced-panel__foot .ced-btn--save:disabled," +
+    ".ced-panel__foot .ced-btn--save:disabled:hover{border-color:var(--c-yellow);" +
+    "background:var(--c-yellow);filter:none;box-shadow:none;}" +
+    /* the success box: the head's own side padding, so the text lines up
+       under the title, and the files it wrote, one chip each */
+    ".ced-saved__body{display:grid;gap:.55rem;padding:.8rem 1.1rem .9rem;}" +
+    ".ced-saved__body p{margin:0;line-height:1.55;}" +
+    ".ced-saved__files{display:flex;flex-wrap:wrap;gap:.3rem;margin:.1rem 0 .2rem;padding:0;list-style:none;}" +
+    ".ced-saved__file{font:12px Consolas,'Courier New',monospace;padding:.18rem .5rem;" +
+    "border:1px solid var(--line);border-radius:6px;color:var(--text);background:var(--bg-deep);}" +
+    ".ced-saved__tick{color:var(--c-yellow);}" +
+    ".ced-saved__tick .ced-tick{width:14px;height:14px;vertical-align:-2px;}" +
     /* THE ONE MOVE OF A DIALOG, FILLED.
        The scope is the button row and not the class. The accent class also
        marks the primary control of a repeated image card in the composer,
@@ -1505,6 +1924,10 @@
     /* image / gallery editing */
     ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
     ".ced-chip--plus{font-size:14px;font-weight:800;}" +
+    ".ced-chip--trash svg{width:13px;height:13px;display:block;}" +
+    /* red under the pointer only: at rest it is one of the carousel's chips,
+       and orange already means "edited" */
+    ".ced-chip--trash:hover{border-color:#e5534b;color:#e5534b;}" +
     ".ced-chip--seed{border-color:var(--dim);color:var(--muted);box-shadow:none;cursor:default;}" +
     ".ced-dropping{outline:3px dashed var(--accent);outline-offset:-3px;border-radius:10px;}" +
     ".ced-modal__alt{display:flex;align-items:center;gap:.6rem;margin:.5rem 1.1rem 0;}" +
@@ -1584,16 +2007,14 @@
     ".ced-tab.on{color:var(--text);border-bottom-color:var(--accent);}" +
     ".ced-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}" +
     ".ced-empty{margin:.2rem 0;color:var(--text-soft);font-size:.86rem;line-height:1.6;}" +
-    ".ced-drop{margin:0 0 .2rem;}" +
-    ".ced-imglist{list-style:none;margin:0;padding:0;display:grid;gap:.3rem;}" +
-    ".ced-imglist li{display:flex;align-items:center;gap:.5rem;min-width:0;" +
-    "font:12px Consolas,'Courier New',monospace;color:var(--text-soft);}" +
-    ".ced-imglist code{color:var(--accent-bright);white-space:nowrap;overflow:hidden;" +
-    "text-overflow:ellipsis;}" +
-    ".ced-imglist__cap{color:var(--dim);min-width:0;overflow:hidden;" +
-    "text-overflow:ellipsis;white-space:nowrap;margin-left:auto;}" +
-    ".ced-chip--inline{position:static;transform:none;flex:none;}" +
-    ".ced-chip--inline:hover{transform:none;}" +
+    /* a carousel's photos in a view of the form: a strip to look at, and a
+       compact zone and two buttons that open the photo boxes */
+    ".ced-photoview{display:grid;gap:.5rem;}" +
+    ".ced-strip{display:flex;flex-wrap:wrap;gap:.35rem;list-style:none;margin:0;padding:0;}" +
+    ".ced-strip img{display:block;width:96px;aspect-ratio:16/9;object-fit:cover;" +
+    "border-radius:6px;border:1px solid var(--line);background:var(--bg-deep);}" +
+    ".ced-handoff__zone.ced-drop{margin:0;padding:.75rem 1rem;}" +
+    ".ced-btnrow{display:flex;flex-wrap:wrap;gap:.4rem;}" +
     /* A button that belongs to a view rather than to the box's button row
        sits where it was put, at the size of the row's own buttons. */
     ".ced-btn--own{justify-self:start;}" +
@@ -1606,6 +2027,81 @@
     /* the head's tag is blue on every other box; a list's own form is
        yellow, for the same reason its pill is */
     ".ced-modal__head .ced-b--y{color:var(--c-yellow);}" +
+    ".ced-modal__head .ced-b--o{color:var(--c-orange);}" +
+    /* THE ASK. One question, a picture of what it is about, and two ways
+       out. The move is filled orange when it deletes or discards. */
+    ".ced-ask{width:min(560px,92vw);}" +
+    ".ced-ask__body{display:flex;gap:.9rem;align-items:flex-start;padding:.9rem 1.1rem .8rem;}" +
+    ".ced-ask__thumb{flex:none;width:140px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;" +
+    "border:1px solid var(--line);background:var(--bg-deep);}" +
+    ".ced-ask__text{min-width:0;display:grid;gap:.4rem;align-content:start;}" +
+    ".ced-ask__text p{margin:0;font-size:.9rem;line-height:1.5;max-width:var(--ced-read);}" +
+    ".ced-ask__text code{font:12px Consolas,'Courier New',monospace;color:var(--accent-bright);" +
+    "overflow-wrap:anywhere;}" +
+    ".ced-modal__btns .ced-btn--fill-danger{border-color:var(--c-orange);background:var(--c-orange);" +
+    "color:var(--bg-deep);transition:filter .2s;}" +
+    ".ced-modal__btns .ced-btn--fill-danger:hover{filter:brightness(1.1);color:var(--bg-deep);}" +
+    "@media (max-width:480px){.ced-ask__body{flex-direction:column;}.ced-ask__thumb{width:100%;}}" +
+    /* ADD PHOTO. The steps sit under the head, and the body scrolls inside
+       the held box, so the buttons stay in one place on every step. */
+    ".ced-addphoto{width:min(760px,92vw);}" +
+    ".ced-steps{display:flex;flex-wrap:wrap;gap:.35rem;margin:0;padding:.6rem 1.1rem 0;list-style:none;}" +
+    ".ced-steps li{font:700 9.5px/1 Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;" +
+    "border-radius:4px;padding:4px 7px;border:1px solid var(--line);color:var(--dim);}" +
+    ".ced-steps li.is-now{border-color:var(--accent);color:var(--accent-bright);}" +
+    ".ced-steps li.is-done{border-color:rgba(74,165,232,.3);color:var(--muted);}" +
+    ".ced-addphoto__body{flex:1 1 auto;min-height:0;overflow:auto;padding:.8rem 1.1rem .4rem;}" +
+    ".ced-addphoto__pane{display:grid;gap:.7rem;}" +
+    ".ced-addphoto__pane[hidden]{display:none;}" +
+    ".ced-addphoto .ced-handoff__zone{margin:0;}" +
+    ".ced-choose{justify-self:start;border-color:var(--accent);color:var(--accent-bright);}" +
+    ".ced-describe{display:grid;grid-template-columns:minmax(0,16rem) minmax(0,1fr);gap:1rem;" +
+    "align-items:start;}" +
+    ".ced-describe__pic{margin:0;display:grid;gap:.3rem;}" +
+    ".ced-describe__pic img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;" +
+    "background:var(--bg-deep);border:1px solid var(--line);border-radius:8px;}" +
+    ".ced-describe__size{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
+    ".ced-describe__fields{display:grid;gap:.6rem;min-width:0;}" +
+    ".ced-place{display:flex;gap:.4rem;overflow-x:auto;padding:.1rem .1rem .4rem;}" +
+    ".ced-place__pic{flex:none;position:relative;width:112px;aspect-ratio:16/9;border-radius:6px;" +
+    "border:1px solid var(--line);overflow:hidden;background:var(--bg-deep);}" +
+    ".ced-place__pic img{display:block;width:100%;height:100%;object-fit:cover;}" +
+    ".ced-place__pic.is-new{border:2px solid var(--c-yellow);}" +
+    ".ced-place__pic.is-new::after{content:'NEW';position:absolute;left:4px;top:4px;" +
+    "font:700 8.5px/1 Consolas,monospace;padding:2px 4px;border-radius:3px;" +
+    "background:var(--c-yellow);color:var(--bg-deep);}" +
+    ".ced-place__moves{display:flex;align-items:center;gap:.5rem;}" +
+    ".ced-place__moves[hidden]{display:none;}" +
+    ".ced-place__move{display:inline-flex;align-items:center;gap:.3rem;}" +
+    ".ced-place__move svg{width:13px;height:13px;}" +
+    ".ced-place__at{font-size:.74rem;color:var(--muted);min-width:6.5rem;text-align:center;}" +
+    ".ced-hint{margin:0;font-size:.74rem;line-height:1.5;color:var(--muted);max-width:var(--ced-read);}" +
+    ".ced-hint code{font:12px Consolas,'Courier New',monospace;color:var(--accent-bright);}" +
+    "@media (max-width:560px){.ced-describe{grid-template-columns:1fr;}}" +
+    /* PHOTOS. A row for each photo: its number, its picture, its words and
+       its moves. The list scrolls, so the head and the buttons hold still. */
+    ".ced-photos{width:min(880px,94vw);}" +
+    ".ced-photos__body{flex:1 1 auto;min-height:0;overflow:auto;padding:.8rem 1.1rem .4rem;}" +
+    ".ced-photos__list{list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}" +
+    ".ced-photo{display:grid;grid-template-columns:auto 132px minmax(0,1fr) auto;gap:.75rem;" +
+    "align-items:start;padding:.6rem;border:1px solid var(--line);border-radius:10px;" +
+    "background:var(--bg-deep);}" +
+    ".ced-photo__n{font:700 11px/1 Consolas,monospace;color:var(--dim);padding-top:.4rem;}" +
+    ".ced-photo__pic{display:block;width:132px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;" +
+    "border:1px solid var(--line);background:var(--panel);}" +
+    ".ced-photo__fields{display:grid;gap:.4rem;min-width:0;}" +
+    ".ced-photo__file{font:11px Consolas,'Courier New',monospace;color:var(--dim);" +
+    "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+    ".ced-photo__tag{margin-left:.4rem;font:700 8.5px/1 Consolas,monospace;padding:2px 4px;" +
+    "border-radius:3px;background:var(--c-yellow);color:var(--bg-deep);vertical-align:1px;}" +
+    ".ced-photo__acts{display:flex;justify-content:flex-end;gap:.3rem;}" +
+    ".ced-photo__acts .ced-tool--icon svg{width:14px;height:14px;display:block;}" +
+    ".ced-photo__acts .ced-tool:disabled{opacity:.35;cursor:default;}" +
+    ".ced-photo__acts .ced-tool:disabled:hover{border-color:var(--line);color:var(--text-soft);}" +
+    ".ced-tool--danger:hover{border-color:#e5534b;color:#e5534b;}" +
+    "@media (max-width:640px){.ced-photo{grid-template-columns:96px minmax(0,1fr);}" +
+    ".ced-photo__n{display:none;}.ced-photo__pic{width:96px;}" +
+    ".ced-photo__acts{grid-column:1 / -1;justify-content:flex-start;flex-wrap:wrap;}}" +
     /* THE MARKDOWN TOOLBAR.
        The sprite is in the page and drawn from, never seen. A name is kept
        for a screen reader on every icon button, because a mark says nothing
@@ -2086,12 +2582,22 @@
     });
     gals.forEach(function (g, i) {
       if (!g.chip) return;
-      if (!gRects[i]) { g.chip.style.display = "none"; g.plusChip.style.display = "none"; return; }
+      var trash = g.trashChip;
+      if (!gRects[i]) {
+        g.chip.style.display = "none"; g.plusChip.style.display = "none";
+        if (trash) trash.style.display = "none";
+        return;
+      }
       g.chip.style.display = ""; g.plusChip.style.display = "";
       g.chip.style.left = (gRects[i].left + sx + 16) + "px";
       g.chip.style.top = (gRects[i].top + sy) + "px";
       g.plusChip.style.left = (gRects[i].left + sx + 58) + "px";
       g.plusChip.style.top = (gRects[i].top + sy) + "px";
+      if (trash) {
+        trash.style.left = (gRects[i].left + sx + 92) + "px";
+        trash.style.top = (gRects[i].top + sy) + "px";
+        trash.style.display = trashable(g) ? "" : "none";
+      }
     });
   }
   var repoTimer = 0;
@@ -2155,6 +2661,13 @@
   var CED_TICK = '<svg class="ced-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="m5 13 5 5L20 7" /></svg>';
+  /* The trash can, for the carousel's chip and a photo's row. One drawing,
+     so a delete looks the same wherever it is offered. */
+  var CED_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />' +
+    '<path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />' +
+    '<path d="M10 11v6" /><path d="M14 11v6" /></svg>';
 
   /* WHAT THE REBUILD BUTTON SAYS.
 
@@ -2191,6 +2704,205 @@
      three seconds would then put the name back over the second's result. */
   var saveTimer = 0;
 
+  /* THE SAVE, CONFIRMED IN A BOX.
+
+     A folder write is invisible: nothing downloads, nothing opens, and the
+     picker that covered the panel has gone. A box is the one place a reader
+     cannot miss, so a success says itself there, with every file it wrote.
+
+     It is a success box only. Nothing to save and a fallback to the download
+     are answered on the button, because neither left a file in the repo and
+     neither needs the reader to stop.
+
+     The frame is the frame every other box wears: the head, the rule under
+     it, running text, the rule over the buttons, and one filled move. */
+  function savedBox(written, folder) {
+    injectStyles();
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-modal--flow ced-saved";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-labelledby", "cedSavedTitle");
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    headEl.innerHTML = '<span class="ced-b ced-b--y ced-saved__tick">' + CED_TICK + "SAVED</span>" +
+      '<span class="ced-slug" id="cedSavedTitle">Written into your repo folder</span>';
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    var body = doc.createElement("div");
+    body.className = "ced-saved__body";
+    var lead = doc.createElement("p");
+    lead.textContent = (written.length === 1 ? "1 file was" : written.length + " files were") +
+      " written into " + (folder ? folder : "the repo folder") + ":";
+    var list = doc.createElement("ul");
+    list.className = "ced-saved__files";
+    written.forEach(function (path) {
+      var li = doc.createElement("li");
+      li.className = "ced-saved__file";
+      li.textContent = path;
+      list.appendChild(li);
+    });
+    var next = doc.createElement("p");
+    /* A hard refresh shows the files only where the page is served from the
+       repo. On the deployed site it shows the old page until the push lands,
+       so the sentence says which case it is for. */
+    next.innerHTML = "<strong>Written is not live.</strong> Commit and push these files " +
+      "to publish them. If this page is served from the repo, press " +
+      "<strong>Ctrl+F5</strong> to see them.";
+    body.appendChild(lead);
+    body.appendChild(list);
+    body.appendChild(next);
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    var ok = doc.createElement("button");
+    ok.type = "button";
+    ok.className = "ced-btn ced-btn--accent";
+    ok.textContent = "OK! Done!";
+    btns.appendChild(ok);
+
+    var shut = false;
+    function done() {
+      if (shut) return;
+      shut = true;
+      dialogDown(done);
+      scrimDown();
+      if (box.parentNode) box.parentNode.removeChild(box);
+    }
+    ok.addEventListener("click", done);
+    xBtn.addEventListener("click", done);
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(body);
+    box.appendChild(btns);
+    scrimUp();
+    doc.body.appendChild(box);
+    dialogUp(done);
+    ok.focus();
+    return box;
+  }
+
+  /* ONE QUESTION, IN A BOX OF ITS OWN.
+
+     window.confirm is the browser's box. It cannot show a photo, and a
+     delete has to show the reader what they are about to lose, so the
+     photo boxes ask here instead.
+
+     o.tag and o.title name the question. o.thumb is a picture to show,
+     o.code a path under it, and o.lines the sentences, one paragraph
+     each. o.yes names the move and o.no the way out, "Cancel" when none
+     is given. o.danger paints the move orange and puts the focus on the
+     way out, so a reader who presses Enter without reading keeps the
+     photo.
+
+     Resolves true for the move and false for the X, Escape and the way
+     out. It never rejects. */
+  var askSeq = 0;
+  function askBox(o) {
+    return new Promise(function (resolve) {
+      injectStyles();
+      var id = "cedAsk" + (++askSeq);
+      var box = doc.createElement("div");
+      box.className = "ced-modal ced-modal--flow ced-ask";
+      box.setAttribute("role", "alertdialog");
+      box.setAttribute("aria-modal", "true");
+      box.setAttribute("aria-labelledby", id);
+
+      var headEl = doc.createElement("div");
+      headEl.className = "ced-modal__head";
+      var tag = doc.createElement("span");
+      tag.className = "ced-b" + (o.danger ? " ced-b--o" : "");
+      tag.textContent = o.tag || "CHECK";
+      var title = doc.createElement("span");
+      title.className = "ced-slug";
+      title.id = id;
+      title.textContent = o.title || "";
+      headEl.appendChild(tag);
+      headEl.appendChild(title);
+
+      var xBtn = doc.createElement("button");
+      xBtn.type = "button";
+      xBtn.className = "ced-modal__x";
+      xBtn.setAttribute("aria-label", "Close");
+      xBtn.title = "Close";
+      xBtn.innerHTML = CED_X;
+
+      var body = doc.createElement("div");
+      body.className = "ced-ask__body";
+      if (o.thumb) {
+        var pic = doc.createElement("img");
+        pic.className = "ced-ask__thumb";
+        pic.alt = "";
+        pic.src = o.thumb;
+        body.appendChild(pic);
+      }
+      var text = doc.createElement("div");
+      text.className = "ced-ask__text";
+      if (o.code) {
+        var path = doc.createElement("code");
+        path.textContent = o.code;
+        text.appendChild(path);
+      }
+      (o.lines || []).forEach(function (line) {
+        if (!line) return;
+        var p = doc.createElement("p");
+        p.textContent = line;
+        text.appendChild(p);
+      });
+      body.appendChild(text);
+
+      var btns = doc.createElement("div");
+      btns.className = "ced-modal__btns";
+      var sp = doc.createElement("span");
+      sp.className = "ced-spacer";
+      btns.appendChild(sp);
+      var no = doc.createElement("button");
+      no.type = "button";
+      no.className = "ced-btn";
+      no.textContent = o.no || "Cancel";
+      btns.appendChild(no);
+      var yes = doc.createElement("button");
+      yes.type = "button";
+      yes.className = "ced-btn " + (o.danger ? "ced-btn--fill-danger" : "ced-btn--accent");
+      yes.textContent = o.yes || "OK";
+      btns.appendChild(yes);
+
+      var shut = false;
+      function done(answer) {
+        if (shut) return;
+        shut = true;
+        dialogDown(escNo);
+        scrimDown();
+        if (box.parentNode) box.parentNode.removeChild(box);
+        resolve(answer);
+      }
+      function escNo() { done(false); }
+      no.addEventListener("click", escNo);
+      xBtn.addEventListener("click", escNo);
+      yes.addEventListener("click", function () { done(true); });
+
+      box.appendChild(headEl);
+      box.appendChild(xBtn);
+      box.appendChild(body);
+      box.appendChild(btns);
+      scrimUp();
+      doc.body.appendChild(box);
+      dialogUp(escNo);
+      (o.danger ? no : yes).focus();
+    });
+  }
+
   function runSave(btn) {
     function say(html, ms) {
       window.clearTimeout(saveTimer);
@@ -2204,8 +2916,10 @@
         console.warn("[site editor] " + out.fellBack);
         return;
       }
-      say(CED_TICK + "Saved " + out.wrote.length +
-        (out.wrote.length === 1 ? " file" : " files"), SAVE_SAY_MS);
+      /* the box says it now, so the button goes back to being a button */
+      window.clearTimeout(saveTimer);
+      btn.textContent = SAVE_LABEL;
+      savedBox(out.wrote, out.folder);
     }, function (err) {
       say("Nothing to save", SAVE_SAY_MS);
       console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
@@ -2411,10 +3125,14 @@
     overlay.appendChild(chip);
   }
 
-  /* An image region's two: IMG##, which opens the modal for the photo on
-     screen, and (+), which adds an empty slot. */
+  /* An image region's chips. On a carousel: IMG##, which opens the PHOTOS
+     box on the photo on screen; (+), which opens ADD PHOTO; and the trash
+     can, which deletes the photo on screen. A kind without photoBoxes
+     keeps the older pair: IMG## opens the image modal and (+) adds an
+     empty slot. */
   function galChipsFor(g) {
     if (!overlay || g.chip) return;
+    var boxes = !!g.kind.photoBoxes;
     var chip = doc.createElement("button");
     chip.type = "button";
     chip.className = "ced-chip ced-chip--img";
@@ -2422,6 +3140,10 @@
     chip.addEventListener("click", function (e) {
       e.stopPropagation();
       var i = activeIndex(g), en = displayedEntries(g)[i];
+      if (boxes) {
+        photosBox(g, realEntry(en) ? g.model.indexOf(en) : -1);
+        return;
+      }
       if (!en || en.isSeed) return;   /* seeds aren't editable - drop to replace */
       openImageModal(g, i);
     });
@@ -2431,10 +3153,25 @@
     plus.type = "button";
     plus.className = "ced-chip ced-chip--plus";
     plus.textContent = "+";
-    plus.title = g.slug + " - add an image slot";
-    plus.addEventListener("click", function (e) { e.stopPropagation(); addSlot(g); });
+    plus.title = boxes ? "Add a photo to this carousel" : g.slug + " - add an image slot";
+    plus.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (boxes) addPhotoBox(g);
+      else addSlot(g);
+    });
     g.plusChip = plus;
     overlay.appendChild(plus);
+    if (boxes) {
+      var trash = doc.createElement("button");
+      trash.type = "button";
+      trash.className = "ced-chip ced-chip--trash";
+      trash.innerHTML = CED_TRASH;
+      trash.title = "Delete the photo on screen";
+      trash.setAttribute("aria-label", "Delete the photo on screen");
+      trash.addEventListener("click", function (e) { e.stopPropagation(); trashOnScreen(g); });
+      g.trashChip = trash;
+      overlay.appendChild(trash);
+    }
     attachGalleryRuntime(g);
   }
 
@@ -2449,6 +3186,714 @@
       listFoot(lists[n]);
       listItemPills(lists[n]);
     });
+  }
+
+  /* ------------------------------------------------------------
+     PHOTOS, IN BOXES
+
+     A carousel is edited through two boxes and three chips.
+
+       (+)     opens ADD PHOTO, a wizard in three steps: choose the photo,
+               describe it, place it. Nothing reaches the carousel until
+               Add photo, so the X, Cancel and Escape change nothing.
+       IMG##   opens PHOTOS, every photo of the carousel in one list. Its
+               changes wait in the box until Apply.
+       trash   deletes the photo on screen, once the reader says so.
+
+     A file dropped on a carousel opens ADD PHOTO on that file. A kind
+     opts in with photoBoxes; the gallery page's tiles do not, so a drop
+     there still opens the image modal.
+     ------------------------------------------------------------ */
+
+  /* An entry that is a photo, and not a slot or a seed. */
+  function realEntry(en) { return !!en && !en.empty && !en.isSeed; }
+
+  /* The trash chip shows only over a photo it could delete. */
+  function trashable(g) { return realEntry(displayedEntries(g)[activeIndex(g)]); }
+
+  /* The name a reader knows a carousel by: its project's title, with
+     "deep dive" after it for the drawer's own carousel. */
+  function carouselName(g) {
+    var m = /^(.+?)-(dd-)?gallery$/.exec(g.slug || "");
+    var r = m ? regionBySlug(m[1] + "-title") : null;
+    var name = r ? parseHtml(r.current).textContent.replace(/\s+/g, " ").trim() : "";
+    if (!name) return g.slug;
+    return m[2] ? name + " deep dive" : name;
+  }
+
+  /* One labelled line of text, with its hint as the placeholder. */
+  function photoField(host, label, hint) {
+    var row = doc.createElement("label");
+    row.className = "ced-field";
+    var lab = doc.createElement("span");
+    lab.className = "ced-field__label";
+    lab.textContent = label;
+    var inp = doc.createElement("input");
+    inp.type = "text";
+    if (hint) inp.placeholder = hint;
+    row.appendChild(lab);
+    row.appendChild(inp);
+    host.appendChild(row);
+    return inp;
+  }
+
+  /* The trash chip's delete. The photo on screen is the one named in the
+     question, and the one removed when the answer is yes. */
+  function trashOnScreen(g) {
+    var en = displayedEntries(g)[activeIndex(g)];
+    if (!realEntry(en)) return;
+    var last = g.model.filter(realEntry).length === 1;
+    askBox({
+      tag: "DELETE", title: "Delete this photo?", danger: true,
+      thumb: en.preview || en.src, code: en.src,
+      lines: [en.caption ? "Caption: " + en.caption : "",
+              last ? g.kind.lastImageNote(g).trim() : ""],
+      yes: "Delete photo"
+    }).then(function (yes) {
+      if (!yes) return;
+      var at = g.model.indexOf(en);
+      if (at === -1) return;
+      imageRegion.remove(g, at);
+      exportedClean = false;
+      renderGallery(g, null, Math.min(at, g.model.length - 1));
+      pendingSyncGallery(g);
+      refreshDirtyUI();
+      photoPrune();
+    });
+  }
+
+  /* Where ADD PHOTO puts its photo when no box is waiting for it: the
+     region itself. A PHOTOS box hands the wizard its own list instead, and
+     both answer the same four things. */
+  function liveTarget(g) {
+    return {
+      name: carouselName(g),
+      list: function () { return g.model.filter(realEntry); },
+      seeds: function () { return !g.model.some(realEntry) && g.seeds.length > 0; },
+      put: function (en, at) {
+        if (viewing === "before") api.after();
+        /* an unfilled slot was only somewhere to drop, so it goes, and the
+           seeds step aside for a real photo on their own */
+        var list = g.model.filter(realEntry);
+        list.splice(at, 0, en);
+        g.model = list;
+        photoKeep(en.photo);
+        exportedClean = false;
+        renderGallery(g, null, at);
+        pendingSyncGallery(g);
+        refreshDirtyUI();
+      }
+    };
+  }
+
+  /* ADD PHOTO, the wizard.
+
+     The photo is prepared while the box is open and let go when the box
+     closes without Add photo, so a closed box leaves the page as it was.
+
+     opts.file    a file a drop already chose; the box opens on it
+     opts.target  where the photo goes: liveTarget(g) when not given
+     opts.done    told true when a photo was added, and false when not */
+  function addPhotoBox(g, opts) {
+    opts = opts || {};
+    if (viewing === "before") api.after();
+    injectStyles();
+    guardDocumentDrops();
+    var target = opts.target || liveTarget(g);
+    var photo = null;          /* prepared, and let go unless Add photo takes it */
+    var at = 0;                /* its place among target.list() */
+    var step = 0;
+    var busy = false;
+    var autoAlt = "";          /* the alt this box wrote, which a new file may replace */
+
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-addphoto";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Add a photo to " + target.name);
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    var tag = doc.createElement("span");
+    tag.className = "ced-b ced-b--y";
+    tag.textContent = "ADD PHOTO";
+    var who = doc.createElement("span");
+    who.className = "ced-slug";
+    who.textContent = target.name;
+    headEl.appendChild(tag);
+    headEl.appendChild(who);
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    /* the steps by name, so the reader can see how far there is to go */
+    var steps = doc.createElement("ol");
+    steps.className = "ced-steps";
+    ["Choose", "Describe", "Place"].forEach(function (word, i) {
+      var li = doc.createElement("li");
+      li.textContent = (i + 1) + " " + word;
+      steps.appendChild(li);
+    });
+
+    var body = doc.createElement("div");
+    body.className = "ced-addphoto__body";
+    function pane() {
+      var p = doc.createElement("div");
+      p.className = "ced-addphoto__pane";
+      body.appendChild(p);
+      return p;
+    }
+
+    /* ---- 1. choose ---- */
+    var choosePane = pane();
+    var zone = doc.createElement("div");
+    zone.className = "ced-handoff__zone";
+    zone.setAttribute("role", "button");
+    zone.tabIndex = 0;
+    zone.innerHTML = "<strong>Drop a photo here</strong>" +
+      "<span>JPG, PNG or WebP. It is saved as a JPG, 1600px on its long edge.</span>";
+    var input = doc.createElement("input");
+    input.type = "file";
+    input.accept = PHOTO_ACCEPT;
+    input.hidden = true;
+    var choose = doc.createElement("button");
+    choose.type = "button";
+    /* its own class, not the accent one: the accent class names a box's one
+       move, and this is a way to start, not the move */
+    choose.className = "ced-btn ced-choose";
+    choose.textContent = "Choose a file";
+    choosePane.appendChild(zone);
+    choosePane.appendChild(choose);
+    choosePane.appendChild(input);
+    zone.addEventListener("click", function () { input.click(); });
+    zone.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      input.click();
+    });
+    choose.addEventListener("click", function () { input.click(); });
+    input.addEventListener("change", function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      input.value = "";
+      if (files.length) take(files);
+    });
+
+    /* ---- 2. describe ---- */
+    var describePane = pane();
+    var describe = doc.createElement("div");
+    describe.className = "ced-describe";
+    var picBox = doc.createElement("figure");
+    picBox.className = "ced-describe__pic";
+    var pic = doc.createElement("img");
+    pic.alt = "";
+    var size = doc.createElement("figcaption");
+    size.className = "ced-describe__size";
+    picBox.appendChild(pic);
+    picBox.appendChild(size);
+    var fields = doc.createElement("div");
+    fields.className = "ced-describe__fields";
+    var capIn = photoField(fields, "Caption", "Shown under the photo in the viewer. Empty for none.");
+    var altIn = photoField(fields, "Alt text", "What the photo shows, for a reader who cannot see it");
+    describe.appendChild(picBox);
+    describe.appendChild(fields);
+    describePane.appendChild(describe);
+    [capIn, altIn].forEach(function (inp) {
+      inp.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        next.click();
+      });
+    });
+
+    /* ---- 3. place ---- */
+    var placePane = pane();
+    var askWhere = doc.createElement("p");
+    askWhere.className = "ced-empty";
+    var strip = doc.createElement("div");
+    strip.className = "ced-place";
+    var moves = doc.createElement("div");
+    moves.className = "ced-place__moves";
+    function moveBtn(label, icon, by) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn ced-place__move";
+      b.innerHTML = icon;
+      b.appendChild(doc.createTextNode(label));
+      b.addEventListener("click", function () { at += by; drawPlace(); });
+      return b;
+    }
+    var earlier = moveBtn("Earlier", ICON.left, -1);
+    var where = doc.createElement("span");
+    where.className = "ced-place__at";
+    var later = moveBtn("Later", ICON.right, 1);
+    moves.appendChild(earlier);
+    moves.appendChild(where);
+    moves.appendChild(later);
+    var fileNote = doc.createElement("p");
+    fileNote.className = "ced-hint";
+    placePane.appendChild(askWhere);
+    placePane.appendChild(strip);
+    placePane.appendChild(moves);
+    placePane.appendChild(fileNote);
+
+    function placePic(src, isNew) {
+      var cell = doc.createElement("span");
+      cell.className = "ced-place__pic" + (isNew ? " is-new" : "");
+      var im = doc.createElement("img");
+      im.alt = "";
+      im.src = src;
+      cell.appendChild(im);
+      return cell;
+    }
+    function drawPlace() {
+      var list = target.list();
+      at = Math.max(0, Math.min(at, list.length));
+      strip.innerHTML = "";
+      var mine = null;
+      for (var i = 0; i <= list.length; i++) {
+        if (i === at) { mine = placePic(photo.url, true); strip.appendChild(mine); }
+        if (i < list.length) strip.appendChild(placePic(list[i].preview || list[i].src, false));
+      }
+      if (list.length) askWhere.textContent = "Where does it go in the carousel?";
+      else askWhere.textContent = target.seeds()
+        ? "This is the first photo in this carousel, so the placeholder photos go away."
+        : "This is the first photo in this carousel.";
+      moves.hidden = !list.length;
+      earlier.disabled = at <= 0;
+      later.disabled = at >= list.length;
+      where.textContent = "Photo " + (at + 1) + " of " + (list.length + 1);
+      fileNote.innerHTML = "Save to repo writes it to <code>" + escText(photo.src) + "</code>.";
+      /* a long carousel scrolls, and the new photo stays in view */
+      strip.scrollLeft = Math.max(0, mine.offsetLeft - (strip.clientWidth - mine.offsetWidth) / 2);
+    }
+
+    var note = doc.createElement("div");
+    note.className = "ced-modal__status";
+    function say(t) { note.textContent = t || ""; }
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    function btn(label, cls, fn) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn" + (cls ? " " + cls : "");
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      btns.appendChild(b);
+      return b;
+    }
+    var back = btn("Back", "", function () { if (step > 0) show(step - 1); });
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    btn("Cancel", "", function () { done(false); });
+    var next = btn("Next", "ced-btn--accent", function () {
+      if (busy || !photo) return;
+      if (step < 2) show(step + 1);
+      else add();
+    });
+
+    function show(n) {
+      step = n;
+      [choosePane, describePane, placePane].forEach(function (p, i) { p.hidden = i !== n; });
+      Array.prototype.forEach.call(steps.children, function (li, i) {
+        li.classList.toggle("is-now", i === n);
+        li.classList.toggle("is-done", i < n);
+        if (i === n) li.setAttribute("aria-current", "step");
+        else li.removeAttribute("aria-current");
+      });
+      back.hidden = n === 0;
+      next.textContent = n === 2 ? "Add photo" : "Next";
+      next.disabled = busy || !photo;
+      if (n === 2) drawPlace();
+      (n === 0 ? choose : (n === 1 ? capIn : next)).focus();
+    }
+
+    /* One file, prepared. A second file replaces the first, and an alt the
+       box wrote follows the new file's name; an alt the reader typed stays. */
+    function take(files) {
+      if (busy) return;
+      var file = files[0];
+      if (!file) { say("That drop carried no file. Use Choose a file instead."); return; }
+      busy = true;
+      next.disabled = true;
+      say("Preparing the photo...");
+      photoIntake(file).then(function (made) {
+        busy = false;
+        if (shut) { photoLetGo(made); return; }
+        var first = !photo;
+        if (photo) photoLetGo(photo);
+        photo = made;
+        pic.src = made.url;
+        size.textContent = photoSize(made);
+        if (!altIn.value.trim() || altIn.value === autoAlt) {
+          autoAlt = imageRegion.humanize(made.from);
+          altIn.value = autoAlt;
+        }
+        if (first) at = target.list().length;
+        say(files.length > 1 ? "One photo at a time. This box uses the first file." : "");
+        show(1);
+      }, function (err) {
+        busy = false;
+        if (shut) return;
+        say(err && err.message ? err.message : String(err));
+        next.disabled = !photo;
+      });
+    }
+
+    /* a photo dropped anywhere on the box is taken, on any step */
+    ["dragover", "dragleave", "drop"].forEach(function (type) {
+      box.addEventListener(type, function (e) {
+        if (!e.dataTransfer) return;
+        e.preventDefault();
+        e.stopPropagation();
+        zone.classList.toggle("is-over", type === "dragover");
+        if (type === "drop") take(Array.prototype.slice.call(e.dataTransfer.files || []));
+      });
+    });
+
+    function add() {
+      var en = imageRegion.fromPhoto(photo,
+        { caption: capIn.value.trim(), alt: altIn.value.trim() }, g.kind);
+      photo = null;              /* the target holds it now */
+      target.put(en, at);
+      done(true);
+    }
+
+    var shut = false;
+    function done(added) {
+      if (shut) return;
+      shut = true;
+      if (photo) photoLetGo(photo);
+      photo = null;
+      dialogDown(escMe);
+      scrimDown();
+      if (box.parentNode) box.parentNode.removeChild(box);
+      if (opts.done) opts.done(!!added);
+    }
+    function escMe() { done(false); }
+    xBtn.addEventListener("click", escMe);
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(steps);
+    box.appendChild(body);
+    box.appendChild(note);
+    box.appendChild(btns);
+    gripAdd(box);
+    scrimUp();
+    doc.body.appendChild(box);
+    dialogUp(escMe);
+    show(0);
+    if (opts.file) take([opts.file]);
+    return box;
+  }
+
+  /* PHOTOS, the box for one carousel.
+
+     Every photo in one list, each with its caption, its alt text, its
+     place and its file. Every change waits in the box and Apply writes
+     them together, which is what lets Cancel mean that nothing happened.
+     The box asks before it throws a change away.
+
+     focusAt is the photo to open on, or -1. opts.done is told true when
+     Apply wrote the carousel, and false when the box closed without. */
+  function photosBox(g, focusAt, opts) {
+    opts = opts || {};
+    if (viewing === "before") api.after();
+    injectStyles();
+    guardDocumentDrops();
+    /* swap is a replacement file not applied yet; fresh is a photo this
+       box added. Both are let go if the box closes without Apply. */
+    var rows = g.model.filter(realEntry).map(function (en) {
+      return { en: en, caption: en.caption || "", alt: en.alt || "", swap: null, fresh: false };
+    });
+    function sig() {
+      return JSON.stringify(rows.map(function (r) {
+        return [r.en.src, r.caption, r.alt, r.swap ? r.swap.src : ""];
+      }));
+    }
+    var was = sig();
+    var name = carouselName(g);
+
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-photos";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Photos in " + name);
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    var tag = doc.createElement("span");
+    tag.className = "ced-b ced-b--y";
+    tag.textContent = "PHOTOS";
+    var who = doc.createElement("span");
+    who.className = "ced-slug";
+    who.textContent = name;
+    headEl.appendChild(tag);
+    headEl.appendChild(who);
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    var body = doc.createElement("div");
+    body.className = "ced-photos__body";
+    var none = doc.createElement("p");
+    none.className = "ced-empty";
+    var list = doc.createElement("ol");
+    list.className = "ced-photos__list";
+    var replaceIn = doc.createElement("input");
+    replaceIn.type = "file";
+    replaceIn.accept = PHOTO_ACCEPT;
+    replaceIn.hidden = true;
+    body.appendChild(none);
+    body.appendChild(list);
+    body.appendChild(replaceIn);
+
+    var note = doc.createElement("div");
+    note.className = "ced-modal__status";
+    function say(t) { note.textContent = t || ""; }
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    function btn(label, cls, fn) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn" + (cls ? " " + cls : "");
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      btns.appendChild(b);
+      return b;
+    }
+
+    /* ADD PHOTO, pointed at this box's list rather than at the page */
+    var draft = {
+      name: name,
+      list: function () {
+        return rows.map(function (r) {
+          return r.swap ? { src: r.swap.src, preview: r.swap.url } : r.en;
+        });
+      },
+      seeds: function () { return !rows.length && g.seeds.length > 0; },
+      put: function (en, at) {
+        rows.splice(at, 0, { en: en, caption: en.caption, alt: en.alt, swap: null, fresh: true });
+        draw(at);
+        say("Added. Press Apply to keep it.");
+      }
+    };
+    var addBtn = btn("Add a photo", "", function () { addPhotoBox(g, { target: draft }); });
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    btn("Cancel", "", cancel);
+    btn("Apply", "ced-btn--accent", apply);
+
+    function iconBtn(label, icon, fn, cls) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-tool ced-tool--icon" + (cls ? " " + cls : "");
+      b.innerHTML = icon;
+      b.setAttribute("aria-label", label);
+      b.title = label;
+      b.addEventListener("click", fn);
+      return b;
+    }
+
+    function rowEl(r, i) {
+      var li = doc.createElement("li");
+      li.className = "ced-photo";
+      var n = doc.createElement("span");
+      n.className = "ced-photo__n";
+      n.textContent = (i < 9 ? "0" : "") + (i + 1);
+      var pic = doc.createElement("img");
+      pic.className = "ced-photo__pic";
+      pic.alt = "";
+      pic.src = r.swap ? r.swap.url : (r.en.preview || r.en.src);
+      var fields = doc.createElement("div");
+      fields.className = "ced-photo__fields";
+      var cap = photoField(fields, "Caption", "Shown under the photo in the viewer");
+      cap.value = r.caption;
+      cap.addEventListener("input", function () { r.caption = cap.value; });
+      var alt = photoField(fields, "Alt text", "What the photo shows");
+      alt.value = r.alt;
+      alt.addEventListener("input", function () { r.alt = alt.value; });
+      var file = doc.createElement("span");
+      file.className = "ced-photo__file";
+      file.textContent = r.swap ? r.swap.src : r.en.src;
+      if (r.swap || r.fresh) {
+        var mark = doc.createElement("span");
+        mark.className = "ced-photo__tag";
+        mark.textContent = r.swap ? "REPLACED" : "NEW";
+        file.appendChild(mark);
+      }
+      fields.appendChild(file);
+      var acts = doc.createElement("div");
+      acts.className = "ced-photo__acts";
+      var up = iconBtn("Move earlier", ICON.up, function () { move(r, -1, 0); });
+      up.disabled = i === 0;
+      var down = iconBtn("Move later", ICON.down, function () { move(r, 1, 1); });
+      down.disabled = i === rows.length - 1;
+      var rep = doc.createElement("button");
+      rep.type = "button";
+      rep.className = "ced-tool";
+      rep.textContent = "Replace";
+      rep.title = "Choose another file for this photo, and keep its caption and alt text";
+      rep.addEventListener("click", function () { replacing = r; replaceIn.click(); });
+      var bin = iconBtn("Delete this photo", CED_TRASH, function () { trash(r); }, "ced-tool--danger");
+      [up, down, rep, bin].forEach(function (b) { acts.appendChild(b); });
+      li.appendChild(n);
+      li.appendChild(pic);
+      li.appendChild(fields);
+      li.appendChild(acts);
+      return li;
+    }
+
+    function draw(focusRow) {
+      list.innerHTML = "";
+      none.hidden = rows.length > 0;
+      none.textContent = g.seeds.length
+        ? "No photos yet. The placeholder photos show until you add one."
+        : "No photos yet.";
+      rows.forEach(function (r, i) { list.appendChild(rowEl(r, i)); });
+      var li = typeof focusRow === "number" ? list.children[focusRow] : null;
+      if (li) {
+        li.scrollIntoView({ block: "nearest" });
+        li.querySelector("input").focus();
+      }
+    }
+
+    function move(r, by, which) {
+      var i = rows.indexOf(r), to = i + by;
+      if (i < 0 || to < 0 || to >= rows.length) return;
+      rows.splice(i, 1);
+      rows.splice(to, 0, r);
+      draw();
+      /* the focus follows the photo, so a run of presses keeps moving it */
+      var li = list.children[to];
+      var b = li ? li.querySelectorAll(".ced-photo__acts .ced-tool")[which] : null;
+      if (b && !b.disabled) b.focus();
+      else if (li) li.querySelector("input").focus();
+      say("Moved. Press Apply to keep the new order.");
+    }
+
+    var replacing = null;
+    replaceIn.addEventListener("change", function () {
+      var file = (replaceIn.files || [])[0];
+      replaceIn.value = "";
+      var r = replacing;
+      replacing = null;
+      if (!file || !r) return;
+      say("Preparing the photo...");
+      photoIntake(file).then(function (made) {
+        if (shut || rows.indexOf(r) === -1) { photoLetGo(made); return; }
+        if (r.swap) photoLetGo(r.swap);
+        r.swap = made;
+        draw(rows.indexOf(r));
+        say("Replaced. Press Apply to keep it.");
+      }, function (err) {
+        if (!shut) say(err && err.message ? err.message : String(err));
+      });
+    });
+
+    function trash(r) {
+      askBox({
+        tag: "DELETE", title: "Delete this photo?", danger: true,
+        thumb: r.swap ? r.swap.url : (r.en.preview || r.en.src),
+        code: r.swap ? r.swap.src : r.en.src,
+        lines: [r.caption ? "Caption: " + r.caption : "",
+                rows.length === 1 ? g.kind.lastImageNote(g).trim() : "",
+                "It leaves the carousel when you press Apply."],
+        yes: "Delete photo"
+      }).then(function (yes) {
+        if (!yes || shut) return;
+        var i = rows.indexOf(r);
+        if (i === -1) return;
+        rows.splice(i, 1);
+        if (r.swap) photoLetGo(r.swap);
+        if (r.fresh) photoLetGo(r.en.photo);
+        draw();
+        say("Deleted. Press Apply to keep the change.");
+      });
+    }
+
+    function apply() {
+      if (sig() === was) { done(false); return; }
+      var next = rows.map(function (r) {
+        var en = r.en;
+        if (r.swap) {
+          photoKeep(r.swap);
+          if (r.fresh) photoLetGo(en.photo);
+          en = imageRegion.fromPhoto(r.swap, en, g.kind);
+        } else if (r.fresh) {
+          photoKeep(en.photo);
+        }
+        en.caption = r.caption.trim();
+        en.alt = r.alt.trim();
+        return en;
+      });
+      g.model.forEach(function (en) { if (next.indexOf(en) === -1) imageRegion.revokePreview(en); });
+      g.model = next;
+      if (!next.length && !g.seeds.length && g.kind.mayBeEmpty) {
+        g.model.push(imageRegion.emptySlot(g.kind));
+      }
+      exportedClean = false;
+      renderGallery(g, null, 0);
+      pendingSyncGallery(g);
+      refreshDirtyUI();
+      done(true);
+      photoPrune();
+    }
+
+    function cancel() {
+      if (shut) return;
+      if (sig() === was) { done(false); return; }
+      askBox({
+        tag: "DISCARD", title: "Discard your changes?", danger: true,
+        lines: ["The changes in this box are not applied yet. Discarding them " +
+                "leaves the carousel as it is."],
+        yes: "Discard changes", no: "Keep editing"
+      }).then(function (yes) { if (yes) done(false); });
+    }
+
+    var shut = false;
+    function done(applied) {
+      if (shut) return;
+      shut = true;
+      if (!applied) {
+        rows.forEach(function (r) {
+          if (r.swap) photoLetGo(r.swap);
+          if (r.fresh) photoLetGo(r.en.photo);
+        });
+      }
+      dialogDown(cancel);
+      scrimDown();
+      if (box.parentNode) box.parentNode.removeChild(box);
+      if (opts.done) opts.done(!!applied);
+    }
+    xBtn.addEventListener("click", cancel);
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(body);
+    box.appendChild(note);
+    box.appendChild(btns);
+    gripAdd(box);
+    scrimUp();
+    doc.body.appendChild(box);
+    dialogUp(cancel);
+    var opening = focusAt >= 0 && focusAt < rows.length;
+    draw(opening ? focusAt : undefined);
+    if (!opening) addBtn.focus();
+    say("Changes wait in this box until you press Apply.");
+    return box;
   }
 
   /* ------------------------------------------------------------
@@ -3065,9 +4510,9 @@
         : "This project has no gallery region.");
     }
 
-    /* One photograph list, drawn for the card's carousel and again for the
-       deep dive's. A drop here is the editor's own drop, so a photograph
-       added in this box is the same photograph the page shows. */
+    /* One carousel's photos, drawn for the card and again for the deep
+       dive. The view shows them and hands the work to the photo boxes, so
+       a photo added here is added exactly as (+) on the page adds one. */
     function drawPhotos(host, g, whenNone) {
       if (!g) {
         var soon = doc.createElement("p");
@@ -3076,61 +4521,73 @@
         host.appendChild(soon);
         return;
       }
-      var zone = doc.createElement("div");
-      zone.className = "ced-handoff__zone ced-drop";
-      zone.setAttribute("role", "button");
-      zone.tabIndex = 0;
-      zone.textContent = "Drop photographs here. They are recorded as img/work/<name>, " +
-        "so copy the file there too.";
-      ["dragover", "dragleave", "drop"].forEach(function (ev) {
-        zone.addEventListener(ev, function (e) {
-          e.preventDefault(); e.stopPropagation();
-          zone.classList.toggle("ced-dropping", ev === "dragover");
-          if (ev !== "drop") return;
-          var files = Array.prototype.filter.call(
-            (e.dataTransfer && e.dataTransfer.files) || [],
-            function (x) { return /^image\//.test(x.type); });
-          if (files.length) { handleDrop(g, files, -1); redrawTabs(); }
-        });
-      });
-      host.appendChild(zone);
+      /* Only this part is drawn again after a box closes. The deep dive's
+         view holds Markdown that may not be applied yet, and drawing the
+         whole view again would throw it away. */
+      var wrap = doc.createElement("div");
+      wrap.className = "ced-photoview";
+      host.appendChild(wrap);
+      function paint() {
+        wrap.innerHTML = "";
+        var shown = g.model.filter(realEntry);
+        if (shown.length) {
+          var strip = doc.createElement("ul");
+          strip.className = "ced-strip";
+          shown.forEach(function (en) {
+            var li = doc.createElement("li");
+            var im = doc.createElement("img");
+            im.src = en.preview || en.src;
+            im.alt = en.alt || "";
+            im.title = en.caption || en.src;
+            li.appendChild(im);
+            strip.appendChild(li);
+          });
+          wrap.appendChild(strip);
+        } else {
+          wrap.appendChild(says(g.seeds.length
+            ? "No photos yet. The placeholder photos show until you add one."
+            : "No photos yet."));
+        }
 
-      var list = doc.createElement("ul");
-      list.className = "ced-imglist";
-      imageRegion.displayed(g).forEach(function (en, i) {
-        var li = doc.createElement("li");
-        var chip = doc.createElement("button");
-        chip.type = "button";
-        chip.className = "ced-chip ced-chip--img ced-chip--inline" +
-          (en.isSeed ? " ced-chip--seed" : "");
-        chip.textContent = en.empty ? "DROP" : (en.isSeed ? "SEED" : (en.imgId || "IMG"));
-        chip.addEventListener("click", function () {
-          if (en.isSeed || en.empty) return;
-          openImageModal(g, i);
+        var zone = doc.createElement("div");
+        zone.className = "ced-handoff__zone ced-drop";
+        zone.setAttribute("role", "button");
+        zone.tabIndex = 0;
+        zone.innerHTML = "<strong>Drop a photo here</strong><span>or click to choose one</span>";
+        zone.addEventListener("click", function () { addPhotoBox(g, { done: paint }); });
+        zone.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          addPhotoBox(g, { done: paint });
         });
-        var path = doc.createElement("code");
-        path.textContent = en.empty ? "(no file yet)" : en.src;
-        var cap = doc.createElement("span");
-        cap.className = "ced-imglist__cap";
-        cap.textContent = en.caption || "";
-        li.appendChild(chip);
-        li.appendChild(path);
-        li.appendChild(cap);
-        list.appendChild(li);
-      });
-      host.appendChild(list);
+        ["dragover", "dragleave", "drop"].forEach(function (ev) {
+          zone.addEventListener(ev, function (e) {
+            e.preventDefault(); e.stopPropagation();
+            zone.classList.toggle("is-over", ev === "dragover");
+            if (ev !== "drop") return;
+            var files = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []);
+            if (files.length) addPhotoBox(g, { file: files[0], done: paint });
+          });
+        });
+        wrap.appendChild(zone);
 
-      var plus = doc.createElement("button");
-      plus.type = "button";
-      plus.className = "ced-btn ced-btn--own";
-      plus.textContent = "Add a slot";
-      plus.addEventListener("click", function () { addSlot(g); redrawTabs(); });
-      host.appendChild(plus);
-    }
-    /* whichever of the two is on screen */
-    function redrawTabs() {
-      if (!imgPane.hidden) drawImages();
-      if (!ddPane.hidden) drawDeep();
+        var row = doc.createElement("div");
+        row.className = "ced-btnrow";
+        var add = doc.createElement("button");
+        add.type = "button";
+        add.className = "ced-btn";
+        add.textContent = "Add a photo";
+        add.addEventListener("click", function () { addPhotoBox(g, { done: paint }); });
+        var edit = doc.createElement("button");
+        edit.type = "button";
+        edit.className = "ced-btn";
+        edit.textContent = "Edit photos";
+        edit.addEventListener("click", function () { photosBox(g, -1, { done: paint }); });
+        row.appendChild(add);
+        row.appendChild(edit);
+        wrap.appendChild(row);
+      }
+      paint();
     }
 
     /* ---------------- the Deep dive view ---------------- */
@@ -3283,7 +4740,7 @@
       photos.appendChild(plab);
       ddPane.appendChild(photos);
       drawPhotos(photos, ddGallery(), "This deep dive has no photographs yet. " +
-        "Write {gallery} where you want them, Apply, then drop one here.");
+        "Write {gallery} where you want them, Apply, then add one here.");
 
       var gone = doc.createElement("button");
       gone.type = "button";
@@ -3527,9 +4984,15 @@
      has no list, so this draws nothing on the other two pages. */
   listKinds.projects = PROJECT_LIST;
 
-  /* The list's own marks. One drawing each, inlined, taking currentColor so
-     they stay black on a yellow pill. */
+  /* The marks the lists and the photo boxes use. One drawing each, inlined,
+     taking currentColor so they stay black on a yellow pill. */
   var ICON = {
+    left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>',
+    right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>',
     pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
       'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>',
@@ -3955,7 +5418,7 @@
     regions.forEach(function (r) { r.chip = null; r.row = null; });
     gals.forEach(function (g) {
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
-      g.chip = null; g.plusChip = null;
+      g.chip = null; g.plusChip = null; g.trashChip = null;
     });
     overlay = panel = panelList = viewBtn = regRowsEl = imgRowsEl = null;
     redrawSelfDrawn();
@@ -5372,27 +6835,33 @@
   var IDB_NAME = "amh-editor", IDB_STORE = "repo", IDB_KEY = "folder";
   var repoOffered = {};      /* a remembered folder is offered once per mode, per load */
 
-  function idbOpen() {
+  /* name and store default to the folder's own database. The held photos
+     keep a database of their own, so neither can block the other's upgrade
+     and clearing one never touches the other. */
+  function idbOpen(name, store) {
     return new Promise(function (resolve, reject) {
       if (typeof indexedDB === "undefined" || !indexedDB) {
         reject(new Error("this browser keeps no IndexedDB"));
         return;
       }
-      var q = indexedDB.open(IDB_NAME, 1);
-      q.onupgradeneeded = function () { q.result.createObjectStore(IDB_STORE); };
+      var q = indexedDB.open(name || IDB_NAME, 1);
+      q.onupgradeneeded = function () { q.result.createObjectStore(store || IDB_STORE); };
       q.onsuccess = function () { resolve(q.result); };
       q.onerror = function () { reject(q.error || new Error("IndexedDB refused")); };
       q.onblocked = function () { reject(new Error("IndexedDB blocked")); };
     });
   }
-  function idbDo(mode, run) {
-    return idbOpen().then(function (db) {
+  function idbDo(mode, run, name, store) {
+    store = store || IDB_STORE;
+    return idbOpen(name, store).then(function (db) {
       return new Promise(function (resolve, reject) {
-        var tx = db.transaction(IDB_STORE, mode);
-        var req = run(tx.objectStore(IDB_STORE));
-        tx.oncomplete = function () { resolve(req ? req.result : undefined); };
-        tx.onerror = function () { reject(tx.error); };
-        tx.onabort = function () { reject(tx.error || new Error("aborted")); };
+        var tx = db.transaction(store, mode);
+        var req = run(tx.objectStore(store));
+        /* one connection for each job, closed with it, so a run of photo
+           writes does not leave a connection open for each */
+        tx.oncomplete = function () { db.close(); resolve(req ? req.result : undefined); };
+        tx.onerror = function () { db.close(); reject(tx.error); };
+        tx.onabort = function () { db.close(); reject(tx.error || new Error("aborted")); };
       });
     });
   }
@@ -6398,6 +7867,16 @@
       else pendingDrop(here, "gallery", slug);
     });
 
+    /* A photo the editor holds comes back from its own store a moment
+       later. Until it does, the entry asks the server for a file that a
+       save has not written yet. */
+    if (Object.keys(galleries).length) {
+      photoRecall().then(function () {
+        gals.forEach(function (g) { if (photoLink(g)) renderGallery(g); });
+        photoPrune();
+      });
+    }
+
     if (lost.length) {
       console.warn("[site editor] these pending edits no longer match this page and were dropped: " +
         lost.join(", "));
@@ -6563,6 +8042,30 @@
     }
     return src;
   }
+  /* Built pages as bytes, with the photos they show beside them at the
+     path each src points to. */
+  function bundleFiles(built, held) {
+    var enc = new TextEncoder();
+    var files = {};
+    built.forEach(function (b) { files[b.path] = enc.encode(b.text); });
+    Object.keys(held || {}).forEach(function (src) { files[src] = held[src]; });
+    return files;
+  }
+
+  /* A page on its own downloads as itself, so the common case is
+     unchanged. Anything more travels as one zip laid out the way the repo
+     is, because the pages and their photos were edited together. */
+  function downloadBundle(built, files) {
+    var names = Object.keys(files).sort();
+    if (names.length === 1 && built.length === 1) {
+      downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
+      return;
+    }
+    downloadFile("publish.zip", zipStore(names.map(function (name) {
+      return { name: name, bytes: files[name] };
+    })));
+  }
+
   function downloadFile(name, data, type) {
     var blob = data instanceof Blob ? data : new Blob([data], { type: type || "application/octet-stream" });
     var a = doc.createElement("a");
@@ -6736,6 +8239,8 @@
       refreshPills(n);
     });
     pendingDropPage(currentPage());
+    /* a photo only this page's edits showed is not held any more */
+    photoPrune();
     refreshRegionRows();
     refreshImageRows();
     refreshDirtyUI(); requestReposition();
@@ -6783,6 +8288,7 @@
     scan();
     revertThisPage();
     pendingClearAll();
+    photoPrune();
     exportedClean = true;
     refreshPendingChip();
     return "discarded " + pendingLabel(c);
@@ -6806,7 +8312,8 @@
     var missing = [];
     editedGals.forEach(function (g) {
       g.model.forEach(function (en) {
-        if (en.empty) return;
+        /* a held photo is not missing: the export carries its bytes */
+        if (en.empty || en.photo) return;
         if (en.missing === true) missing.push(en.src);
         else if (en.missing === null) missing.push(en.src + " (existence not verified yet)");
       });
@@ -6821,20 +8328,14 @@
       pages.map(function (pg) { return pg + " (" + pageLabel(pg) + ")"; }).join(", "));
     Promise.all(pages.map(buildPage))
       .then(function (built) {
-        /* one page downloads as itself, so the common case is unchanged; more
-           than one has to travel together, because they were edited together */
-        if (built.length === 1) {
-          downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
-        } else {
-          var enc = new TextEncoder();
-          downloadFile("publish.zip", zipStore(built.map(function (b) {
-            return { name: b.path, bytes: enc.encode(b.text) };
-          })));
-        }
-        exportedClean = true;
-        console.info("[site editor] exported " +
-          built.map(function (b) { return b.path; }).join(", ") + " with " +
-          edited.length + " text region(s) and " + editedGals.length + " gallery/ies spliced in.");
+        return photoFiles(pages).then(function (held) {
+          var files = bundleFiles(built, held);
+          downloadBundle(built, files);
+          exportedClean = true;
+          console.info("[site editor] exported " + Object.keys(files).sort().join(", ") +
+            " with " + edited.length + " text region(s) and " + editedGals.length +
+            " gallery/ies spliced in.");
+        });
       })
       .catch(function (err) {
         console.error("[site editor] export failed: " + err.message +
@@ -6860,6 +8361,11 @@
      A refused folder falls back to the download. The pages are built by the
      time the folder is asked for, and losing them to a refused permission
      would be the worst of both routes.
+
+     A photo the editor holds goes with the page that shows it, into
+     img/work/. Paths are written in sorted order, so img/work/ comes
+     before index.html: a failed photo stops the save before a page can
+     point at a file that is not there.
      ------------------------------------------------------------ */
 
   /* What the save did, for the caller that draws it. Resolves with
@@ -6871,18 +8377,14 @@
     var pages = changedPages();
     if (!pages.length) return Promise.reject(new Error("no edits to save."));
     return Promise.all(pages.map(buildPage)).then(function (built) {
-      var enc = new TextEncoder();
-      var files = {};
-      built.forEach(function (b) { files[b.path] = enc.encode(b.text); });
+      return photoFiles(pages).then(function (held) {
+        return { built: built, files: bundleFiles(built, held) };
+      });
+    }).then(function (bundle) {
+      var built = bundle.built, files = bundle.files;
       /* the download, for a browser with no picker and for a refused folder */
       function asZip(why) {
-        if (built.length === 1) {
-          downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
-        } else {
-          downloadFile("publish.zip", zipStore(built.map(function (b) {
-            return { name: b.path, bytes: files[b.path] };
-          })));
-        }
+        downloadBundle(built, files);
         AMH.tool.markExported();
         return { wrote: [], fellBack: why };
       }
@@ -6897,11 +8399,13 @@
         if (!got) return asZip("The folder was not chosen, so the pages were downloaded instead.");
         return writeRepo(files).then(function (written) {
           AMH.tool.savedPages(written);
+          photoSaved(written);
           console.info("[site editor] written into the repo folder:\n  " +
             written.join("\n  ") +
             "\n\nThe files are on disk and not live yet: the commit and the push " +
             "are still yours to make.");
-          return { wrote: written, fellBack: null };
+          return { wrote: written, fellBack: null,
+                   folder: repoWriteDir && repoWriteDir.name ? repoWriteDir.name : "" };
         });
       }, function (err) {
         var why = (err && err.message ? err.message : String(err));
@@ -7292,6 +8796,19 @@
   AMH.tool.listForm = listForm;            /* open one block's form, or a new one */
   AMH.tool.spliceAllEdits = spliceAllEdits; /* every outstanding edit at once */
   AMH.tool.changedPages = changedPages;    /* managed pages an export would write */
+  /* The photos the editor holds for these pages, as bytes keyed by the
+     img/work/ path each is written to. A bundle that carries a page
+     carries these beside it. */
+  AMH.tool.photoFiles = photoFiles;
+  /* What the editor holds, for the console and the tests: one record for
+     each photo, without its bytes. */
+  AMH.tool.photos = function () {
+    return Object.keys(photos).sort().map(function (src) {
+      var p = photos[src];
+      return { src: src, w: p.w, h: p.h, size: p.size, type: p.blob.type,
+               from: p.from, saved: p.saved };
+    });
+  };
   AMH.tool.zip = zipStore;                 /* STORE zip writer */
   AMH.tool.download = downloadFile;        /* hand a file to the browser */
   AMH.tool.escAttr = escAttr;          /* a consumer's serializer needs it */

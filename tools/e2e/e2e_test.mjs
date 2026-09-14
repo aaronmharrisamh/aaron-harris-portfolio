@@ -384,6 +384,22 @@ async function waitLoaded(ms = 10000) {
   return false;
 }
 
+// Wait until a page expression is truthy, and return what it gave. A photo is
+// decoded and encoded before a box moves on, and a fixed sleep races that.
+// Returns the last value when the time runs out, so a check can show it.
+async function waitFor(expression, ms = 6000) {
+  const t0 = Date.now();
+  let value;
+  while (Date.now() - t0 < ms) {
+    try {
+      value = await evaluate(expression, { awaitPromise: true });
+      if (value) return value;
+    } catch {}
+    await sleep(150);
+  }
+  return value;
+}
+
 async function main() {
   const wsUrl = await getPageWs();
   ws = new WebSocket(wsUrl);
@@ -1012,6 +1028,9 @@ async function main() {
     tile.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
     await new Promise(r => setTimeout(r, 600));
     const modal = document.querySelector('.ced-modal');
+    /* the tiles keep the image modal; the carousels' wizard is not theirs */
+    const imageModal = !!document.querySelector('.ced-modal--image');
+    const wizard = !!document.querySelector('.ced-addphoto');
     if (modal) document.querySelector('.ced-modal__x').click();
     await new Promise(r => setTimeout(r, 300));
     const tiles = [...train.querySelectorAll('.gal-tile')];
@@ -1026,8 +1045,12 @@ async function main() {
       chip: tiles[0].querySelector('.gal-tile__chip').textContent,
       hasCtl: !!tiles[0].querySelector('.gal-tile__ctl'),
       prefer: model[0].prefer,
+      imageModal, wizard,
     };
   })()`, { awaitPromise: true });
+  check("gallery edit: a tile drop still opens the image modal, and not the carousels' wizard",
+    galDrop.imageModal === true && galDrop.wizard === false,
+    JSON.stringify({ imageModal: galDrop.imageModal, wizard: galDrop.wizard }));
   check("gallery edit: a drop records img/work/ and previews the dropped file",
     galDrop.count === 1 && galDrop.recorded === "img/work/tile-one.png" &&
     galDrop.shown === "blob:" && galDrop.chip !== "SEED" &&
@@ -1827,6 +1850,9 @@ async function main() {
     imgRows: document.querySelectorAll('.ced-panel__row--img').length,
     imgChips: document.querySelectorAll('.ced-chip--img').length,
     plusChips: document.querySelectorAll('.ced-chip--plus').length,
+    trashChips: document.querySelectorAll('.ced-chip--trash').length,
+    trashShown: [...document.querySelectorAll('.ced-chip--trash')]
+      .filter(t => t.style.display !== 'none').length,
     panel: !!document.querySelector('.ced-panel'),
   })`);
   check("edit() returns ON", on === "editor mode ON", String(on));
@@ -1835,8 +1861,12 @@ async function main() {
   // project form without a source edit.
   check("panel lists all 94 text regions", ui.rows === 94, "rows=" + ui.rows);
   check("panel lists 9 gallery rows (all SEED)", ui.imgRows === 9, "imgRows=" + ui.imgRows);
-  check("9 IMG chips + 9 plus chips built", ui.imgChips === 9 && ui.plusChips === 9,
-    "img=" + ui.imgChips + " plus=" + ui.plusChips);
+  // Every carousel shows seeds here, and a seed is not a photo anyone can
+  // delete, so each trash chip is built and none of them shows.
+  check("9 IMG chips, 9 plus chips and 9 trash chips built, and no trash shows over a seed",
+    ui.imgChips === 9 && ui.plusChips === 9 && ui.trashChips === 9 && ui.trashShown === 0,
+    "img=" + ui.imgChips + " plus=" + ui.plusChips + " trash=" + ui.trashChips +
+    " shown=" + ui.trashShown);
   check("badges shown for visible regions", ui.chips >= 70, "chips=" + ui.chips);
   // The panel's own moves are filled, so a reader finds them without
   // reading them. View is not among them: it reports which copy is on
@@ -1856,7 +1886,9 @@ async function main() {
   check("panel foot: the moves are filled, View stays plain, and Rebuild is not offered here",
     JSON.stringify(foot.labels) ===
       '["Export","Save to repo","New post","Revert all","Exit"]' &&
-    foot.filled.every((c) => c === "rgb(74, 165, 232)") &&
+    /* every move is filled blue except Save to repo, which is yellow */
+    foot.filled.every((c, i) => foot.labels[i] === "Save to repo"
+      ? c === "rgb(242, 193, 78)" : c === "rgb(74, 165, 232)") &&
     foot.view !== "rgb(74, 165, 232)",
     JSON.stringify(foot));
   // The panel names itself, and its head carries the close where a window
@@ -2021,92 +2053,496 @@ async function main() {
       innerNew.trim().slice(0, 80));
   }
 
-  // ============ GALLERY / IMAGE TESTS ============
-  const DROP_HELPER = `
-    window.__drop = function (sel, names) {
-      var holder = document.querySelector(sel);
-      if (!holder) return "no holder: " + sel;
-      var dt = new DataTransfer();
-      names.forEach(function (n) {
-        dt.items.add(new File([new Uint8Array(64)], n, { type: "image/png" }));
+  // ============ PH. PHOTOS ON A CAROUSEL ============
+  // A carousel is edited through two boxes and three chips. (+) opens ADD
+  // PHOTO, a wizard that changes nothing until its last step. IMG## opens
+  // PHOTOS, where every change waits for Apply. The trash chip deletes the
+  // photo on screen once the reader says so. A photo is held by the editor as
+  // a web-ready JPG, and a save or an export writes it into img/work/.
+  //
+  // The photos are drawn on a canvas, because a drop of made-up bytes is no
+  // longer enough: the editor decodes every file it is given.
+  const PHOTO_HELPER = `
+    window.__photo = function (name, w, h, color, type) {
+      var cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      var cx = cv.getContext('2d');
+      cx.fillStyle = color || '#2b6cb0'; cx.fillRect(0, 0, w, h);
+      cx.fillStyle = '#f2c14e'; cx.fillRect(w * .1, h * .2, w * .3, h * .5);
+      return new Promise(function (res) {
+        cv.toBlob(function (b) { res(new File([b], name, { type: type || 'image/png' })); },
+          type || 'image/png');
       });
-      var ev;
-      try { ev = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }); } catch (e) {}
-      if (!ev || !ev.dataTransfer) {
-        ev = new Event("drop", { bubbles: true, cancelable: true });
-        Object.defineProperty(ev, "dataTransfer", { value: dt });
-      }
-      holder.dispatchEvent(ev);
-      return "dropped";
+    };
+    window.__choose = function (input, file) {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    window.__dropOn = function (el, file) {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
     };`;
-  await evaluate(DROP_HELPER);
+  // A download captured with its name, because one page downloads as itself
+  // and a page with a photo downloads as a zip.
+  const DL_CAPTURE = `
+    window.__dl = null;
+    HTMLAnchorElement.prototype.click = function () {
+      if (!this.download) return;
+      var name = this.download;
+      fetch(this.href).then(r => r.blob()).then(b => new Promise(res => {
+        var fr = new FileReader();
+        fr.onload = () => res(fr.result.split(',')[1]);
+        fr.readAsDataURL(b);
+      })).then(b64 => { window.__dl = { name: name, b64: b64 }; });
+    };`;
+  await evaluate(PHOTO_HELPER);
   const FR3 = `document.querySelectorAll('.work .gallery')[0]`;
+  const WIZ = `document.querySelector('.ced-addphoto')`;
+  const NEXT = `document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent')`;
+  const onStep = (name) =>
+    `(document.querySelector('.ced-addphoto .ced-steps li.is-now') || {}).textContent === ${JSON.stringify(name)}`;
+  const ph0 = await evaluate(`({ stage: ${FR3}.querySelectorAll('.gallery__stage img').length })`);
 
-  // G1. drop a file on the fr3 carousel: seeds vanish, modal opens in image mode
-  const dropRes = await evaluate(`window.__drop('.work .gallery .gallery__holder', ['fr3-real.png'])`);
-  await sleep(400);
-  const g1 = await evaluate(`({
-    stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
-    src: ${FR3}.querySelector('.gallery__stage img')?.src || '',
-    modal: !!document.querySelector('.ced-modal--image'),
-    chip: document.querySelector('.ced-chip--img')?.textContent || '',
-  })`);
-  check("drop replaces seeds with the real image (all-or-nothing)", dropRes === "dropped" && g1.stage === 1,
-    "stage=" + g1.stage);
-  check("dropped image previews from blob", g1.src.startsWith("blob:"), g1.src.slice(0, 24));
-  check("image modal opens on drop", g1.modal);
-  check("IMG chip tracks the new image", /^IMG\d\d$/.test(g1.chip), "chip=" + g1.chip);
-
-  // G2. caption + alt via the modal
-  await evaluate(`document.querySelector('.ced-modal textarea').value = 'Live capture of the real UI'`);
-  await evaluate(`document.querySelector('.ced-modal__alt input').value = 'Forerunner 3 real interface'`);
-  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
-  await sleep(300);
-  const g2 = await evaluate(`({
-    cap: ${FR3}.querySelector('.gallery__stage img')?.getAttribute('data-caption') || '',
-    alt: ${FR3}.querySelector('.gallery__stage img')?.getAttribute('alt') || '',
-  })`);
-  check("Apply writes caption + alt into the live gallery",
-    g2.cap === "Live capture of the real UI" && g2.alt === "Forerunner 3 real interface",
-    "cap=" + g2.cap + " alt=" + g2.alt);
-  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
-
-  // G3. (+) adds an empty slot and navigates to it
+  // PH1. (+) opens the wizard on step 1, and the X closes it with nothing changed
   await evaluate(`document.querySelector('.ced-chip--plus').click()`);
-  await sleep(400);
-  const g3 = await evaluate(`({
-    stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
-    active: ${FR3}.querySelector('.gallery__stage img.is-active')?.src.slice(0, 14) || '',
-    chip: document.querySelector('.ced-chip--img')?.textContent || '',
-  })`);
-  check("(+) adds an empty slot", g3.stage === 2, "stage=" + g3.stage);
-  check("carousel navigates to the slot (drop-here tile active)",
-    g3.active.startsWith("data:image/svg") && g3.chip === "DROP",
-    "active=" + g3.active + " chip=" + g3.chip);
-
-  // G4. delete the empty slot from its modal
-  await evaluate(`document.querySelector('.ced-chip--img').click()`);
-  await sleep(200);
-  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--danger').click()`);
   await sleep(300);
-  const g4 = await evaluate(`${FR3}.querySelectorAll('.gallery__stage img').length`);
-  check("Delete removes the empty slot", g4 === 1, "stage=" + g4);
+  const ph1 = await evaluate(`(function () {
+    var box = ${WIZ};
+    if (!box) return { there: false };
+    var btns = [...box.querySelectorAll('.ced-modal__btns .ced-btn')];
+    var probe = document.createElement('span');
+    document.body.appendChild(probe);
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    var accent = getComputedStyle(probe).color;
+    probe.remove();
+    return { there: true,
+      tag: box.querySelector('.ced-modal__head .ced-b').textContent,
+      name: box.querySelector('.ced-modal__head .ced-slug').textContent,
+      steps: [...box.querySelectorAll('.ced-steps li')].map(li => li.textContent),
+      now: box.querySelector('.ced-steps li.is-now').textContent,
+      zone: !!box.querySelector('.ced-handoff__zone'),
+      choose: (box.querySelector('.ced-choose') || {}).textContent || '',
+      accept: box.querySelector('input[type=file]').accept,
+      shown: btns.filter(b => !b.hidden).map(b => b.textContent),
+      nextDead: btns.find(b => b.textContent === 'Next').disabled,
+      x: !!box.querySelector('.ced-modal__x'),
+      scrim: !!document.querySelector('.ced-scrim'),
+      headRule: parseFloat(getComputedStyle(box.querySelector('.ced-modal__head')).borderBottomWidth),
+      btnRule: parseFloat(getComputedStyle(box.querySelector('.ced-modal__btns')).borderTopWidth),
+      filled: btns.filter(b => getComputedStyle(b).backgroundColor === accent).map(b => b.textContent) };
+  })()`);
+  check("photos: (+) opens ADD PHOTO on step 1, named for its carousel, with a drop zone and a Choose a file chip",
+    ph1.there && ph1.tag === "ADD PHOTO" && ph1.name === "Forerunner 3" &&
+    ph1.steps.join() === "1 Choose,2 Describe,3 Place" && ph1.now === "1 Choose" &&
+    ph1.zone && ph1.choose === "Choose a file" && /image\/jpeg/.test(ph1.accept) &&
+    ph1.x && ph1.scrim,
+    JSON.stringify(ph1));
+  check("photos: step 1 offers Cancel and a Next that waits for a photo, in the shared frame",
+    ph1.shown.join() === "Cancel,Next" && ph1.nextDead === true &&
+    ph1.headRule >= 1 && ph1.btnRule >= 1 && ph1.filled.join() === "Next",
+    JSON.stringify({ shown: ph1.shown, filled: ph1.filled, rules: [ph1.headRule, ph1.btnRule] }));
+  await evaluate(`${WIZ}.querySelector('.ced-modal__x').click()`);
+  await sleep(250);
+  const ph1x = await evaluate(`({ box: !!${WIZ}, scrim: !!document.querySelector('.ced-scrim'),
+    stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
+    model: AMH.tool.regionFor('fr3-gallery').model.length })`);
+  check("photos: the X closes the wizard and leaves the carousel as it was",
+    ph1x.box === false && ph1x.scrim === false && ph1x.stage === ph0.stage && ph1x.model === 0,
+    JSON.stringify({ before: ph0, after: ph1x }));
+  await evaluate(`document.querySelector('.ced-chip--plus').click()`);
+  await sleep(250);
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(250);
+  check("photos: Escape closes the wizard too",
+    (await evaluate(`!${WIZ} && !document.querySelector('.ced-scrim')`)) === true);
 
-  // G5. export splices the gallery; everything outside edited regions intact
-  await evaluate(`window.__exported = null; window.edit.export();`);
-  let exported2 = null;
-  for (let i = 0; i < 20 && !exported2; i++) { await sleep(400); exported2 = await evaluate(`window.__exported`); }
-  check("gallery export produced output", !!exported2, exported2 ? exported2.length + " chars" : "none");
+  // PH2. a file that is not a photo is refused on step 1, with the reason
+  await evaluate(`document.querySelector('.ced-chip--plus').click()`);
+  await sleep(250);
+  await evaluate(`window.__choose(${WIZ}.querySelector('input[type=file]'),
+    new File(['not a photo'], 'notes.txt', { type: 'text/plain' }))`);
+  const ph2 = await waitFor(`(function () {
+    var b = ${WIZ}, s = b ? b.querySelector('.ced-modal__status').textContent : '';
+    return /JPG, PNG and WebP/.test(s) ? { status: s, now: b.querySelector('.ced-steps li.is-now').textContent,
+      nextDead: ${NEXT}.disabled } : null;
+  })()`);
+  check("photos: a file that is not a photo stays on step 1, and the box says why",
+    !!ph2 && ph2.now === "1 Choose" && ph2.nextDead === true && /notes\.txt/.test(ph2.status),
+    JSON.stringify(ph2));
+
+  // PH3. a real photo: step 2 shows the web-ready copy
+  await evaluate(`window.__photo('Hangar Bay_01.png', 2400, 1200).then(function (f) {
+    window.__choose(${WIZ}.querySelector('input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  const ph3 = await evaluate(`(function () {
+    var b = ${WIZ};
+    var ins = b.querySelectorAll('.ced-describe .ced-field input');
+    return { now: b.querySelector('.ced-steps li.is-now').textContent,
+      pic: b.querySelector('.ced-describe__pic img').src.slice(0, 5),
+      size: b.querySelector('.ced-describe__size').textContent,
+      caption: ins[0].value, alt: ins[1].value,
+      back: [...b.querySelectorAll('.ced-modal__btns .ced-btn')].some(x => x.textContent === 'Back' && !x.hidden),
+      status: b.querySelector('.ced-modal__status').textContent };
+  })()`);
+  check("photos: a chosen file moves to step 2 as a web-ready copy, 1600px on its long edge, alt from its name",
+    ph3.now === "2 Describe" && ph3.pic === "blob:" && /^1600 x 800 /.test(ph3.size) &&
+    ph3.caption === "" && ph3.alt === "Hangar Bay 01" && ph3.back && ph3.status === "",
+    JSON.stringify(ph3));
+
+  // PH4. step 3 on a carousel of seeds, and Add photo
+  await evaluate(`(function () {
+    var ins = ${WIZ}.querySelectorAll('.ced-describe .ced-field input');
+    ins[0].value = 'Live capture of the real UI';
+    ins[1].value = 'Forerunner 3 real interface';
+  })()`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  const ph4 = await evaluate(`(function () {
+    var b = ${WIZ};
+    return { now: b.querySelector('.ced-steps li.is-now').textContent,
+      ask: b.querySelector('.ced-addphoto__pane:not([hidden]) .ced-empty').textContent,
+      pics: b.querySelectorAll('.ced-place__pic').length,
+      moves: b.querySelector('.ced-place__moves').hidden,
+      file: b.querySelector('.ced-hint code').textContent,
+      next: ${NEXT}.textContent,
+      stage: ${FR3}.querySelectorAll('.gallery__stage img').length };
+  })()`);
+  check("photos: step 3 says the first photo replaces the placeholders, names its file, and still changes nothing",
+    ph4.now === "3 Place" && /first photo/.test(ph4.ask) && /placeholder/.test(ph4.ask) &&
+    ph4.pics === 1 && ph4.moves === true && ph4.file === "img/work/hangar-bay-01.jpg" &&
+    ph4.next === "Add photo" && ph4.stage === ph0.stage,
+    JSON.stringify(ph4));
+  await evaluate(`${NEXT}.click()`);
+  await sleep(500);
+  const ph5 = await evaluate(`(function () {
+    var g = AMH.tool.regionFor('fr3-gallery');
+    var img = ${FR3}.querySelector('.gallery__stage img');
+    return { box: !!${WIZ}, model: g.model.map(e => e.src),
+      cap: img.getAttribute('data-caption'), alt: img.getAttribute('alt'),
+      shown: img.src.slice(0, 5), stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
+      chip: g.chip.textContent, trash: g.trashChip.style.display,
+      held: AMH.tool.photos(),
+      waiting: !!((JSON.parse(sessionStorage.getItem('amh-pending-edits') || '{}')['index.html'] || {})
+        .gallery || {})['fr3-gallery'] };
+  })()`);
+  check("photos: Add photo puts it in the carousel in place of the seeds, captioned",
+    ph5.box === false && ph5.model.join() === "img/work/hangar-bay-01.jpg" && ph5.stage === 1 &&
+    ph5.cap === "Live capture of the real UI" && ph5.alt === "Forerunner 3 real interface" &&
+    ph5.shown === "blob:" && /^IMG\d\d$/.test(ph5.chip),
+    JSON.stringify(ph5));
+  check("photos: the editor holds it as a JPG at 1600 x 800, and the edit waits to be saved",
+    ph5.held.length === 1 && ph5.held[0].src === "img/work/hangar-bay-01.jpg" &&
+    ph5.held[0].type === "image/jpeg" && ph5.held[0].w === 1600 && ph5.held[0].h === 800 &&
+    ph5.held[0].saved === false && ph5.waiting === true,
+    JSON.stringify({ held: ph5.held, waiting: ph5.waiting }));
+  check("photos: the trash chip shows once a real photo is on screen", ph5.trash === "", "display=" + ph5.trash);
+  const ph5b = await evaluate(`AMH.tool.photoFiles(['index.html']).then(function (m) {
+    return Object.keys(m).map(function (k) { var b = m[k]; return [k, b[0], b[1], b[2], b.length]; });
+  })`, { awaitPromise: true });
+  check("photos: the bytes a save would write are a JPEG, at the path the page points to",
+    ph5b.length === 1 && ph5b[0][0] === "img/work/hangar-bay-01.jpg" &&
+    ph5b[0][1] === 0xFF && ph5b[0][2] === 0xD8 && ph5b[0][3] === 0xFF && ph5b[0][4] > 1000,
+    JSON.stringify(ph5b));
+
+  // PH6. a drop opens the wizard on its file; a taken name gets a number
+  await evaluate(`window.__photo('hangar-bay-01.png', 800, 1000, '#7a3b8f').then(function (f) {
+    window.__dropOn(${FR3}.querySelector('.gallery__holder'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  const ph6 = await evaluate(`(${WIZ} ? ${WIZ}.querySelector('.ced-describe__size').textContent : 'no wizard')`);
+  check("photos: a file dropped on a carousel opens the wizard on that file, and a smaller photo keeps its size",
+    /^800 x 1000 /.test(ph6), ph6);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  const ph6a = await evaluate(`(function () {
+    var b = ${WIZ};
+    return { at: b.querySelector('.ced-place__at').textContent,
+      last: b.querySelectorAll('.ced-place__pic')[1].classList.contains('is-new'),
+      file: b.querySelector('.ced-hint code').textContent };
+  })()`);
+  check("photos: a photo goes last unless it is placed, and a name in use gets a number instead of an overwrite",
+    ph6a.at === "Photo 2 of 2" && ph6a.last && ph6a.file === "img/work/hangar-bay-01-2.jpg",
+    JSON.stringify(ph6a));
+  await evaluate(`[...${WIZ}.querySelectorAll('.ced-place__move')].find(x => x.textContent === 'Earlier').click()`);
+  await sleep(150);
+  const ph6b = await evaluate(`(function () {
+    var b = ${WIZ};
+    var move = function (w) { return [...b.querySelectorAll('.ced-place__move')].find(x => x.textContent === w); };
+    return { at: b.querySelector('.ced-place__at').textContent,
+      first: b.querySelectorAll('.ced-place__pic')[0].classList.contains('is-new'),
+      earlierDead: move('Earlier').disabled, laterDead: move('Later').disabled };
+  })()`);
+  check("photos: Earlier puts the new photo in front, and an arrow with nowhere to go is dead",
+    ph6b.at === "Photo 1 of 2" && ph6b.first && ph6b.earlierDead && !ph6b.laterDead,
+    JSON.stringify(ph6b));
+  await evaluate(`${NEXT}.click()`);
+  await sleep(500);
+  check("photos: the placed photo lands first in the carousel",
+    (await evaluate(`AMH.tool.regionFor('fr3-gallery').model.map(e => e.src).join()`)) ===
+      "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg");
+
+  // PH7. PHOTOS: one row a photo; changes wait for Apply; Cancel asks first
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(400);
+  const ph7 = await evaluate(`(function () {
+    var b = document.querySelector('.ced-photos');
+    if (!b) return { there: false };
+    var rows = [...b.querySelectorAll('.ced-photo')];
+    return { there: true, tag: b.querySelector('.ced-modal__head .ced-b').textContent,
+      name: b.querySelector('.ced-modal__head .ced-slug').textContent,
+      files: rows.map(r => r.querySelector('.ced-photo__file').textContent),
+      caps: rows.map(r => r.querySelector('input').value),
+      acts: [...rows[0].querySelectorAll('.ced-photo__acts .ced-tool')]
+        .map(x => x.getAttribute('aria-label') || x.textContent),
+      firstUpDead: rows[0].querySelector('[aria-label="Move earlier"]').disabled,
+      buttons: [...b.querySelectorAll('.ced-modal__btns .ced-btn')].map(x => x.textContent),
+      headRule: parseFloat(getComputedStyle(b.querySelector('.ced-modal__head')).borderBottomWidth),
+      btnRule: parseFloat(getComputedStyle(b.querySelector('.ced-modal__btns')).borderTopWidth) };
+  })()`);
+  check("photos: IMG## opens PHOTOS, one row for each photo, in the carousel's order",
+    ph7.there && ph7.tag === "PHOTOS" && ph7.name === "Forerunner 3" &&
+    ph7.files.join() === "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg" &&
+    ph7.caps[1] === "Live capture of the real UI" && ph7.headRule >= 1 && ph7.btnRule >= 1,
+    JSON.stringify(ph7));
+  check("photos: each row moves, replaces and deletes, and the box adds, cancels and applies",
+    ph7.acts.join() === "Move earlier,Move later,Replace,Delete this photo" && ph7.firstUpDead &&
+    ph7.buttons.join() === "Add a photo,Cancel,Apply",
+    JSON.stringify({ acts: ph7.acts, buttons: ph7.buttons }));
+  await evaluate(`document.querySelectorAll('.ced-photos .ced-photo')[0]
+    .querySelector('[aria-label="Move later"]').click()`);
+  await sleep(150);
+  await evaluate(`(function () {
+    var i = document.querySelectorAll('.ced-photos .ced-photo')[1].querySelector('input');
+    i.value = 'Moved behind the first';
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const ph7m = await evaluate(`({
+    rows: [...document.querySelectorAll('.ced-photos .ced-photo__file')].map(f => f.textContent),
+    carousel: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src) })`);
+  check("photos: a move waits in the box, and the carousel keeps its order until Apply",
+    ph7m.rows.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg" &&
+    ph7m.carousel.join() === "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg",
+    JSON.stringify(ph7m));
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  const ph7c = await evaluate(`(function () {
+    var a = document.querySelector('.ced-ask');
+    return { ask: !!a, photos: !!document.querySelector('.ced-photos'),
+      title: a ? a.querySelector('.ced-slug').textContent : '',
+      buttons: a ? [...a.querySelectorAll('.ced-modal__btns .ced-btn')].map(x => x.textContent) : [],
+      focused: document.activeElement ? document.activeElement.textContent : '' };
+  })()`);
+  check("photos: Cancel with a change asks first, and the safe answer has the focus",
+    ph7c.ask && ph7c.photos && ph7c.title === "Discard your changes?" &&
+    ph7c.buttons.join() === "Keep editing,Discard changes" && ph7c.focused === "Keep editing",
+    JSON.stringify(ph7c));
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Keep editing').click()`);
+  await sleep(200);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ph7a = await evaluate(`(function () {
+    var g = AMH.tool.regionFor('fr3-gallery');
+    return { box: !!document.querySelector('.ced-photos'), ask: !!document.querySelector('.ced-ask'),
+      scrim: !!document.querySelector('.ced-scrim'),
+      model: g.model.map(e => e.src + '|' + e.caption),
+      stage: [...${FR3}.querySelectorAll('.gallery__stage img')].map(i => i.getAttribute('data-caption') || '') };
+  })()`);
+  check("photos: Keep editing keeps the box, and Apply writes the order and the caption together",
+    ph7a.box === false && ph7a.ask === false && ph7a.scrim === false &&
+    ph7a.model.join() === "img/work/hangar-bay-01.jpg|Live capture of the real UI," +
+      "img/work/hangar-bay-01-2.jpg|Moved behind the first" &&
+    ph7a.stage.join() === "Live capture of the real UI,Moved behind the first",
+    JSON.stringify(ph7a));
+
+  // PH8. Replace in PHOTOS, then Discard changes: nothing reaches the carousel
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(300);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-photo')[1].querySelectorAll('.ced-photo__acts .ced-tool')]
+    .find(x => x.textContent === 'Replace').click()`);
+  await evaluate(`window.__photo('Night Pass.webp', 1200, 1600, '#0e5a8a', 'image/webp').then(function (f) {
+    window.__choose(document.querySelector('.ced-photos input[type=file]'), f); })`, { awaitPromise: true });
+  const ph8 = await waitFor(`(function () {
+    var r = document.querySelectorAll('.ced-photos .ced-photo')[1];
+    var tag = r ? r.querySelector('.ced-photo__tag') : null;
+    return tag ? { tag: tag.textContent, file: r.querySelector('.ced-photo__file').firstChild.textContent,
+      cap: r.querySelector('input').value, pic: r.querySelector('.ced-photo__pic').src.slice(0, 5) } : null;
+  })()`);
+  check("photos: Replace takes a new file for a row, keeps its caption, and marks the row",
+    !!ph8 && ph8.tag === "REPLACED" && ph8.file === "img/work/night-pass.jpg" &&
+    ph8.cap === "Moved behind the first" && ph8.pic === "blob:",
+    JSON.stringify(ph8));
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Discard changes').click()`);
+  await sleep(300);
+  const ph8d = await evaluate(`({ box: !!document.querySelector('.ced-photos'), ask: !!document.querySelector('.ced-ask'),
+    model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src) })`);
+  check("photos: Discard changes closes the box, and the carousel keeps the photos it had",
+    ph8d.box === false && ph8d.ask === false &&
+    ph8d.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg",
+    JSON.stringify(ph8d));
+
+  // PH8b. Add a photo from inside PHOTOS goes into the box's list, and only
+  // Apply puts it on the page. A row's trash takes it out again the same way.
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(300);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Add a photo').click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('Draft Frame.png', 1600, 900, '#2f6f3e').then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  const ph8p = await evaluate(`({ pics: document.querySelectorAll('.ced-addphoto .ced-place__pic').length,
+    at: document.querySelector('.ced-addphoto .ced-place__at').textContent })`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(400);
+  const ph8a = await evaluate(`(function () {
+    var rows = [...document.querySelectorAll('.ced-photos .ced-photo')];
+    return { wizard: !!document.querySelector('.ced-addphoto'), photos: !!document.querySelector('.ced-photos'),
+      files: rows.map(r => r.querySelector('.ced-photo__file').firstChild.textContent),
+      tag: (rows[2] && rows[2].querySelector('.ced-photo__tag') || {}).textContent || '',
+      carousel: AMH.tool.regionFor('fr3-gallery').model.length };
+  })()`);
+  check("photos: Add a photo inside PHOTOS places among the box's rows, and adds a row marked NEW, not a photo",
+    ph8p.pics === 3 && ph8p.at === "Photo 3 of 3" && ph8a.wizard === false && ph8a.photos === true &&
+    ph8a.files.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg,img/work/draft-frame.jpg" &&
+    ph8a.tag === "NEW" && ph8a.carousel === 2,
+    JSON.stringify({ place: ph8p, box: ph8a }));
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ph8ap = await evaluate(`({ model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src),
+    held: AMH.tool.photos().map(p => p.src) })`);
+  check("photos: Apply puts the new row's photo in the carousel, and the editor holds it",
+    ph8ap.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg,img/work/draft-frame.jpg" &&
+    ph8ap.held.indexOf("img/work/draft-frame.jpg") !== -1,
+    JSON.stringify(ph8ap));
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(300);
+  await evaluate(`document.querySelectorAll('.ced-photos .ced-photo')[2]
+    .querySelector('[aria-label="Delete this photo"]').click()`);
+  await sleep(250);
+  const ph8t = await evaluate(`[...document.querySelectorAll('.ced-ask__text p')].map(p => p.textContent).join("|")`);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Delete photo').click()`);
+  await sleep(250);
+  const ph8r = await evaluate(`({ rows: document.querySelectorAll('.ced-photos .ced-photo').length,
+    carousel: AMH.tool.regionFor('fr3-gallery').model.length })`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  const ph8ad = await evaluate(`({ box: !!document.querySelector('.ced-photos'),
+    model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src),
+    held: AMH.tool.photos().map(p => p.src) })`);
+  check("photos: a row's trash asks, says the photo leaves at Apply, and takes only the row until then",
+    /leaves the carousel when you press Apply/.test(ph8t) && ph8r.rows === 2 && ph8r.carousel === 3,
+    JSON.stringify({ lines: ph8t, rows: ph8r }));
+  check("photos: Apply then takes the photo off the page, and the editor lets it go",
+    ph8ad.box === false &&
+    ph8ad.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg" &&
+    ph8ad.held.indexOf("img/work/draft-frame.jpg") === -1,
+    JSON.stringify(ph8ad));
+
+  // PH8c. the project form's Images view shows the photos and opens the same boxes
+  await evaluate(`AMH.tool.listForm("projects", "fr3", 1)`);
+  await sleep(400);
+  const ph8f = await evaluate(`(function () {
+    var pane = [...document.querySelectorAll('.ced-projform .ced-pane')].find(p => !p.hidden);
+    return { strip: pane.querySelectorAll('.ced-strip img').length,
+      zone: !!pane.querySelector('.ced-handoff__zone'),
+      buttons: [...pane.querySelectorAll('.ced-btnrow .ced-btn')].map(b => b.textContent) };
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-projform .ced-btnrow .ced-btn')]
+    .find(b => b.textContent === 'Edit photos').click()`);
+  await sleep(300);
+  const ph8o = await evaluate(`({ photos: !!document.querySelector('.ced-photos'),
+    form: !!document.querySelector('.ced-projform'),
+    rows: document.querySelectorAll('.ced-photos .ced-photo').length })`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  const ph8z = await evaluate(`({ photos: !!document.querySelector('.ced-photos'),
+    ask: !!document.querySelector('.ced-ask'), form: !!document.querySelector('.ced-projform') })`);
+  check("photos: the project form's Images view shows the strip, and Edit photos opens PHOTOS over the form",
+    ph8f.strip === 2 && ph8f.zone && ph8f.buttons.join() === "Add a photo,Edit photos" &&
+    ph8o.photos && ph8o.form && ph8o.rows === 2,
+    JSON.stringify({ view: ph8f, opened: ph8o }));
+  check("photos: Cancel with nothing changed closes PHOTOS without asking, and the form stays",
+    ph8z.photos === false && ph8z.ask === false && ph8z.form === true, JSON.stringify(ph8z));
+  await evaluate(`document.querySelector('.ced-projform .ced-modal__x').click()`);
+  await sleep(250);
+
+  // PH9. the trash chip: it asks, Cancel keeps the photo, Delete photo takes it
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').trashChip.click()`);
+  await sleep(250);
+  const ph9 = await evaluate(`(function () {
+    var a = document.querySelector('.ced-ask');
+    if (!a) return { there: false };
+    var btns = [...a.querySelectorAll('.ced-modal__btns .ced-btn')];
+    var yes = btns.find(x => x.textContent === 'Delete photo');
+    return { there: true, tag: a.querySelector('.ced-modal__head .ced-b').textContent,
+      title: a.querySelector('.ced-slug').textContent, role: a.getAttribute('role'),
+      thumb: a.querySelector('.ced-ask__thumb').src.slice(0, 5),
+      code: a.querySelector('.ced-ask__text code').textContent,
+      lines: [...a.querySelectorAll('.ced-ask__text p')].map(p => p.textContent),
+      buttons: btns.map(x => x.textContent),
+      fill: yes ? getComputedStyle(yes).backgroundColor : '',
+      focused: document.activeElement ? document.activeElement.textContent : '',
+      headRule: parseFloat(getComputedStyle(a.querySelector('.ced-modal__head')).borderBottomWidth),
+      btnRule: parseFloat(getComputedStyle(a.querySelector('.ced-modal__btns')).borderTopWidth) };
+  })()`);
+  check("photos: the trash chip asks first, with a picture of the photo on screen and its file",
+    ph9.there && ph9.tag === "DELETE" && ph9.title === "Delete this photo?" && ph9.role === "alertdialog" &&
+    ph9.thumb === "blob:" && ph9.code === "img/work/hangar-bay-01.jpg" &&
+    ph9.lines.join("|") === "Caption: Live capture of the real UI",
+    JSON.stringify(ph9));
+  check("photos: the ask wears the shared frame, fills its move orange, and puts the focus on Cancel",
+    ph9.headRule >= 1 && ph9.btnRule >= 1 && ph9.buttons.join() === "Cancel,Delete photo" &&
+    ph9.fill === "rgb(240, 136, 62)" && ph9.focused === "Cancel",
+    JSON.stringify(ph9));
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  check("photos: Cancel keeps the photo",
+    (await evaluate(`AMH.tool.regionFor('fr3-gallery').model.length === 2 && !document.querySelector('.ced-ask')`)) === true);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').trashChip.click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Delete photo').click()`);
+  await sleep(500);
+  const ph9d = await evaluate(`({ model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src),
+    stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
+    held: AMH.tool.photos().map(p => p.src) })`);
+  check("photos: Delete photo takes the photo on screen, and the editor lets go of its bytes",
+    ph9d.model.join() === "img/work/hangar-bay-01-2.jpg" && ph9d.stage === 1 &&
+    ph9d.held.join() === "img/work/hangar-bay-01-2.jpg",
+    JSON.stringify(ph9d));
+
+  // PH10. Export: the page and the photo it shows, in one zip laid out as the repo is
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const dl2 = await waitFor(`window.__dl`, 12000);
+  const zip2 = dl2 && dl2.name === "publish.zip" ? unzipStore(Buffer.from(dl2.b64, "base64")) : {};
+  const exported2 = zip2["index.html"] ? zip2["index.html"].toString("utf8") : "";
+  const jpg2 = zip2["img/work/hangar-bay-01-2.jpg"];
+  check("photos: Export downloads one zip holding the page and the photo it shows",
+    !!dl2 && dl2.name === "publish.zip" &&
+    Object.keys(zip2).sort().join() === "img/work/hangar-bay-01-2.jpg,index.html" &&
+    !!jpg2 && jpg2[0] === 0xFF && jpg2[1] === 0xD8,
+    JSON.stringify({ name: dl2 && dl2.name, files: Object.keys(zip2) }));
   if (exported2) {
     const galA = exported2.indexOf("<!--[edit:fr3-gallery]-->");
     const galB = exported2.indexOf("<!--[/edit:fr3-gallery]-->");
     const galSpan = exported2.slice(galA, galB);
-    check("exported gallery holds the img/work path + caption + alt",
-      galSpan.includes('src="img/work/fr3-real.png"') &&
-      galSpan.includes('data-caption="Live capture of the real UI"') &&
-      galSpan.includes('alt="Forerunner 3 real interface"') &&
-      !galSpan.includes("img/seed/"),
-      galSpan.replace(/\s+/g, " ").slice(0, 140));
+    check("photos: the exported gallery points at the photo, with its caption and alt, and no seed",
+      galSpan.includes('src="img/work/hangar-bay-01-2.jpg"') &&
+      galSpan.includes('data-caption="Moved behind the first"') &&
+      galSpan.includes('alt="hangar bay 01"') &&
+      !galSpan.includes("img/seed/") && !galSpan.includes("blob:"),
+      galSpan.replace(/\s+/g, " ").slice(0, 160));
     const exact2 = exportIsByteExact("index.html", exported2, ["hero-h1", "fr3-gallery"]);
     check("gallery export: byte-identical outside edited regions", exact2.ok, exact2.detail);
   }
@@ -2121,20 +2557,33 @@ async function main() {
   })`);
   check("drawer opens with its seed gallery built", dd0.open && dd0.built && dd0.seedShown,
     JSON.stringify(dd0));
-  await evaluate(`window.__drop('.dd__body .gallery .gallery__holder', ['dd-real.png'])`);
-  await sleep(400);
+  // The drawer's carousel has chips of its own, and its (+) is the same wizard.
+  // The name a discarded replacement held in PH8 is free again here.
+  await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('Night Pass.png', 1600, 900, '#0e5a8a').then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  const ddWiz = await evaluate(`(${WIZ} || { querySelector: function () { return null; } })
+    .querySelector('.ced-modal__head .ced-slug')?.textContent || 'no wizard'`);
+  await evaluate(`document.querySelectorAll('.ced-addphoto .ced-describe .ced-field input')[0].value = 'Real orbital scene'`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  const ddFile = await evaluate(`document.querySelector('.ced-addphoto .ced-hint code')?.textContent || ''`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(500);
   const dd1 = await evaluate(`({
     tplSrc: document.querySelectorAll('template.deepdive')[0].content.querySelector('.gallery img')?.getAttribute('src') || '',
+    tplImgs: document.querySelectorAll('template.deepdive')[0].content.querySelectorAll('.gallery img').length,
     drawerSrc: document.querySelector('.dd__body .gallery__stage img')?.src || '',
-    modal: !!document.querySelector('.ced-modal--image'),
+    box: !!document.querySelector('.ced-addphoto'),
   })`);
-  check("dd drop updates the template with the img/work path", dd1.tplSrc === "img/work/dd-real.png", dd1.tplSrc);
-  check("dd drop previews live in the drawer", dd1.drawerSrc.startsWith("blob:"), dd1.drawerSrc.slice(0, 24));
-  check("dd drop opens the image modal", dd1.modal);
-  await evaluate(`document.querySelector('.ced-modal textarea').value = 'Real orbital scene'`);
-  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
-  await sleep(200);
-  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel').click()`);
+  check("photos: the drawer's (+) opens the wizard for the deep dive's own carousel",
+    ddWiz === "Forerunner 3 deep dive", ddWiz);
+  check("photos: a name a discarded photo held is free again", ddFile === "img/work/night-pass.jpg", ddFile);
+  check("dd add updates the template with the img/work path",
+    dd1.tplSrc === "img/work/night-pass.jpg" && dd1.tplImgs === 1 && dd1.box === false, JSON.stringify(dd1));
+  check("dd add previews live in the drawer", dd1.drawerSrc.startsWith("blob:"), dd1.drawerSrc.slice(0, 24));
   // THE TEXT HALF IS NOT EDITED IN THE RAW BOX ANY MORE. Part 4 made the
   // drawer follow the Markdown the template carries, so the panel row opens
   // the project on the view that owns it and the raw box never appears.
@@ -2158,18 +2607,22 @@ async function main() {
     .find(b => b.textContent === 'Apply').click()`);
   await sleep(500);
 
-  // G7. export with nested regions both edited
-  await evaluate(`window.__exported = null; window.edit.export();`);
-  let exported3 = null;
-  for (let i = 0; i < 20 && !exported3; i++) { await sleep(400); exported3 = await evaluate(`window.__exported`); }
-  check("nested export produced output", !!exported3);
+  // G7. export with nested regions both edited, and both held photos with it
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const dl3 = await waitFor(`window.__dl`, 12000);
+  const zip3 = dl3 && dl3.name === "publish.zip" ? unzipStore(Buffer.from(dl3.b64, "base64")) : {};
+  const exported3 = zip3["index.html"] ? zip3["index.html"].toString("utf8") : null;
+  check("nested export produced the page and both held photos",
+    !!exported3 &&
+    Object.keys(zip3).sort().join() === "img/work/hangar-bay-01-2.jpg,img/work/night-pass.jpg,index.html",
+    JSON.stringify(Object.keys(zip3)));
   if (exported3) {
     const ddA = exported3.indexOf("<!--[edit:fr3-deepdive]-->");
     const ddB = exported3.indexOf("<!--[/edit:fr3-deepdive]-->");
     const ddSpan = exported3.slice(ddA, ddB);
     check("deepdive span carries the text edit AND the dd image",
       ddSpan.includes("TESTEDDD built") &&
-      ddSpan.includes('src="img/work/dd-real.png"') &&
+      ddSpan.includes('src="img/work/night-pass.jpg"') &&
       ddSpan.includes('data-caption="Real orbital scene"'),
       ddSpan.replace(/\s+/g, " ").slice(0, 120));
     const exact3 = exportIsByteExact("index.html", exported3,
@@ -2180,18 +2633,25 @@ async function main() {
   await evaluate(`document.querySelector('.dd__close')?.click()`);
   await sleep(300);
 
-  // G8. delete the last real project image: seeds return
-  await evaluate(`document.querySelector('.ced-chip--img').click()`);
-  await sleep(200);
-  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--danger').click()`);
-  await sleep(400);
+  // G8. delete the last real project photo with the trash chip: seeds return
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').trashChip.click()`);
+  await sleep(250);
+  const g8ask = await evaluate(`[...document.querySelectorAll('.ced-ask__text p')].map(p => p.textContent).join("|")`);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(b => b.textContent === 'Delete photo').click()`);
+  await sleep(500);
   const g8 = await evaluate(`({
     stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
     firstSrc: ${FR3}.querySelector('.gallery__stage img')?.getAttribute('src') || '',
+    trash: AMH.tool.regionFor('fr3-gallery').trashChip.style.display,
+    held: AMH.tool.photos().map(p => p.src),
   })`);
+  check("photos: deleting the last photo says the placeholders return first",
+    /seed placeholders will return/.test(g8ask), g8ask);
   check("deleting the last real image restores the seed placeholders",
-    g8.stage === 3 && g8.firstSrc.includes("img/seed/"),
-    "stage=" + g8.stage + " src=" + g8.firstSrc);
+    g8.stage === 3 && g8.firstSrc.includes("img/seed/") && g8.trash === "none",
+    JSON.stringify(g8));
+  check("photos: the editor still holds the deep dive's photo, and no longer the one that left",
+    g8.held.join() === "img/work/night-pass.jpg", JSON.stringify(g8.held));
 
   // 9. revertAll (confirm auto-accepted)
   await evaluate(`window.edit.revertAll()`);
@@ -2722,6 +3182,8 @@ async function main() {
   // A folder that can be written into, and a note of what landed in it.
   const FAKE_REPO = `(function () {
     window.__wrote = {};
+    /* a photo is not text, so its length and first bytes are kept as numbers */
+    window.__wroteBytes = {};
     function fileH(name, seed) {
       return { kind: "file", name: name,
         getFile: function () {
@@ -2733,6 +3195,9 @@ async function main() {
             write: function (bytes) {
               window.__wrote[name] = typeof bytes === "string" ? bytes
                 : new TextDecoder().decode(bytes);
+              if (typeof bytes !== "string") {
+                window.__wroteBytes[name] = [bytes.length, bytes[0], bytes[1], bytes[2]];
+              }
               return Promise.resolve();
             },
             close: function () { return Promise.resolve(); }
@@ -2744,6 +3209,7 @@ async function main() {
     function dirH(prefix) {
       return {
         kind: "directory",
+        name: prefix ? prefix.slice(0, -1) : "aaron-harris-portfolio",
         getDirectoryHandle: function (n) {
           var key = prefix + n + "/";
           if (!dirs[key]) dirs[key] = dirH(key);
@@ -2782,13 +3248,30 @@ async function main() {
     const btns = [...document.querySelectorAll('.ced-panel__foot .ced-btn')];
     const names = btns.map(b => b.textContent);
     const save = document.querySelector('.ced-panel__foot .ced-btn--save');
+    const probe = document.createElement('span');
+    document.body.appendChild(probe);
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--c-yellow').trim();
+    const yellow = getComputedStyle(probe).color;
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    const blue = getComputedStyle(probe).color;
+    probe.remove();
+    const exportBtn = btns.find(b => b.textContent === 'Export');
     return { names, there: !!save, live: save ? !save.disabled : false,
+             paint: save ? getComputedStyle(save).backgroundColor : '',
+             exportPaint: exportBtn ? getComputedStyle(exportBtn).backgroundColor : '',
+             yellow, blue,
              after: names[btns.indexOf(save) - 1],
              help: typeof AMH.tool !== 'undefined' && typeof window.edit.save === 'function' };
   })()`);
   check("save: the panel offers Save to repo beside Export, and edit.save() answers to it",
     svBtn.there && svBtn.live && svBtn.after === "Export" && svBtn.help,
     JSON.stringify(svBtn));
+  // Yellow is the colour the panel already uses for "unsaved change", so the
+  // button that settles it wears that, and every other move stays blue.
+  check("save: the button is yellow, and Export beside it stays blue",
+    svBtn.paint === svBtn.yellow && svBtn.exportPaint === svBtn.blue && svBtn.yellow !== svBtn.blue,
+    JSON.stringify({ paint: svBtn.paint, exportPaint: svBtn.exportPaint,
+                     yellow: svBtn.yellow, blue: svBtn.blue }));
 
   // SV2. nothing to save says so, and writes nothing
   await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
@@ -2798,9 +3281,11 @@ async function main() {
       .map(b => b.textContent).join("|"),
     wrote: Object.keys(window.__wrote),
     picks: window.__picks,
+    box: !!document.querySelector('.ced-saved'),
   })`);
   check("save: with nothing changed it says so, asks for no folder and writes no file",
-    /Nothing to save/.test(svNone.said) && svNone.wrote.length === 0 && svNone.picks === 0,
+    /Nothing to save/.test(svNone.said) && svNone.wrote.length === 0 && svNone.picks === 0 &&
+    svNone.box === false,
     JSON.stringify(svNone));
 
   // SV3. one edit, one file, byte-exact outside the region it wrote
@@ -2816,16 +3301,52 @@ async function main() {
   const svOne = await evaluate(`({
     wrote: Object.keys(window.__wrote).sort(),
     text: window.__wrote["index.html"] || "",
-    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
-      .map(b => b.textContent).join("|"),
+    said: document.querySelector('.ced-panel__foot .ced-btn--save').textContent,
     picks: window.__picks,
     pending: Object.keys(JSON.parse(
       sessionStorage.getItem('amh-pending-edits') || '{}')).length,
+    box: (function () {
+      var b = document.querySelector('.ced-saved');
+      if (!b) return null;
+      var head = b.querySelector('.ced-modal__head'), row = b.querySelector('.ced-modal__btns');
+      return {
+        head: head.textContent,
+        files: [].map.call(b.querySelectorAll('.ced-saved__file'), function (li) { return li.textContent; }),
+        lead: b.querySelector('.ced-saved__body p').textContent,
+        next: b.querySelectorAll('.ced-saved__body p')[1].textContent,
+        buttons: [].map.call(row.querySelectorAll('.ced-btn'), function (x) { return x.textContent; }),
+        focused: document.activeElement && document.activeElement.textContent,
+        headRule: parseFloat(getComputedStyle(head).borderBottomWidth),
+        btnRule: parseFloat(getComputedStyle(row).borderTopWidth),
+        scrim: !!document.querySelector('.ced-scrim'),
+        dialog: b.getAttribute('role'),
+      };
+    })(),
   })`);
-  check("save: one changed page is written into the folder, and the button counts it",
+  check("save: one changed page is written into the folder",
     svOne.wrote.join() === "index.html" && svOne.picks === 1 &&
-    svOne.text.includes("ship the SAVED impossible") && /Saved 1 file/.test(svOne.said),
-    JSON.stringify({ wrote: svOne.wrote, picks: svOne.picks, said: svOne.said }));
+    svOne.text.includes("ship the SAVED impossible"),
+    JSON.stringify({ wrote: svOne.wrote, picks: svOne.picks }));
+  // A folder write is invisible: nothing downloads and the picker is gone. The
+  // box is the one place a reader cannot miss, so a success says itself there.
+  check("save: a success opens a box that names the folder and every file it wrote",
+    !!svOne.box && /SAVED/.test(svOne.box.head) &&
+    svOne.box.files.join() === "index.html" &&
+    /1 file was written into aaron-harris-portfolio/.test(svOne.box.lead) &&
+    /Written is not live/.test(svOne.box.next) && /Commit and push/.test(svOne.box.next) &&
+    svOne.box.dialog === "dialog",
+    JSON.stringify(svOne.box));
+  check("save: the box wears the shared frame, with one move, and the button is its name again",
+    !!svOne.box && svOne.box.headRule >= 1 && svOne.box.btnRule >= 1 &&
+    svOne.box.buttons.join() === "OK! Done!" && svOne.box.focused === "OK! Done!" &&
+    svOne.box.scrim === true && svOne.said === "Save to repo",
+    JSON.stringify({ box: svOne.box, said: svOne.said }));
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent').click()`);
+  await sleep(250);
+  const svShut = await evaluate(`({ box: !!document.querySelector('.ced-saved'),
+    scrim: !!document.querySelector('.ced-scrim') })`);
+  check("save: OK! Done! closes the box and takes the ground away with it",
+    svShut.box === false && svShut.scrim === false, JSON.stringify(svShut));
   const svExact = exportIsByteExact("index.html", svOne.text, ["hero-h1"]);
   check("save: everything outside the edited region is byte-identical", svExact.ok, svExact.detail);
   check("save: a written page is no longer waiting in the record",
@@ -2847,14 +3368,19 @@ async function main() {
     wrote: Object.keys(window.__wrote).sort(),
     gal: (window.__wrote["gallery.html"] || "").includes("Written by the save."),
     idx: (window.__wrote["index.html"] || "").includes("SAVED TWICE"),
-    said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
-      .map(b => b.textContent).join("|"),
     picks: window.__picks,
+    files: [...document.querySelectorAll('.ced-saved .ced-saved__file')].map(li => li.textContent),
+    lead: (document.querySelector('.ced-saved .ced-saved__body p') || {}).textContent || '',
   })`);
   check("save: two changed pages land in one press, on the folder already in hand",
     svTwo.wrote.join() === "gallery.html,index.html" && svTwo.gal && svTwo.idx &&
-    svTwo.picks === 1 && /Saved 2 files/.test(svTwo.said),
-    JSON.stringify({ wrote: svTwo.wrote, picks: svTwo.picks, said: svTwo.said }));
+    svTwo.picks === 1 && svTwo.files.join() === "gallery.html,index.html" &&
+    /2 files were written/.test(svTwo.lead),
+    JSON.stringify({ wrote: svTwo.wrote, picks: svTwo.picks, files: svTwo.files, lead: svTwo.lead }));
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(250);
+  check("save: Escape closes the success box too",
+    (await evaluate(`!document.querySelector('.ced-saved') && !document.querySelector('.ced-scrim')`)) === true);
 
   // SV5. a refused folder falls back to the download rather than losing the work.
   // A fresh load, because the folder this tab already holds is the folder: the
@@ -2888,9 +3414,10 @@ async function main() {
     downloaded: window.__downloaded,
     said: [...document.querySelectorAll('.ced-panel__foot .ced-btn')]
       .map(b => b.textContent).join("|"),
+    box: !!document.querySelector('.ced-saved'),
   })`);
-  check("save: a refused folder falls back to the download and says which way it went",
-    svFell.downloaded === "index.html" && /Downloaded/.test(svFell.said),
+  check("save: a refused folder falls back to the download, says so, and claims no success",
+    svFell.downloaded === "index.html" && /Downloaded/.test(svFell.said) && svFell.box === false,
     JSON.stringify(svFell));
 
   // SV6. no folder picker at all: the button stays on screen, dead, with the reason
@@ -2938,14 +3465,94 @@ async function main() {
     held: (window.__wrote["blog.html"] || "").includes("Saved from the blog page."),
     saw: AMH.tool.changedPages(),
     said: document.querySelector('.ced-panel__foot .ced-btn--save').textContent,
+    files: [...document.querySelectorAll('.ced-saved .ced-saved__file')].map(li => li.textContent),
   })`);
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent')?.click()`);
+  await sleep(250);
   check("save: the blog page keeps both buttons, and they do two different jobs",
     /Save to repo/.test(svBlogFoot) && /Rebuild/.test(svBlogFoot),
     svBlogFoot);
   check("save: on the blog page it writes the page and none of the files a publish owns",
-    svBlog.wrote.join() === "blog.html" && svBlog.held,
+    svBlog.wrote.join() === "blog.html" && svBlog.held && svBlog.files.join() === "blog.html",
     JSON.stringify(svBlog));
   await evaluate(`window.edit.revertAll(); window.edit();`);
+  await sleep(400);
+
+  // ============ PS. A HELD PHOTO, CARRIED AND SAVED ============
+  // A photo added on one page is bytes the editor holds, not a path. It has to
+  // survive a walk to another page, be written beside the page that shows it,
+  // and not be written a second time once it is on disk.
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('Carried Frame.png', 2000, 1000, '#8a4b0e').then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(600);
+  const psHere = await evaluate(`({ model: AMH.tool.regionFor('fr2-gallery').model.map(e => e.src),
+    held: AMH.tool.photos().map(p => p.src) })`);
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html` });
+  await waitLoaded();
+  await sleep(1200);
+  const psAway = await evaluate(`AMH.tool.photoFiles(['index.html']).then(function (m) {
+    return Object.keys(m).map(function (k) { return [k, m[k][0], m[k][1], m[k].length]; });
+  })`, { awaitPromise: true });
+  check("photos: a held photo is still bytes from another page, ready for a save made there",
+    psHere.model.join() === "img/work/carried-frame.jpg" && psAway.length === 1 &&
+    psAway[0][0] === "img/work/carried-frame.jpg" && psAway[0][1] === 0xFF && psAway[0][2] === 0xD8,
+    JSON.stringify({ here: psHere, away: psAway }));
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  const psBack = await waitFor(`(function () {
+    var g = AMH.tool.regionFor('fr2-gallery');
+    var en = g && g.model[0];
+    var img = document.querySelectorAll('.work .gallery')[1].querySelector('.gallery__stage img');
+    return en && en.photo && img && img.src.indexOf('blob:') === 0
+      ? { src: en.src, held: AMH.tool.photos().map(p => p.src) } : null;
+  })()`, 8000);
+  check("photos: back on its page, the carousel shows the held photo again, not a missing file",
+    !!psBack && psBack.src === "img/work/carried-frame.jpg" &&
+    psBack.held.join() === "img/work/carried-frame.jpg",
+    JSON.stringify(psBack));
+  await evaluate(FAKE_REPO);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  const psSaved = await waitFor(`document.querySelector('.ced-saved') ? {
+    wrote: Object.keys(window.__wrote).sort(),
+    bytes: window.__wroteBytes['img/work/carried-frame.jpg'] || null,
+    files: [...document.querySelectorAll('.ced-saved__file')].map(li => li.textContent),
+    lead: document.querySelector('.ced-saved__body p').textContent,
+    held: AMH.tool.photos() } : null`, 10000);
+  check("photos: Save to repo writes the held photo into img/work/ beside its page, and the box lists both",
+    !!psSaved && psSaved.wrote.join() === "img/work/carried-frame.jpg,index.html" &&
+    psSaved.files.join() === "img/work/carried-frame.jpg,index.html" &&
+    /2 files were written/.test(psSaved.lead),
+    JSON.stringify(psSaved));
+  check("photos: what lands in img/work/ is the JPEG, and the editor marks the photo saved",
+    !!psSaved && !!psSaved.bytes && psSaved.bytes[0] > 1000 &&
+    psSaved.bytes[1] === 0xFF && psSaved.bytes[2] === 0xD8 &&
+    psSaved.held.length === 1 && psSaved.held[0].saved === true,
+    JSON.stringify(psSaved && { bytes: psSaved.bytes, held: psSaved.held }));
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent').click()`);
+  await sleep(250);
+  await evaluate(`window.__wrote = {}; window.__wroteBytes = {};
+    document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  const psAgain = await waitFor(`document.querySelector('.ced-saved') ? Object.keys(window.__wrote).sort() : null`, 10000);
+  check("photos: a second save writes the page again, and not the photo it already wrote",
+    Array.isArray(psAgain) && psAgain.join() === "index.html", JSON.stringify(psAgain));
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent')?.click()`);
+  await sleep(250);
+  await evaluate(`window.showDirectoryPicker = window.__realPicker;
+    window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
   await sleep(400);
 
   // ============ MULTI-PAGE PUBLISH ============
@@ -6281,7 +6888,12 @@ async function main() {
     // had to be kept in step with the first. It was not: the address named
     // the month reached while the heading and the rail still named this
     // one, and every control was left scrolled off the top of the page.
+    /* A mark on the window, and not the history length. Chrome holds at most
+       50 entries, so once a run has made that many a real navigation leaves
+       the length where it was. A page load wipes the window, and nothing
+       else here does, so the mark going is the navigation. */
     const beforeHop = await evaluate(`history.length`);
+    await evaluate(`window.__beforeHop = true`);
     await evaluate(`document.querySelector('.bm-older').click()`);
     for (let i = 0; i < 40; i++) {
       await sleep(200);
@@ -6296,11 +6908,12 @@ async function main() {
       dividers: document.querySelectorAll('.bm-divider').length,
       months: [...new Set([...document.querySelectorAll('main .bs-post')]
         .map(function (p) { return (p.getAttribute('data-date') || '').slice(0, 4); }))],
-      histLen: history.length
+      histLen: history.length,
+      loaded: window.__beforeHop !== true
     })`);
     check("chain: on a month page Older posts opens that month and appends nothing",
       /\/blog\/2606\.html$/.test(walked.path) && walked.dividers === 0 &&
-      JSON.stringify(walked.months) === '["2606"]' && walked.histLen > beforeHop,
+      JSON.stringify(walked.months) === '["2606"]' && walked.loaded === true,
       JSON.stringify({ ...walked, before: beforeHop }));
     // the three that used to disagree after a hop now cannot: there is one
     // month on the page, so there is one thing for them to name

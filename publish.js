@@ -3667,21 +3667,34 @@
      a diff is noise, and noise is what stops a diff from being read.
 
      Nothing here can fail the publish. A page that cannot be read or spliced
-     is reported and dropped: the post is the thing the user came to do. */
+     is reported and dropped: the post is the thing the user came to do.
+
+     A page that carries a photo the editor holds carries the photo too,
+     into img/work/, or the bundle would point at a file it does not have. */
   function bcOtherPages(files, entries) {
     if (entries.length) TOOL.stage(HL_PAGE, HL_SLUG, bcHighlights(entries));
     var here = TOOL.currentPage();
     var paths = TOOL.changedPages().filter(function (path) { return path !== here; });
     var enc = new TextEncoder();
+    var carried = [];
     return Promise.all(paths.map(function (path) {
       return Promise.all([TOOL.pristine(path), TOOL.buildPage(path)])
         .then(function (both) {
-          if (both[1].text !== both[0]) files[path] = enc.encode(both[1].text);
+          if (both[1].text === both[0]) return;
+          files[path] = enc.encode(both[1].text);
+          carried.push(path);
         }, function (err) {
           console.warn("[blog] " + path + " could not be written (" + err.message +
             ") and is left out of the bundle. The post is published either way.");
         });
-    }));
+    })).then(function () {
+      return TOOL.photoFiles(carried).then(function (held) {
+        Object.keys(held).forEach(function (src) { files[src] = held[src]; });
+      }, function (err) {
+        console.warn("[blog] the photos those pages show could not be read (" +
+          (err && err.message ? err.message : err) + "). Save them from the site editor.");
+      });
+    });
   }
 
   /* Read one deployed month file. null means the month is genuinely not there,
