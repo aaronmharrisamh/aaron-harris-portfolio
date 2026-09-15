@@ -71,7 +71,8 @@
    opens ADD PHOTO, a wizard that takes a dropped or chosen file;
    IMG## opens PHOTOS, where captions, alt text, order, replacing and
    deleting wait for Apply; and the trash can deletes the photo on
-   screen after it asks. A file dropped on a carousel opens ADD PHOTO
+   screen after it asks. A caption on screen carries a pencil that
+   edits it in place. A file dropped on a carousel opens ADD PHOTO
    on that file. Seed images (img/seed/) are placeholder filler: they
    show only while a gallery has no real images.
 
@@ -1367,6 +1368,16 @@
     });
   }
 
+  /* A deep dive's carousel is also written into its template, which stays in
+     clean export form: no blob previews and no slots. Template content always
+     reports isConnected false, so a bare null check is the right guard. */
+  function syncGallerySource(g, list) {
+    if (!g.kind.syncSource || !g.el) return;
+    setGalleryImgs(g.el, list.filter(function (e) { return !e.empty; })
+      .map(function (e) { return { src: e.src, alt: e.alt, caption: e.caption,
+                                   preview: e.src, empty: false }; }), false);
+  }
+
   /* re-render one gallery from its model: restore a plain <img> list, then
      let the page's own builder re-enhance it. showIndex navigates the rebuilt
      carousel (rebuilds always land on photo 0). */
@@ -1381,14 +1392,7 @@
       return;
     }
     var list = viewEntries || displayedEntries(g);
-    /* note: template-content nodes always report isConnected false - a bare
-       null check is the right guard for the dd gallery inside the template */
-    if (g.kind.syncSource && g.el) {
-      /* the template stays in clean export form (no blob previews, no slots) */
-      setGalleryImgs(g.el, list.filter(function (e) { return !e.empty; })
-        .map(function (e) { return { src: e.src, alt: e.alt, caption: e.caption,
-                                     preview: e.src, empty: false }; }), false);
-    }
+    syncGallerySource(g, list);
     var live = g.live;
     if (live && live.isConnected) {
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
@@ -1445,10 +1449,14 @@
     var stage = g.live.querySelector(".gallery__stage");
     if (stage && window.MutationObserver) {
       if (g.observer) g.observer.disconnect();   /* drawer reopens re-attach; don't stack */
-      g.observer = new MutationObserver(function () { updateGalleryChip(g); });
+      g.observer = new MutationObserver(function () {
+        updateGalleryChip(g);
+        captionPencil(g);
+      });
       g.observer.observe(stage, { attributes: true, attributeFilter: ["class"], subtree: true });
     }
     updateGalleryChip(g);
+    captionPencil(g);
   }
 
   /* drop = replace what you are looking at; extra files append as new photos.
@@ -1925,6 +1933,28 @@
     ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
     ".ced-chip--plus{font-size:14px;font-weight:800;}" +
     ".ced-chip--trash svg{width:13px;height:13px;display:block;}" +
+    /* THE CAPTION PENCIL sits at the end of a carousel's caption label and
+       comes and goes with it. The label ignores the pointer so a tap falls
+       through to the carousel, so the pencil asks for the pointer back. */
+    ".gallery__caption .ced-cappen{flex:none;display:grid;place-items:center;width:22px;height:22px;" +
+    "margin-left:.55rem;padding:0;border:1px solid rgba(111,188,242,.6);border-radius:50%;" +
+    "background:rgba(6,9,14,.6);color:var(--accent-bright);cursor:pointer;pointer-events:auto;" +
+    "transition:background .2s,border-color .2s,color .2s;}" +
+    ".gallery__caption .ced-cappen:hover{background:var(--accent);border-color:var(--accent);" +
+    "color:var(--bg-deep);}" +
+    ".gallery__caption .ced-cappen:focus-visible{outline:2px solid var(--accent-bright);outline-offset:2px;}" +
+    ".gallery__caption .ced-cappen svg{width:12px;height:12px;display:block;}" +
+    ".gallery__caption .ced-cappen[hidden]{display:none;}" +
+    /* While a caption is edited its label holds still, takes the pointer and
+       widens toward the frame, so a long caption has room to be read. */
+    ".gallery__caption.ced-capediting{opacity:1;transform:none;pointer-events:auto;" +
+    "width:min(34rem,calc(100% - 1rem));max-width:calc(100% - 1rem);}" +
+    ".gallery__caption .ced-capedit{flex:1 1 auto;min-width:0;padding:.28rem .5rem;" +
+    "border:1px solid var(--accent);border-radius:6px;background:rgba(6,9,14,.78);" +
+    "color:var(--text);font:600 .78rem var(--font);}" +
+    /* the accent border already says where typing goes, so the focus is a
+       soft ring and not a second outline around the first */
+    ".gallery__caption .ced-capedit:focus{outline:none;box-shadow:0 0 0 3px rgba(74,165,232,.28);}" +
     /* red under the pointer only: at rest it is one of the carousel's chips,
        and orange already means "edited" */
     ".ced-chip--trash:hover{border-color:#e5534b;color:#e5534b;}" +
@@ -3191,7 +3221,7 @@
   /* ------------------------------------------------------------
      PHOTOS, IN BOXES
 
-     A carousel is edited through two boxes and three chips.
+     A carousel is edited through two boxes, three chips and a pencil.
 
        (+)     opens ADD PHOTO, a wizard in three steps: choose the photo,
                describe it, place it. Nothing reaches the carousel until
@@ -3199,6 +3229,8 @@
        IMG##   opens PHOTOS, every photo of the carousel in one list. Its
                changes wait in the box until Apply.
        trash   deletes the photo on screen, once the reader says so.
+       pencil  on the caption label, edits that caption where it is. See
+               A CAPTION, EDITED WHERE IT IS.
 
      A file dropped on a carousel opens ADD PHOTO on that file. A kind
      opts in with photoBoxes; the gallery page's tiles do not, so a drop
@@ -3894,6 +3926,141 @@
     if (!opening) addBtn.focus();
     say("Changes wait in this box until you press Apply.");
     return box;
+  }
+
+  /* ------------------------------------------------------------
+     A CAPTION, EDITED WHERE IT IS
+
+     While the editor is on, a carousel's caption label carries a pencil,
+     and the pencil turns the label into a field on the photo itself. It is
+     the quick way. PHOTOS is still where alt text, order and files live.
+
+     THE PENCIL IS ON A CAPTION THAT EXISTS. It shows only over a real photo
+     that has one. Writing a first caption is the wizard's job and PHOTOS's.
+
+     THE FIELD KEEPS ITS KEYS. Above it, the carousel moves on the arrow
+     keys, and a deep dive's drawer opens the viewer on Enter and Space and
+     closes on Escape. Every key stops at the field, so typing changes the
+     caption and nothing else.
+
+     A SAVE DOES NOT REBUILD THE CAROUSEL. The label, the photo's own
+     data-caption and a deep dive's template are written in place, so the
+     click that ended the edit still lands on what it was aimed at.
+     ------------------------------------------------------------ */
+  var capEditing = null;     /* the open caption field's finish(save), or null */
+
+  /* The photo a pencil is for: the one on screen, when it is real and has a
+     caption, and never in the before view, which shows what is published. */
+  function captionTarget(g) {
+    if (viewing === "before") return null;
+    var en = displayedEntries(g)[activeIndex(g)];
+    return realEntry(en) && en.caption ? en : null;
+  }
+
+  /* Put the pencil on a carousel's caption label, show it or hide it, or
+     take it away. Runs after every rebuild and at every change of the photo
+     on screen, so it is safe to call as often as those happen. */
+  function captionPencil(g) {
+    if (!g.live || !g.live.isConnected) return;
+    var label = g.live.querySelector(".gallery__caption");
+    var pen = label ? label.querySelector(".ced-cappen") : null;
+    if (!active || !g.kind.photoBoxes || !label) {
+      if (pen) pen.parentNode.removeChild(pen);
+      return;
+    }
+    if (!pen) {
+      pen = doc.createElement("button");
+      pen.type = "button";
+      pen.className = "ced-cappen";
+      pen.innerHTML = ICON.pencil;
+      pen.title = "Edit this caption";
+      pen.setAttribute("aria-label", "Edit this caption");
+      pen.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        captionEdit(g, label);
+      });
+      /* Enter and Space press the pencil. A drawer's carousel would also
+         take them as "open the viewer", so they go no further. */
+      pen.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") e.stopPropagation();
+      });
+      label.appendChild(pen);
+    }
+    if (label.classList.contains("ced-capediting")) return;
+    pen.hidden = !captionTarget(g);
+  }
+
+  /* Open the field. Enter saves, Escape puts the caption back, and moving
+     away saves, because a click somewhere else is the reader moving on. */
+  function captionEdit(g, label) {
+    var en = captionTarget(g);
+    if (!en || label.classList.contains("ced-capediting")) return;
+    if (capEditing) capEditing(true);        /* one field at a time: the other saves */
+    var text = label.querySelector(".gallery__caption-text");
+    var pen = label.querySelector(".ced-cappen");
+    var field = doc.createElement("input");
+    field.type = "text";
+    field.className = "ced-capedit";
+    field.value = en.caption;
+    field.setAttribute("aria-label", "Caption");
+    label.classList.add("ced-capediting");
+    if (text) text.hidden = true;
+    if (pen) pen.hidden = true;
+    label.insertBefore(field, pen);
+
+    var shut = false;
+    function finish(save) {
+      if (shut) return;
+      shut = true;
+      capEditing = null;
+      var value = field.value.trim();
+      /* taking the field out of the page blurs it, which is why shut is set
+         before this line and not after it */
+      if (field.parentNode) field.parentNode.removeChild(field);
+      label.classList.remove("ced-capediting");
+      if (text) text.hidden = false;
+      if (save && value !== en.caption) captionSave(g, en, value);
+      captionPencil(g);
+    }
+    field.addEventListener("keydown", function (e) {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    field.addEventListener("blur", function () { finish(true); });
+    /* a click in the field places the caret; on the carousel it would open
+       the viewer */
+    field.addEventListener("click", function (e) { e.stopPropagation(); });
+    capEditing = finish;
+    field.focus();
+    field.select();
+  }
+
+  /* Write one caption: the photo's entry, the photo in the live carousel,
+     the label when that photo is on screen, a deep dive's template, and the
+     record of what is waiting to be saved. An empty caption is a choice, and
+     the label hides, as it does for any photo with none. */
+  function captionSave(g, en, value) {
+    en.caption = value;
+    var at = g.model.indexOf(en);
+    var live = g.live && g.live.isConnected ? g.live : null;
+    var img = live && at !== -1 ? live.querySelectorAll(".gallery__stage img")[at] : null;
+    if (img) {
+      if (value) img.setAttribute("data-caption", value);
+      else img.removeAttribute("data-caption");
+      var label = live.querySelector(".gallery__caption");
+      var text = label ? label.querySelector(".gallery__caption-text") : null;
+      if (img.classList.contains("is-active") && text) {
+        text.textContent = value;
+        label.classList.toggle("is-empty", !value);
+      }
+    }
+    syncGallerySource(g, displayedEntries(g));
+    exportedClean = false;
+    pendingSyncGallery(g);
+    refreshDirtyUI();
+    updateGalleryChip(g);
   }
 
   /* ------------------------------------------------------------
@@ -5416,9 +5583,12 @@
     window.removeEventListener("resize", requestReposition);
     window.removeEventListener("scroll", requestFloor);
     regions.forEach(function (r) { r.chip = null; r.row = null; });
+    /* a caption half typed when the editor closes is put back, not saved */
+    if (capEditing) capEditing(false);
     gals.forEach(function (g) {
       if (g.observer) { g.observer.disconnect(); g.observer = null; }
       g.chip = null; g.plusChip = null; g.trashChip = null;
+      captionPencil(g);          /* the editor is off, so this takes the pencil away */
     });
     overlay = panel = panelList = viewBtn = regRowsEl = imgRowsEl = null;
     redrawSelfDrawn();
@@ -8200,10 +8370,14 @@
     if (viewing === "before") return "already viewing BEFORE";
     viewing = "before";
     regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.original; });
+    if (capEditing) capEditing(false);
     gals.forEach(function (g) {
-      if (!galDirty(g)) return;
-      var before = imageRegion.fromExportForm(g.original, g.kind);
-      renderGallery(g, before.length ? before : g.seeds);
+      if (galDirty(g)) {
+        var before = imageRegion.fromExportForm(g.original, g.kind);
+        renderGallery(g, before.length ? before : g.seeds);
+      }
+      /* the before view is what is published, and nothing is edited there */
+      captionPencil(g);
     });
     refreshDirtyUI(); requestReposition();
     return "viewing BEFORE (published content) - edit.after() to switch back";
@@ -8213,7 +8387,10 @@
     if (viewing === "after") return "already viewing AFTER";
     viewing = "after";
     regions.forEach(function (r) { if (r.edited) r.el.innerHTML = r.current; });
-    gals.forEach(function (g) { if (galDirty(g)) renderGallery(g); });
+    gals.forEach(function (g) {
+      if (galDirty(g)) renderGallery(g);
+      captionPencil(g);
+    });
     refreshDirtyUI(); requestReposition();
     return "viewing AFTER (with your edits)";
   };

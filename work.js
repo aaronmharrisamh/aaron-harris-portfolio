@@ -505,6 +505,10 @@
       closeBtn.addEventListener("click", close);
       doc.addEventListener("keydown", function (e) {
         if (!root || !root.classList.contains("is-open")) return;
+        /* A box the editor opened over the drawer owns the keyboard. Its
+           Escape closes the box and not the drawer under it, and its Tab
+           stays in the box instead of being pulled back into the drawer. */
+        if (AMH.tool && AMH.tool.modalOpen && AMH.tool.modalOpen()) return;
         if (e.key === "Escape") { e.preventDefault(); close(); }
         else if (e.key === "Tab") { trap(e); }
       });

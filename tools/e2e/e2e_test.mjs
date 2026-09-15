@@ -387,6 +387,16 @@ async function waitLoaded(ms = 10000) {
 // Wait until a page expression is truthy, and return what it gave. A photo is
 // decoded and encoded before a box moves on, and a fixed sleep races that.
 // Returns the last value when the time runs out, so a check can show it.
+// A real key press, as the browser's own input sends it. A synthetic event
+// dispatched on the document skips the focused element, and a caption field
+// is tested on what reaches it and what it lets go of.
+async function pressKey(key, code, keyCode, text) {
+  await send("Input.dispatchKeyEvent",
+    { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text });
+  await send("Input.dispatchKeyEvent",
+    { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+}
+
 async function waitFor(expression, ms = 6000) {
   const t0 = Date.now();
   let value;
@@ -2547,6 +2557,79 @@ async function main() {
     check("gallery export: byte-identical outside edited regions", exact2.ok, exact2.detail);
   }
 
+  // PC. A CAPTION, EDITED WHERE IT IS. The caption label carries a pencil
+  // over a real photo that has a caption, and the pencil makes the label a
+  // field. Enter saves, Escape puts it back, a click away saves.
+  const PEN = (slug) => `(function () {
+    var g = AMH.tool.regionFor('${slug}');
+    var p = g && g.live ? g.live.querySelector('.gallery__caption .ced-cappen') : null;
+    return p ? { there: true, shown: !p.hidden } : { there: false, shown: false };
+  })()`;
+  const penReal = await evaluate(PEN("fr3-gallery"));
+  const penSeed = await evaluate(PEN("fr2-gallery"));
+  check("captions: the pencil shows over a real photo with a caption, and not over a seed",
+    penReal.shown === true && penSeed.there === true && penSeed.shown === false,
+    JSON.stringify({ real: penReal, seed: penSeed }));
+  await evaluate(`window.edit.before()`);
+  await sleep(300);
+  const penBefore = await evaluate(PEN("fr3-gallery"));
+  await evaluate(`window.edit.after()`);
+  await sleep(500);
+  const penAfter = await evaluate(PEN("fr3-gallery"));
+  check("captions: the before view shows what is published, so it carries no pencil",
+    penBefore.shown === false && penAfter.shown === true,
+    JSON.stringify({ before: penBefore, after: penAfter }));
+
+  const CAP = `(function () {
+    var g = AMH.tool.regionFor('fr3-gallery');
+    var label = g.live.querySelector('.gallery__caption');
+    var field = label.querySelector('.ced-capedit');
+    return { field: !!field, value: field ? field.value : null,
+      focused: !!field && document.activeElement === field,
+      editing: label.classList.contains('ced-capediting'),
+      model: g.model[0].caption,
+      data: g.live.querySelector('.gallery__stage img').getAttribute('data-caption'),
+      label: label.querySelector('.gallery__caption-text').textContent,
+      viewer: AMH.work.lightbox.isOpen() };
+  })()`;
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(250);
+  const pc1 = await evaluate(CAP);
+  check("captions: the pencil turns the label into a field holding the caption, ready to type",
+    pc1.field && pc1.value === "Moved behind the first" && pc1.focused && pc1.editing,
+    JSON.stringify(pc1));
+  await pressKey("End", "End", 35);
+  await send("Input.insertText", { text: " at dusk" });
+  await pressKey("Enter", "Enter", 13, "\r");
+  await sleep(300);
+  const pc2 = await evaluate(CAP);
+  const pc2Waiting = await evaluate(`(((JSON.parse(sessionStorage.getItem('amh-pending-edits') || '{}')['index.html'] || {})
+    .gallery || {})['fr3-gallery'] || [])[0]`);
+  check("captions: Enter saves into the photo, the label and the edit waiting to be saved",
+    !pc2.field && !pc2.editing && pc2.model === "Moved behind the first at dusk" &&
+    pc2.data === pc2.model && pc2.label === pc2.model && !pc2.viewer &&
+    !!pc2Waiting && pc2Waiting.caption === pc2.model,
+    JSON.stringify({ state: pc2, waiting: pc2Waiting }));
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(200);
+  await send("Input.insertText", { text: "thrown away" });
+  await pressKey("Escape", "Escape", 27);
+  await sleep(300);
+  const pc3 = await evaluate(CAP);
+  check("captions: Escape closes the field and puts the caption back",
+    !pc3.field && pc3.model === "Moved behind the first at dusk" && pc3.label === pc3.model,
+    JSON.stringify(pc3));
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(200);
+  await pressKey("End", "End", 35);
+  await send("Input.insertText", { text: ", again" });
+  await evaluate(`document.activeElement.blur()`);
+  await sleep(300);
+  const pc4 = await evaluate(CAP);
+  check("captions: moving away from the field saves what was typed",
+    !pc4.field && pc4.model === "Moved behind the first at dusk, again" && pc4.label === pc4.model,
+    JSON.stringify(pc4));
+
   // G6. deep-dive: open drawer, drop, check template; then edit dd text too
   await evaluate(`[...document.querySelectorAll('.project__more')][0].click()`);
   await sleep(600);
@@ -2628,7 +2711,63 @@ async function main() {
     const exact3 = exportIsByteExact("index.html", exported3,
       ["hero-h1", "fr3-gallery", "fr3-deepdive"]);
     check("nested export: byte-identical outside edited regions", exact3.ok, exact3.detail);
+    const fr3Span = exported3.slice(exported3.indexOf("<!--[edit:fr3-gallery]-->"),
+      exported3.indexOf("<!--[/edit:fr3-gallery]-->"));
+    check("captions: a caption edited on the carousel is what the export writes",
+      fr3Span.includes('data-caption="Moved behind the first at dusk, again"'),
+      fr3Span.replace(/\s+/g, " ").slice(0, 160));
   }
+
+  // PD. The drawer's keys. Its carousel opens the viewer on Space and the
+  // drawer closes on Escape, so a caption field inside it has to keep both,
+  // and a box the editor opens over it has to keep Escape and Tab.
+  const DDCAP = `(function () {
+    var g = AMH.tool.regionFor('fr3-dd-gallery');
+    var label = g.live ? g.live.querySelector('.gallery__caption') : null;
+    var field = label ? label.querySelector('.ced-capedit') : null;
+    return { pen: !!(label && label.querySelector('.ced-cappen:not([hidden])')),
+      field: !!field, model: g.model[0] ? g.model[0].caption : null,
+      template: (document.querySelectorAll('template.deepdive')[0].content
+        .querySelector('.gallery img') || { getAttribute: function () { return null; } })
+        .getAttribute('data-caption'),
+      drawer: document.body.classList.contains('dd-open'),
+      viewer: AMH.work.lightbox.isOpen() };
+  })()`;
+  const pd0 = await evaluate(DDCAP);
+  await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(250);
+  await pressKey("End", "End", 35);
+  await pressKey(" ", "Space", 32, " ");
+  await send("Input.insertText", { text: "at dawn" });
+  await pressKey("Enter", "Enter", 13, "\r");
+  await sleep(300);
+  const pd1 = await evaluate(DDCAP);
+  check("captions: the drawer's carousel carries the pencil too",
+    pd0.pen === true && pd0.model === "Real orbital scene", JSON.stringify(pd0));
+  check("captions: Space and Enter in the drawer's field type and save, and open no viewer",
+    pd1.model === "Real orbital scene at dawn" && pd1.template === pd1.model &&
+    !pd1.field && pd1.drawer && !pd1.viewer,
+    JSON.stringify(pd1));
+  await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(200);
+  await pressKey("Escape", "Escape", 27);
+  await sleep(300);
+  const pd2 = await evaluate(DDCAP);
+  check("captions: Escape in the drawer's field closes the field and leaves the drawer open",
+    !pd2.field && pd2.drawer && pd2.model === "Real orbital scene at dawn", JSON.stringify(pd2));
+  await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').chip.click()`);
+  await sleep(400);
+  await pressKey("Tab", "Tab", 9);
+  await sleep(150);
+  const pd3 = await evaluate(`({ box: !!document.querySelector('.ced-photos'),
+    inBox: !!(document.activeElement && document.activeElement.closest('.ced-photos')) })`);
+  await pressKey("Escape", "Escape", 27);
+  await sleep(300);
+  const pd4 = await evaluate(`({ box: !!document.querySelector('.ced-photos'),
+    drawer: document.body.classList.contains('dd-open') })`);
+  check("drawer: a box the editor opens over it keeps Tab, and its Escape closes only the box",
+    pd3.box && pd3.inBox && pd4.box === false && pd4.drawer === true,
+    JSON.stringify({ tab: pd3, escape: pd4 }));
   // close the drawer for the remaining tests
   await evaluate(`document.querySelector('.dd__close')?.click()`);
   await sleep(300);
@@ -2675,8 +2814,10 @@ async function main() {
   const off = await evaluate(`({
     chips: document.querySelectorAll('.ced-chip').length,
     panel: !!document.querySelector('.ced-panel'),
+    pens: document.querySelectorAll('.ced-cappen').length,
   })`);
-  check("exit removes all editor UI", off.chips === 0 && !off.panel);
+  check("exit removes all editor UI, the caption pencils included",
+    off.chips === 0 && !off.panel && off.pens === 0, JSON.stringify(off));
 
   // ============ LIGHTBOX INTERFACE ============
   // Phase 2 Part 2 gave the viewer an interface that takes a list of items
