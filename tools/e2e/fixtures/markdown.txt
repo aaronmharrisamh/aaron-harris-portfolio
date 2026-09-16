@@ -106,6 +106,17 @@ Text after.
 [png0002,Cap two]
 <p>Text after.</p>
 ====
+image tag runs: a blank line between two runs is kept, so they stay two carousels, and a frame word is part of a tag
+[portrait img0001,Cap one|Alt one]
+[img0002,Cap two]
+
+[landscape img0003]
+----
+[portrait img0001,Cap one|Alt one]
+[img0002,Cap two]
+
+[landscape img0003]
+====
 flags: a flag anywhere is a cut, and the paragraph splits where it is written
 Intro.
 

@@ -52,7 +52,7 @@
      both need to fold and neither measure catches both.
 
      A line is a block in the body: a paragraph, a list item, a table row,
-     a line of code. A figure is one line.
+     a line of code. A carousel is one line.
 
      {expandformore} and {pagebreak} in the source override these for the
      post that carries them. */
@@ -74,7 +74,10 @@
 
      the date its files are named for, the ORIGINAL's format, size and
      bytes, and then the flags that hold: uhd when the page shows the
-     original in the display copy's place, gif when it moves.
+     original in the display copy's place, truesize when it shows the
+     original at its own size, gif when it moves. A line with truesize
+     carries uhd as well, so a reader that knows only uhd still shows the
+     original.
 
      The date and the number give every path, so nothing else is written
      down. publish.js writes the same line, and the two must agree. */
@@ -82,8 +85,10 @@
     var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line);
     if (!m) return null;
     var flags = m[7].split(/\s+/).filter(Boolean);
+    var truesize = flags.indexOf("truesize") !== -1;
     return { num: m[1], date: m[2], type: m[3], ow: +m[4], oh: +m[5], bytes: +m[6],
-             uhd: flags.indexOf("uhd") !== -1, animated: flags.indexOf("gif") !== -1 };
+             uhd: truesize || flags.indexOf("uhd") !== -1, truesize: truesize,
+             animated: flags.indexOf("gif") !== -1 };
   }
 
   /* The lines: next-post and next-img are the counters; stamp names the
@@ -173,15 +178,12 @@
     return doc.getElementById("blogStream") ? "root" : "month";
   }
 
-  /* [img####,caption|alt] / [png####,caption|alt] - runs of adjacent tags
-     (whitespace only between) become ONE unit. Returns HTML for a post body.
-     mode "stream": tag runs -> .gallery markup (upgraded to carousels).
-     mode "static": tag runs -> stacked <figure class="bp-fig"> blocks. */
   /* ==========================================================
      3. BODY RENDERING
      ----------------------------------------------------------
      A post body is plain HTML plus image tags of the form
-     [img0001,caption|alt]. Expand those into figures.
+     [img0001,caption|alt]. Each run of tags becomes one carousel, which
+     work.js builds on the page the way it builds the home page's.
      ========================================================== */
   /* How wide a blog image is drawn, which the browser has to be told before
      it picks a copy.
@@ -192,12 +194,25 @@
      over .bs-stream in site.css section 8 - so one measurement serves both.
 
      widest is the widest the string above can ask for, 80vw at 700px. A
-     figure fills its column whatever it is given, so it takes a srcset for
-     any photo; the preview's carousel draws a photo at its own size and
-     would stretch one narrower than the slot, so it states the width. */
+     carousel draws a photo at its own size, and a srcset would stretch a
+     photo narrower than the slot, so such a photo is written without one. */
   var BLOG_SIZES = "(max-width: 700px) 80vw, 520px";
-  var BLOG_FIG_SLOT = { sizes: BLOG_SIZES, widest: 0 };
-  var BLOG_GALLERY_SLOT = { sizes: BLOG_SIZES, widest: 560 };
+  var BLOG_SLOT = { sizes: BLOG_SIZES, widest: 560 };
+
+  /* THE IMAGE TAG, NAMED ONCE.
+
+       [portrait img0001,caption|alt]
+
+     An optional frame word and one space, img and four digits, an optional
+     comma and caption, an optional pipe and alt. The word is portrait or
+     landscape, in lower case, and png is the older name of img. The groups,
+     in order: the word, img or png, the number, the caption, the alt.
+
+     publish.js builds every tag reader it has from this source, so a tag
+     means one thing to the composer and to the page. markdown.js keeps a
+     copy of its own, because it also loads on the home page, where this
+     file does not; the harness runs one list of tags through both. */
+  var BLOG_TAG = "\\[(?:(portrait|landscape) )?(img|png)(\\d{4})(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
 
   /* One image tag, as an entry the engine writes markup from. The manifest
      names the original's format and size; every path and the copies' sizes
@@ -213,55 +228,64 @@
     var sd = AMH.images.copySize(img.ow, img.oh, "sd");
     return { src: base + ".jpg", sd: base + "_sd.webp", sdw: sd.w,
              w: hd.w, h: hd.h, ow: img.ow, oh: img.oh,
-             original: base + "_original." + img.type, bytes: img.bytes, uhd: img.uhd };
+             original: base + "_original." + img.type, bytes: img.bytes, uhd: img.uhd,
+             truesize: img.truesize };
   }
 
-  /* prefix is what a static image path is relative to. A month file sits
-     in blog/, so its figures point at "../blog/...", which is the default
-     and leaves every old caller unchanged. The stream on blog.html is at
-     the root and passes "".
+  /* The runs of tags in a body. Tags with nothing between them but white
+     space holding at most one line break are one run, so tags on back-to-
+     back lines are one run, and a blank line or any text starts the next.
+     Returns [{ start, end, tags }], each tag a match of BLOG_TAG. */
+  function blogTagRuns(source) {
+    var re = new RegExp(BLOG_TAG, "g");
+    var runs = [], run = null, m;
+    while ((m = re.exec(source))) {
+      if (run && /^[ \t]*(?:\r?\n)?[ \t]*$/.test(source.slice(run.end, m.index))) {
+        run.tags.push(m);
+        run.end = re.lastIndex;
+      } else {
+        run = { start: m.index, end: re.lastIndex, tags: [m] };
+        runs.push(run);
+      }
+    }
+    return runs;
+  }
 
-     images is the manifest's map of what is on the site. Without one every
-     tag renders as it did before the engine, which is what keeps a page
-     built by an older publish readable. */
-  var BLOG_TAG_RE = /\[(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
-  function blogRenderBody(source, postDate, mode, prefix, images) {
+  /* A post body with each run of image tags written as one carousel: a
+     .gallery for the run, and an <img> for each tag with the markup
+     contract on it.
+
+       source    the body's HTML; a Markdown post's is rendered first
+       postDate  its YYMMDD, for an image from before the engine
+       prefix    what a path is relative to: "" on blog.html and in the
+                 preview, "../" on a month page, which sits in blog/
+       images    the manifest's map of what is on the site. Without one a
+                 tag is written as it was before the engine, with one src
+
+     The first word found in a run becomes the carousel's data-shape. With
+     none, work.js takes the frame's shape from the photos. */
+  function blogRenderBody(source, postDate, prefix, images) {
     var esc = function (s) {
       return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     };
-    var at = prefix === undefined ? "../" : prefix;
-    var slot = mode === "stream" ? BLOG_GALLERY_SLOT : BLOG_FIG_SLOT;
-    /* the stream's own paths carry no prefix; a figure's carry the caller's */
-    var opts = { prefix: mode === "stream" ? "" : at };
-    function markup(im) {
-      return AMH.images.attrs(im.entry, slot, opts).map(function (a) {
-        return " " + a[0] + '="' + esc(a[1]) + '"';
-      }).join("");
-    }
-    var RUN_RE = /(?:\[(?:img|png)\d{4}(?:,[^\]|]*)?(?:\|[^\]]*)?\]\s*)+/g;
-    return source.replace(RUN_RE, function (run) {
-      var imgs = [];
-      run.replace(BLOG_TAG_RE, function (_, fmt, num, cap, alt) {
-        imgs.push({
-          entry: blogImageEntry(num, postDate, fmt, images),
-          caption: (cap || "").trim(),
-          alt: (alt || "").trim() || (cap || "").trim() || ("Blog image " + num)
-        });
-        return _;
+    var opts = { prefix: prefix === undefined ? "../" : prefix };
+    var text = String(source);
+    var out = "", at = 0;
+    blogTagRuns(text).forEach(function (run) {
+      var word = "";
+      var imgs = run.tags.map(function (m) {
+        if (!word && m[1]) word = m[1];
+        var num = m[3], cap = (m[4] || "").trim(), alt = (m[5] || "").trim();
+        var attrs = AMH.images.attrs(blogImageEntry(num, postDate, m[2], images), BLOG_SLOT, opts)
+          .map(function (a) { return " " + a[0] + '="' + esc(a[1]) + '"'; }).join("");
+        return "<img" + attrs + ' loading="lazy" alt="' + esc(alt || cap || ("Blog image " + num)) + '"' +
+          (cap ? ' data-caption="' + esc(cap) + '"' : "") + " />";
       });
-      if (!imgs.length) return run;
-      if (mode === "stream") {
-        return '<div class="gallery">' + imgs.map(function (im) {
-          return "<img" + markup(im) + ' loading="lazy" alt="' + esc(im.alt) + '"' +
-            (im.caption ? ' data-caption="' + esc(im.caption) + '"' : "") + " />";
-        }).join("") + "</div>";
-      }
-      return imgs.map(function (im) {
-        return '<figure class="bp-fig"><img' + markup(im) + ' loading="lazy" alt="' +
-          esc(im.alt) + '" /><figcaption>' +
-          esc(im.caption).replace(/&quot;/g, '"') + "</figcaption></figure>";
-      }).join("\n");
+      out += text.slice(at, run.start) +
+        '<div class="gallery"' + (word ? ' data-shape="' + word + '"' : "") + ">" + imgs.join("") + "</div>";
+      at = run.end;
     });
+    return out + text.slice(at);
   }
 
   /* ==========================================================
@@ -347,7 +371,42 @@
   function blogEditButtons() {
     var posts = blogPosts();
     posts.forEach(blogEditButton);
+    blogNewPostPills();
     return posts.length;
+  }
+
+  /* THE NEW POST PILLS. While the editor is on, one at the end of the bar at
+     the top of the column, and one after the last post on the page, which
+     moves down each time the chain appends a month. They are the editor's:
+     they come with AMH.tool.newPost, and the editor's teardown takes them. */
+  var BLOG_PLUS =
+    '<svg class="bs-retry__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 5v14" /><path d="M5 12h14" /></svg>';
+
+  function blogNewPostPill(where) {
+    var b = doc.createElement("button");
+    b.type = "button";
+    /* Two classes, two jobs, as on the Edit pill: bs-newpost places it,
+       and ced-pill is the paint every one of the editor's pills wears. */
+    b.className = "bs-newpost bs-newpost--" + where + " ced-pill";
+    b.innerHTML = BLOG_PLUS;
+    b.appendChild(doc.createTextNode("New post"));
+    b.addEventListener("click", function () {
+      if (AMH.tool && AMH.tool.newPost) AMH.tool.newPost();
+    });
+    return b;
+  }
+
+  function blogNewPostPills() {
+    if (!(AMH.tool && AMH.tool.newPost)) return;
+    var bar = doc.getElementById("blogBar");
+    if (bar && !bar.querySelector(".bs-newpost")) bar.appendChild(blogNewPostPill("top"));
+    var posts = blogPosts();
+    var last = posts[posts.length - 1];
+    if (!last || !last.parentNode) return;
+    var foot = doc.querySelector(".bs-newpost--foot") || blogNewPostPill("foot");
+    if (last.nextSibling !== foot) last.parentNode.insertBefore(foot, last.nextSibling);
   }
 
   /* ---------------- the cuts ----------------
@@ -385,7 +444,7 @@
   }
   /* The first block to hide, or -1 for no cut. A flag decides it when the
      post carries one. Otherwise the limit does, and the block that crosses
-     the limit is shown whole, so a cut never lands inside a figure or a
+     the limit is shown whole, so a cut never lands inside a carousel or a
      table. */
   function blogCutAt(blocks, kind, limit) {
     var i;
@@ -467,38 +526,6 @@
     var n = 0;
     (only || blogPosts()).forEach(function (p) { if (blogCutPost(p)) n++; });
     return n;
-  }
-
-  /* ---------------- zoom ----------------
-
-     Any image in a post opens the shared lightbox at that image, and the
-     set is that post's own images in order, so the arrows walk the post
-     and stop at its edges.
-
-     One delegated handler on the surface, not one per figure, so a month
-     the loader appends zooms with no second binding. work.js owns the
-     viewer; a page that somehow lacks it lets the click alone. */
-  function blogZoomAttach(root) {
-    if (!root) return;
-    root.addEventListener("click", function (e) {
-      var img = e.target && e.target.closest ? e.target.closest(".bp-fig img") : null;
-      if (!img || !(AMH.work && AMH.work.lightbox)) return;
-      var post = img.closest(".bs-post") || img.closest(".blog-post") || root;
-      var imgs = Array.prototype.slice.call(post.querySelectorAll(".bp-fig img"));
-      e.preventDefault();
-      AMH.work.lightbox.open(imgs.map(blogZoomItem), imgs.indexOf(img), { opener: img });
-    });
-  }
-  /* The caption is the figure's own, not a data attribute: these figures
-     are written with a figcaption, which is what a reader sees when the
-     viewer is closed. */
-  function blogZoomItem(img) {
-    var cap = img.parentNode ? img.parentNode.querySelector("figcaption") : null;
-    return {
-      src: img.currentSrc || img.src,
-      caption: cap ? cap.textContent.trim() : "",
-      alt: img.getAttribute("alt") || ""
-    };
   }
 
   /* ---------------- the sticky bar ----------------
@@ -1088,11 +1115,10 @@
          rather than the whole month for a frame and then one post */
       var focused = blogFocusApply();
       blogFocusBoot();
-      /* a month page has the same bar, the same pill and the same zoom;
-         it has no stream, so its posts are under main */
+      /* a month page has the same bar and the same pill. It has no stream,
+         so its posts are under main, and work.js built their carousels. */
       blogBarFill();
       findAttach();
-      blogZoomAttach(doc.querySelector("main"));
       /* the focused view hides the foot, so Back there would go into a
          place the reader cannot reach. That view has its own, under the
          bar, put there by blogFocusApply. */
@@ -1126,13 +1152,19 @@
     return blogChainRoot ? doc.getElementById("blogStream") : doc.querySelector("main");
   }
   /* A path written for a page in blog/, read from the root. Only the one
-     step up comes off, and only from the front. */
+     step up comes off, and only from the front: of src and href, of each
+     candidate in a srcset, and of the paths the image engine writes into
+     data attributes, which the carousel and the viewer read. */
+  var BLOG_PATH_ATTRS = ["src", "href", "data-sd", "data-original", "data-hd"];
   function blogChainPaths(root) {
-    Array.prototype.forEach.call(root.querySelectorAll("[src],[href]"), function (el) {
-      ["src", "href"].forEach(function (at) {
+    var found = root.querySelectorAll("[src],[href],[srcset],[data-sd],[data-original],[data-hd]");
+    Array.prototype.forEach.call(found, function (el) {
+      BLOG_PATH_ATTRS.forEach(function (at) {
         var v = el.getAttribute(at);
         if (v && v.slice(0, 3) === "../") el.setAttribute(at, v.slice(3));
       });
+      var set = el.getAttribute("srcset");
+      if (set) el.setAttribute("srcset", set.replace(/(^|,\s*)\.\.\//g, "$1"));
     });
   }
   function blogTimeLabel(hhmm) {
@@ -1291,6 +1323,8 @@
           AMH.site.setUrl(href, false);
           if (d.title) doc.title = d.title;
         }
+        /* the month's carousels arrived as plain lists of images */
+        if (AMH.work) AMH.work.buildGalleries();
         blogEditButtons();
         blogCutAll(added);
         if (AMH.site) AMH.site.requestTick();
@@ -1814,6 +1848,11 @@
   (function () {
     var onMonth = blogChainAttach();
     if (!onMonth && !blogAttach()) return;
+    /* One viewer for a post: a photo opens the viewer on every photo of
+       its post, from its first carousel to its last. */
+    if (AMH.work && AMH.work.viewerScope) {
+      AMH.work.viewerScope(function (gallery) { return gallery.closest(".bs-post"); });
+    }
     blogTagClicks();
     var t = /[?&]t=([^&]*)/.exec(location.search);
     if (onMonth) {
@@ -1823,7 +1862,6 @@
     blogRailFill();
     blogBarFill();
     findAttach();
-    blogZoomAttach(blogStream);
     blogCutAll();
     /* a tag view narrows what the reader sees, so it gets the same way
        out as one post does */
@@ -1846,7 +1884,10 @@
      a member may change as long as both change with it.
 
        parseManifest()            -> { entries, months, nextPost, nextImg, stamp }
-       renderBody(src, date, mode, prefix) -> HTML for one post body
+       renderBody(src, date, prefix, images) -> HTML for one post body,
+                                  each run of image tags a carousel
+       TAG                        the image tag's pattern, as a regular
+                                  expression's source; see section 3
        encodeSource(s) / decodeSource(s) -> the escaped form stored in a
                                    month file's x-blog-source tag
        monthTitle(yymm) / dateLabel(yymmdd) / dateTime(yymmdd) -> display
@@ -1863,7 +1904,8 @@
                                   alone. Month pages only, and true when a
                                   post was selected. Safe to call twice.
        show(target, push)         -> answer a deep link
-       editButtons()              -> add the Edit button to the posts
+       editButtons()              -> add the Edit button to the posts,
+                                  and the two New post pills
        cut(only)                  -> fold the posts that are not folded
                                   yet, and say how many. `only` limits it
                                   to a list, which the loader uses for the
@@ -1890,6 +1932,7 @@
   AMH.blog = {
     parseManifest: blogParseManifest,
     renderBody: blogRenderBody,
+    TAG: BLOG_TAG,
     encodeSource: blogEncodeSource,
     decodeSource: blogDecodeSource,
     monthTitle: blogMonthTitle,

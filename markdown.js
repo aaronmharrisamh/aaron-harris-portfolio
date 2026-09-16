@@ -15,13 +15,15 @@
 
    Image tags, [img0001,Caption|Alt], are not Markdown. A run of them is
    one block, passed on as it is, and AMH.blog.renderBody turns the run
-   into figures, so the two never diverge: render(source, {date, mode})
-   runs that expansion when a date is given and leaves the tags in place
-   when it is not. Inside code a tag is code: its bracket is escaped, so
-   the tag renderer cannot see it.
+   into a carousel, so the two never diverge: render(source, {date}) runs
+   that expansion when a date is given and leaves the tags in place when
+   it is not. Two runs with a blank line between them keep that blank
+   line, because it is what makes them two carousels. Inside code a tag
+   is code: its bracket is escaped, so the tag renderer cannot see it.
 
-   Loaded only by blog.html, before tool.js and publish.js. It reads no
-   page and touches no DOM. Publishes AMH.markdown.
+   Loaded by blog.html, before tool.js and publish.js, and by the home
+   page for its deep dives. It reads no page and touches no DOM.
+   Publishes AMH.markdown.
 
    Sections:
      1. SETUP                    5. THE BLOCK SCANNER
@@ -83,15 +85,16 @@
      and is read before a paragraph is gathered. This one finds the rest. */
   var FLAG_NAMES = FLAGS.map(function (f) { return f.name; }).join("|");
   var FLAG_ANY = new RegExp("\\{(" + FLAG_NAMES + ")\\}", "g");
-  /* THE ESCAPES. {!name} writes a flag as text and [!img0001] writes an
-     image tag as text. The mark answers only for a command the renderer
-     knows, so {!hello} is not an escape and stays exactly as typed. */
+  /* THE ESCAPES. {!name} writes a flag as text, and [!img0001] and
+     [!portrait img0001] write an image tag as text. The mark answers only
+     for a command the renderer knows, so {!hello} is not an escape and
+     stays exactly as typed. */
   var ESC_FLAG = new RegExp("\\{!(" + FLAG_NAMES + ")\\}", "g");
-  var ESC_TAG = /\[!(img|png)(\d{4})/g;
+  var ESC_TAG = /\[!((?:portrait|landscape) )?(img|png)(\d{4})/g;
   /* Taken off LAST, once nothing is looking for a command any more. Undo it
      earlier and the thing the mark was protecting would be obeyed. */
   function unmark(s) {
-    return String(s).replace(ESC_FLAG, "{$1}").replace(ESC_TAG, "[$1$2");
+    return String(s).replace(ESC_FLAG, "{$1}").replace(ESC_TAG, "[$1$2$3");
   }
   function flagOf(name) {
     for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i].name === name) return FLAGS[i];
@@ -107,13 +110,17 @@
     number: /^( *)\d+\. +(.*)$/,
     pipe: /^\s*\|.*\|\s*$/,
     delim: /^\s*\|(\s*:?-+:?\s*\|)+\s*$/,
-    /* one tag, and a line that is nothing but tags */
-    tagRun: /^(?:\s*\[(?:img|png)\d{4}(?:,[^\]|]*)?(?:\|[^\]]*)?\])+\s*$/,
+    /* a line that is nothing but image tags */
+    tagRun: /^(?:\s*\[(?:(?:portrait|landscape) )?(?:img|png)\d{4}(?:,[^\]|]*)?(?:\|[^\]]*)?\])+\s*$/,
     flag: new RegExp("^\\{(" + FLAGS.map(function (f) { return f.name; }).join("|") + ")\\}\\s*$"),
     html: /^<[a-zA-Z\/!]/,
     blank: /^\s*$/
   };
-  var TAG_G = /\[(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
+  /* One image tag, with its groups: the frame word, img or png, the number,
+     the caption, the alt. blog.js names the same tag as AMH.blog.TAG; this
+     is a copy, because this file also loads on the home page, where blog.js
+     does not, and the harness runs one list of tags through both. */
+  var TAG_G = /\[(?:(portrait|landscape) )?(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
   /* a link: text, then a url that may hold one level of parentheses,
      which is what a javascript: url in the fixture needs to be caught whole */
   var LINK_G = /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
@@ -297,13 +304,14 @@
       RE.tagRun.test(l) || RE.html.test(l);
   }
   /* render(source, opts) -> HTML
-       opts.date  the post date; with it, image tag runs become figures
-                  through AMH.blog.renderBody, as an HTML post's do
-       opts.mode  "static" (the default) or "stream", for renderBody */
+       opts.date  the post date; with it, each run of image tags becomes a
+                  carousel through AMH.blog.renderBody, as an HTML post's
+                  does, with paths for a month page */
   function render(source, opts) {
     var lines = String(source).replace(/\r\n?/g, "\n").split("\n");
     var out = [];
     var i = 0, m, r;
+    var lastRun = -2;    /* where the last run of image tags went in out */
     while (i < lines.length) {
       var line = lines[i];
       if (RE.blank.test(line)) { i++; continue; }
@@ -333,7 +341,11 @@
       if (RE.tagRun.test(line)) {
         var run = [];
         while (i < lines.length && RE.tagRun.test(lines[i])) { run.push(lines[i].trim()); i++; }
+        /* two runs that a blank line kept apart stay apart: the blank line is
+           what tells the tag renderer they are two carousels */
+        if (out.length && lastRun === out.length - 1) out.push("");
         out.push(run.join("\n"));
+        lastRun = out.length - 1;
         continue;
       }
       if (RE.html.test(line)) {
@@ -358,7 +370,7 @@
     /* renderBody is what turns an image tag into an image, so the tag's
        escape has to survive until after it has run. */
     if (opts && opts.date && AMH.blog && AMH.blog.renderBody) {
-      html = AMH.blog.renderBody(html, opts.date, opts.mode || "static");
+      html = AMH.blog.renderBody(html, opts.date);
     }
     return unmark(html);
   }
@@ -398,7 +410,7 @@
     s = s.replace(FLAG_ANY, " ");
     s = unmark(s);
     s = s.replace(LINK_G, "$1");
-    s = s.replace(TAG_G, function (_, fmt, num, cap, alt) {
+    s = s.replace(TAG_G, function (_, word, fmt, num, cap, alt) {
       var words = [(cap || "").trim(), (alt || "").trim()].filter(Boolean).join(" ");
       return words ? "(" + words + ")" : "";
     });

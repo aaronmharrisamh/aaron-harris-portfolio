@@ -1820,6 +1820,69 @@ async function main() {
   await sleep(400);
   await send("Emulation.clearDeviceMetricsOverride");
 
+  // TP5. A TILE AT ITS OWN SIZE. A photo with Display True Pixel Size on is
+  // drawn whole in its tile over the carousel's blurred backdrop, one
+  // backdrop however often the train is drawn. A crisp photo keeps hard
+  // edges only while its tile holds it whole: a 160x240 PNG is crisp, and
+  // no tile is 240 px tall at these widths.
+  await send("Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html?tp=5` });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(PHOTO_HELPER);
+  const tp5add = await evaluate(`(async () => {
+    window.edit();
+    await new Promise(r => setTimeout(r, 500));
+    const train = document.querySelector('[data-section="br"]');
+    const region = window.AMH.gallery.regions().filter(r => r.el === train)[0];
+    if (!region) return -1;
+    const files = await Promise.all([window.__photo('Icon.png', 32, 32), window.__photo('Rue Cler.png', 1200, 800),
+      window.__photo('Tall.png', 160, 240, '#8a4b0e')]);
+    window.AMH.tool.addPhoto(region, { files: files });
+    const t0 = Date.now();
+    while (document.querySelectorAll('.ced-addphoto .ced-describe .ced-photo').length !== 3 && Date.now() - t0 < 12000) {
+      await new Promise(r => setTimeout(r, 150));
+    }
+    for (let i = 0; i < 2; i++) {
+      const next = document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent');
+      if (next) next.click();
+      await new Promise(r => setTimeout(r, 400));
+    }
+    await new Promise(r => setTimeout(r, 1200));
+    return region.model.length;
+  })()`, { awaitPromise: true });
+  const TP5_TILES = `(function () { var train = document.querySelector('[data-section="br"]');
+    return [...train.querySelectorAll('.gal-tile')].map(function (f) {
+      var im = f.querySelector('img'), amb = f.querySelectorAll('.gal-tile__ambient'), cs = getComputedStyle(im);
+      return { size: im.getAttribute('data-original-size'), truesize: im.getAttribute('data-truesize') === '1',
+               fit: cs.objectFit, rendering: cs.imageRendering, ambients: amb.length,
+               fromSd: amb.length === 1 && amb[0].getAttribute('src') === im.getAttribute('data-sd') };
+    }); })()`;
+  const tp5a = await evaluate(TP5_TILES);
+  await send("Emulation.setDeviceMetricsOverride",
+    { width: 1100, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await sleep(900);
+  const tp5b = await evaluate(TP5_TILES);
+  const tp5read = await evaluate(`(function () { var train = document.querySelector('[data-section="br"]');
+    var region = window.AMH.gallery.regions().filter(function (r) { return r.el === train; })[0];
+    return region ? region.kind.readImgs(train).length : -1; })()`);
+  const tileOf = (list, size) => list.find((t) => t.size === size) || {};
+  check("true size: a tile with the switch on draws its photo whole over one backdrop from the small copy, one after a resize too, and a tile without it has neither",
+    tp5add === 3 && tileOf(tp5a, "32x32").truesize && tileOf(tp5a, "32x32").fit === "scale-down" &&
+    tileOf(tp5a, "32x32").ambients === 1 && tileOf(tp5a, "32x32").fromSd && tileOf(tp5b, "32x32").ambients === 1 &&
+    tileOf(tp5a, "1200x800").truesize === false && tileOf(tp5a, "1200x800").fit === "cover" &&
+    tileOf(tp5a, "1200x800").ambients === 0 && tp5read === 3,
+    JSON.stringify({ added: tp5add, read: tp5read, before: tp5a, after: tp5b }));
+  check("true size: a crisp photo keeps hard edges while its tile holds it whole, and a tile smaller than it smooths it",
+    tileOf(tp5a, "32x32").rendering === "pixelated" && tileOf(tp5b, "32x32").rendering === "pixelated" &&
+    tileOf(tp5a, "160x240").truesize && tileOf(tp5a, "160x240").rendering === "auto" &&
+    tileOf(tp5b, "160x240").rendering === "auto",
+    JSON.stringify({ before: tp5a, after: tp5b }));
+  await evaluate(`window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(300);
+  await send("Emulation.clearDeviceMetricsOverride");
+
   // ============ GL. THE GALLERY IS A LIST ============
   // Every other edit replaces what is between one pair of markers, so nothing
   // could add a pair. A list is the answer: a run of blocks the editor may add
@@ -2939,7 +3002,8 @@ async function main() {
       acts: [...rows[0].querySelectorAll('.ced-photo__acts .ced-tool')]
         .map(x => x.getAttribute('aria-label') || x.textContent),
       firstUpDead: rows[0].querySelector('[aria-label="Move earlier"]').disabled,
-      buttons: [...b.querySelectorAll('.ced-modal__btns .ced-btn')].map(x => x.textContent),
+      /* the box's own actions; the Frame group's buttons are the frame's, which FS5 reads */
+      buttons: [...b.querySelectorAll('.ced-modal__btns > .ced-btn')].map(x => x.textContent),
       headRule: parseFloat(getComputedStyle(b.querySelector('.ced-modal__head')).borderBottomWidth),
       btnRule: parseFloat(getComputedStyle(b.querySelector('.ced-modal__btns')).borderTopWidth) };
   })()`);
@@ -4760,6 +4824,8 @@ async function main() {
   const gifMoving = makeGif(64, 64, TWO_FRAMES, "made by the suite");
   const gifMovingCut = makeGif(64, 64, TWO_FRAMES);
   const gifStill = makeGif(16, 16, [() => 3]);
+  /* larger than any frame the suite draws, for True Pixel Size (TP4) */
+  const gifLarge = makeGif(800, 450, [(x, y) => ((x >> 5) + (y >> 5)) % 2 ? 1 : 2, (x, y) => ((x >> 5) + (y >> 5)) % 2 ? 2 : 3]);
   const bytesIn = (buf) => `Uint8Array.from(atob(${JSON.stringify(Buffer.from(buf).toString("base64"))}), function (c) { return c.charCodeAt(0); })`;
   const yellowOf = `(function () { var p = document.createElement('span'); document.body.appendChild(p);
     p.style.color = getComputedStyle(document.documentElement).getPropertyValue('--c-yellow').trim();
@@ -5132,6 +5198,630 @@ async function main() {
   check("viewer: a seed has no original, so it has no See original",
     bt13b.open === true && bt13b.hidden === true, JSON.stringify(bt13b));
   writeFileSync(join(SERVE, "index.html"), servedSource("index.html"));
+
+  // ============ LD. A PHOTO SHOWN WHOLE KEEPS ITS DISPLAY COPY ============
+  // With Display Maximum UHD on, an image names its original in src and its
+  // display copy in data-hd. The editor reads a page's images every time the
+  // page loads, so the read must take the display copy from data-hd. An entry
+  // built from the src attribute held the original as its display copy, the
+  // next save wrote the original into data-hd, and the save's orphan scan then
+  // moved the display copy out of the folder.
+  const servedUhdRegion = (caption) =>
+    '\n            <div class="gallery">\n' +
+    '              <img src="' + SERVED + '_original.png" loading="lazy"' +
+    pad19 + 'srcset="' + SERVED + '_sd.webp 480w, ' + SERVED + '_original.png 2400w"' +
+    pad19 + 'sizes="(max-width: 880px) 84vw, (max-width: 1180px) 48vw, 562px"' +
+    pad19 + 'width="1600"' + pad19 + 'height="900"' +
+    pad19 + 'alt="A photo the page names"' +
+    pad19 + 'data-caption="' + caption + '"' +
+    pad19 + 'data-uhd="1"' +
+    pad19 + 'data-hd="' + SERVED + '.jpg"' +
+    pad19 + 'data-sd="' + SERVED + '_sd.webp"' +
+    pad19 + 'data-original="' + SERVED + '_original.png"' +
+    pad19 + 'data-original-size="2400x1350"' +
+    pad19 + 'data-original-bytes="' + seedJpg.length + '" />' +
+    '\n            </div>\n            ';
+  writeFileSync(join(SERVE, "index.html"), spliceInner(servedSource("index.html"), "edit", "fr2-gallery",
+    servedUhdRegion("A photo shown whole")));
+  await send("Page.navigate", { url: PAGE + "?ld=1" });
+  await waitLoaded();
+  await sleep(1400);
+
+  // LD1. an <img> with the switch on reads back with its display copy as src, and writes it into data-hd
+  const ld1 = await evaluate(`(function () {
+    var d = new DOMParser().parseFromString(${JSON.stringify(servedUhdRegion("A photo shown whole"))}, 'text/html');
+    var R = AMH.tool.imageRegion, K = AMH.tool.imageKinds.carousel;
+    var en = R.fromImg(d.querySelector('img'), K);
+    var out = R.serialize([en], "", K);
+    return { src: en.src, uhd: !!en.uhd, hd: (/data-hd="([^"]*)"/.exec(out) || [])[1] || "",
+             named: AMH.images.named(out) };
+  })()`);
+  check("uhd: an image with the switch on reads back with its display copy as src, and writes that copy into data-hd",
+    ld1.src === SERVED + ".jpg" && ld1.uhd === true && ld1.hd === SERVED + ".jpg" &&
+    ld1.named.indexOf(SERVED + ".jpg") !== -1, JSON.stringify(ld1));
+
+  // LD2. a page that shows a photo whole is read on load, edited, and written back with its display copy
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  const ld2model = await evaluate(`(function () { var reg = AMH.tool.regionFor('fr2-gallery'), en = reg.model[0];
+    var im = reg.live ? reg.live.querySelector('.gallery__img') : null;
+    return { src: en.src, uhd: !!en.uhd, truesize: !!en.truesize,
+             readTruesize: im ? AMH.images.read(im).truesize : null }; })()`);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(`(function () {
+    var i = document.querySelector('.ced-photos .ced-photo input');
+    i.value = 'Renamed with the switch on';
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const ld2 = await waitFor(`window.__dl`, 12000);
+  const ld2Text = ld2 && ld2.name === "index.html" ? Buffer.from(ld2.b64, "base64").toString("utf8") : "";
+  const ld2Region = regionOf(ld2Text, "fr2-gallery");
+  check("uhd: a page that shows a photo whole is read on load and written back with its display copy in data-hd",
+    ld2model.src === SERVED + ".jpg" && ld2model.uhd === true &&
+    ld2Region === servedUhdRegion("Renamed with the switch on"),
+    JSON.stringify({ model: ld2model, name: ld2 && ld2.name, region: ld2Region.replace(/\s+/g, " ").slice(0, 420) }));
+  // TP9. the same image has UHD on and no True Pixel Size: it reads the
+  // second switch off, and its export gains no attribute from it
+  check("true size: an image with UHD on and no True Pixel Size reads it off, and exports byte for byte as it was",
+    ld2model.truesize === false && ld2model.readTruesize === false &&
+    ld2Region === servedUhdRegion("Renamed with the switch on") && !/data-truesize|data-crisp/.test(ld2Region),
+    JSON.stringify(ld2model));
+  await evaluate(`window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(300);
+  writeFileSync(join(SERVE, "index.html"), servedSource("index.html"));
+
+  // ============ CS. THE CAPTION STRIP ============
+  // A carousel with any caption shows it in a strip under the photos, at all
+  // times, with the arrows at the strip's right. The strip is as tall as the
+  // longest caption, two lines at most, and a carousel with no caption has no
+  // strip, so its arrows stay over the photo.
+  await send("Page.navigate", { url: PAGE + "?cs=1" });
+  await waitLoaded();
+  await sleep(1400);
+  const STRIP_OF = `(function (g) {
+    if (!g) return null;
+    var box = function (el) {
+      if (!el) return null;
+      var b = el.getBoundingClientRect();
+      return { t: b.top, b: b.bottom, l: b.left, r: b.right, h: b.height };
+    };
+    var label = g.querySelector('.gallery__caption');
+    var rocker = g.querySelector('.gallery__nav-cluster');
+    var style = label ? getComputedStyle(label) : null;
+    return {
+      strip: !!g.querySelector('.gallery__holder > .gallery__strip'),
+      view: !!g.querySelector('.gallery__holder > .gallery__view > .gallery__stage'),
+      stripBox: box(g.querySelector('.gallery__strip')),
+      img: box(g.querySelector('.gallery__stage img.is-active')),
+      label: box(label), rocker: box(rocker),
+      rockerIn: rocker ? rocker.parentNode.className : '',
+      opacity: style ? style.opacity : '', visibility: style ? style.visibility : '',
+      text: label ? label.querySelector('.gallery__caption-text').textContent : null,
+      sizers: g.querySelectorAll('.gallery__caption-sizer').length,
+      captions: [].filter.call(g.querySelectorAll('.gallery__stage img'),
+        function (im) { return !!im.getAttribute('data-caption'); }).length
+    };
+  })`;
+  const FIRST_CARD = `document.querySelectorAll('.work .gallery')[0]`;
+
+  // CS1. a carousel with captions shows the caption under the photo with no hover, and the arrows beside it
+  await evaluate(`${FIRST_CARD}.scrollIntoView({ block: "center" })`);
+  await waitFor(`(function () { var im = ${FIRST_CARD}.querySelector('.gallery__stage img.is-active');
+    return !!im && im.complete; })()`, 8000);
+  const cs1 = await evaluate(STRIP_OF + `(${FIRST_CARD})`);
+  check("carousel: a caption sits in a strip under the photo, shown with no hover, with the arrows beside it",
+    !!cs1 && cs1.strip && cs1.view && cs1.rockerIn === "gallery__strip" &&
+    cs1.opacity === "1" && cs1.visibility === "visible" && !!cs1.text &&
+    cs1.img.b <= cs1.stripBox.t + 0.5 && cs1.captions > 0 && cs1.sizers === cs1.captions,
+    JSON.stringify(cs1));
+
+  // CS3. a long caption takes two lines and not three, and the strip keeps one height through every photo
+  await evaluate(`(function () {
+    var g = document.createElement('div');
+    g.className = 'gallery';
+    g.id = 'csLong';
+    var long = 'Fig. A: ' + 'the dish at dawn, seen from the ridge above the valley, '.repeat(8);
+    g.innerHTML = '<img src="img/seed/forerunner-01.jpg" alt="a" data-caption="' + long + '">' +
+      '<img src="img/seed/forerunner-02.jpg" alt="b" data-caption="Short">' +
+      '<img src="img/seed/forerunner-03.jpg" alt="c">';
+    document.querySelector('.work .project__media').appendChild(g);
+    AMH.work.buildGalleries();
+    g.scrollIntoView({ block: "center" });
+  })()`);
+  await sleep(400);
+  const cs3 = [];
+  for (let k = 0; k < 3; k++) {
+    cs3.push(await evaluate(`(function () {
+      var g = document.getElementById('csLong');
+      var text = g.querySelector('.gallery__caption-text');
+      var sizer = g.querySelector('.gallery__caption-sizer');
+      var lh = parseFloat(getComputedStyle(text).lineHeight);
+      return { strip: Math.round(g.querySelector('.gallery__strip').getBoundingClientRect().height),
+        longest: Math.round(sizer.getBoundingClientRect().height / lh),
+        shown: Math.round(text.getBoundingClientRect().height / lh),
+        hidden: getComputedStyle(g.querySelector('.gallery__caption')).visibility === 'hidden' };
+    })()`));
+    await evaluate(`document.querySelector('#csLong .gallery__nav--next.gallery__nav--bar').click()`);
+    await sleep(250);
+  }
+  await evaluate(`document.getElementById('csLong').remove()`);
+  check("carousel: a long caption takes two lines and not three, and the strip keeps one height through every photo",
+    cs3[0].longest === 2 && cs3[0].shown === 2 && cs3[1].shown === 1 && cs3[2].hidden === true &&
+    cs3.every((m) => m.strip === cs3[0].strip), JSON.stringify(cs3));
+
+  // CS4. a one-photo carousel with a caption has the strip and no arrows
+  await evaluate(`(function () {
+    var g = document.createElement('div');
+    g.className = 'gallery';
+    g.id = 'csOne';
+    g.innerHTML = '<img src="img/seed/forerunner-01.jpg" alt="a" data-caption="One photo">';
+    document.querySelector('.work .project__media').appendChild(g);
+    AMH.work.buildGalleries();
+  })()`);
+  await sleep(200);
+  const cs4 = await evaluate(STRIP_OF + `(document.getElementById('csOne'))`);
+  await evaluate(`document.getElementById('csOne').remove()`);
+  check("carousel: a one-photo carousel with a caption has the strip and no arrows",
+    !!cs4 && cs4.strip && cs4.rocker === null && cs4.text === "One photo" && cs4.opacity === "1",
+    JSON.stringify(cs4));
+
+  // CS5. a deep dive's caption is on screen when its drawer opens, and nothing takes it away
+  await evaluate(`[...document.querySelectorAll('.project__more')][0].click()`);
+  await sleep(400);
+  const cs5 = await evaluate(`(function () {
+    var cap = document.querySelector('.dd__body .gallery__caption');
+    return { cap: !!cap, flashed: !!cap && cap.classList.contains('is-visible'),
+      measured: ${STRIP_OF}(document.querySelector('.dd__body .gallery')) };
+  })()`);
+  await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(500);
+  check("carousel: a deep dive's caption is on screen when its drawer opens, and nothing takes it away",
+    cs5.cap && !cs5.flashed && !!cs5.measured && cs5.measured.strip &&
+    cs5.measured.opacity === "1" && cs5.measured.visibility === "visible", JSON.stringify(cs5));
+
+  // CS6. at 390 px the label and the arrows share the strip without overlapping
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await sleep(600);
+  await evaluate(`${FIRST_CARD}.scrollIntoView({ block: "center" })`);
+  await sleep(200);
+  const cs6 = await evaluate(STRIP_OF + `(${FIRST_CARD})`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+  check("carousel: at 390 px the label and the arrows share the strip without overlapping",
+    !!cs6 && cs6.strip && !!cs6.label && !!cs6.rocker && cs6.label.r <= cs6.rocker.l + 0.5 &&
+    cs6.label.t >= cs6.stripBox.t - 0.5 && cs6.rocker.b <= cs6.stripBox.b + 0.5, JSON.stringify(cs6));
+
+  // CS2. photos added with no caption give a carousel with no strip, whose arrows stay over the photo
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await batchInto("aiw-gallery", `__photo('Plain one.png', 800, 600), __photo('Plain two.png', 800, 600, '#aa3355')`, 2);
+  await batchAdd();
+  const cs2 = await evaluate(STRIP_OF + `(AMH.tool.regionFor('aiw-gallery').live)`);
+  check("carousel: photos with no caption give a carousel with no strip, and its arrows stay over the photo",
+    !!cs2 && cs2.strip === false && cs2.view && cs2.rockerIn === "gallery__hud" && cs2.label === null,
+    JSON.stringify(cs2));
+
+  // CS7. the caption pencil opens its field in the strip, and the caption's cell steps aside until it closes
+  await batchInto("phl-gallery", `__photo('Captioned.png', 800, 600)`, 1);
+  await evaluate(`(function () {
+    var i = ${ROWS}[0].querySelector('input');
+    i.value = 'A caption in the strip';
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await batchAdd();
+  await sleep(300);
+  await evaluate(`AMH.tool.regionFor('phl-gallery').live.querySelector('.ced-cappen').click()`);
+  await sleep(250);
+  const cs7a = await evaluate(`(function () {
+    var label = AMH.tool.regionFor('phl-gallery').live.querySelector('.gallery__caption');
+    var field = label.querySelector('.ced-capedit');
+    return { inStrip: !!label.closest('.gallery__strip'), field: !!field, value: field ? field.value : null,
+      cell: getComputedStyle(label.querySelector('.gallery__caption-cell')).display,
+      fieldWidth: field ? Math.round(field.getBoundingClientRect().width) : 0 };
+  })()`);
+  await pressKey("Escape", "Escape", 27);
+  await sleep(300);
+  const cs7b = await evaluate(`(function () {
+    var label = AMH.tool.regionFor('phl-gallery').live.querySelector('.gallery__caption');
+    return { field: !!label.querySelector('.ced-capedit'),
+      cell: getComputedStyle(label.querySelector('.gallery__caption-cell')).display,
+      text: label.querySelector('.gallery__caption-text').textContent };
+  })()`);
+  check("captions: the pencil opens its field in the strip, and the caption's cell steps aside until the field closes",
+    cs7a.inStrip && cs7a.field && cs7a.value === "A caption in the strip" && cs7a.cell === "none" &&
+    cs7a.fieldWidth > 60 && !cs7b.field && cs7b.cell === "grid" && cs7b.text === "A caption in the strip",
+    JSON.stringify({ open: cs7a, closed: cs7b }));
+  await evaluate(`window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(300);
+
+  // ============ FS. A FRAME TAKES THE SHAPE OF ITS PHOTOS ============
+  // A frame is landscape or portrait. With no word on its wrapper its photos
+  // decide, and data-shape="landscape" or "portrait" is the author's word,
+  // which the PHOTOS box writes. Landscape runs from 16:9 to 20:9, portrait
+  // from 9:16 to 9:20, and a frame is never taller than the screen allows.
+  await send("Page.navigate", { url: PAGE + "?fs=1" });
+  await waitLoaded();
+  await sleep(1400);
+  const FRAME_OF = (js) => `(function (g) {
+    var v = g.querySelector('.gallery__view').getBoundingClientRect();
+    var h = g.querySelector('.gallery__holder').getBoundingClientRect();
+    var c = g.getBoundingClientRect();
+    return { portrait: g.classList.contains('gallery--portrait'), landscape: g.classList.contains('gallery--landscape'),
+      word: g.getAttribute('data-shape'), ratio: +(v.width / v.height).toFixed(4), viewH: Math.round(v.height),
+      holder: Math.round(h.width), column: Math.round(c.width),
+      left: Math.round(h.left - c.left), right: Math.round(c.right - h.right), screen: window.innerHeight };
+  })(${js})`;
+  const FRAME_GROUP = `(function () {
+    var grp = document.querySelector('.ced-photos .ced-frame');
+    return grp ? [].map.call(grp.querySelectorAll('button'), function (b) {
+      return b.textContent + (b.getAttribute('aria-pressed') === 'true' ? '*' : ''); }) : null;
+  })()`;
+  const BOX_BTN = (words) => `[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === ${JSON.stringify(words)}).click()`;
+  const FRAME_BTN = (word) => `document.querySelector('.ced-photos .ced-frame button[data-shape="${word}"]').click()`;
+  const BUILT = (page) => evaluate(`window.AMH.tool.buildPage(${JSON.stringify(page)}).then(p => p.text)`, { awaitPromise: true });
+  const openTagOf = (text, slug) => (/<div[^>]*>/.exec(regionOf(text, slug)) || [""])[0];
+
+  // FS1. the shape rule, row by row, and a word that is not a shape
+  const fs1 = await evaluate(`(function () {
+    var F = AMH.work.frameShape, r = function (w, h) { return { w: w, h: h }; };
+    var rows = [
+      [[r(0, 0), r(0, 0)], '', 'landscape', 16 / 9],
+      [[r(3000, 2000), r(4000, 3000)], '', 'landscape', 16 / 9],
+      [[r(2000, 1000)], '', 'landscape', 2],
+      [[r(3000, 1000)], '', 'landscape', 20 / 9],
+      [[r(1500, 2000), r(1500, 2000), r(1500, 2000)], '', 'portrait', 9 / 16],
+      [[r(900, 1950), r(900, 1950)], '', 'portrait', 900 / 1950],
+      [[r(900, 2500)], '', 'portrait', 9 / 20],
+      [[r(1500, 1000), r(1500, 1000), r(1500, 2000)], '', 'landscape', 16 / 9],
+      [[r(1500, 1000), r(1500, 2000)], '', 'landscape', 16 / 9],
+      [[r(1500, 2000), r(1500, 2000)], 'landscape', 'landscape', 16 / 9],
+      [[r(1500, 1000), r(1500, 1000)], 'portrait', 'portrait', 9 / 16],
+      [[r(1500, 2000), r(1500, 2000)], 'portait', 'portrait', 9 / 16],
+      [[r(1500, 1000), r(3000, 1000), r(2000, 1000)], '', 'landscape', 2]
+    ];
+    var bad = rows.map(function (row, i) {
+      var got = F(row[0], row[1]);
+      return got.orientation === row[2] && Math.abs(got.ratio - row[3]) < 1e-9 ? null : i + ' ' + JSON.stringify(got);
+    }).filter(Boolean);
+    var warned = [];
+    var warn = console.warn;
+    console.warn = function (m) { warned.push(String(m)); };
+    var g = document.createElement('div');
+    g.className = 'gallery';
+    g.setAttribute('data-shape', 'portait');
+    g.innerHTML = '<img src="img/seed/forerunner-01.jpg" width="1500" height="1000" alt="a">';
+    document.querySelector('.work .project__media').appendChild(g);
+    AMH.work.buildGalleries();
+    console.warn = warn;
+    var cls = g.className;
+    g.remove();
+    return { rows: rows.length, bad: bad, warned: warned.filter(function (w) { return w.indexOf('portait') !== -1; }).length, cls: cls };
+  })()`);
+  check("frame: the shape follows the photos and the author's word, row by row, and a word that is not a shape warns",
+    fs1.rows === 13 && fs1.bad.length === 0 && fs1.warned === 1 && / gallery--landscape/.test(fs1.cls),
+    JSON.stringify(fs1));
+
+  // FS2. every seed carousel on the home page keeps its 16:9 frame at the full width of its column
+  const fs2 = await evaluate(`[].map.call(document.querySelectorAll('.work .gallery.is-ready'), function (g) {
+    return ${FRAME_OF("g")};
+  })`);
+  check("frame: every seed carousel on the home page keeps its 16:9 frame at the full width of its column",
+    fs2.length === 7 && fs2.every((f) => f.landscape && Math.abs(f.ratio - 16 / 9) < 0.01 && Math.abs(f.holder - f.column) <= 1),
+    JSON.stringify(fs2.map((f) => [f.ratio, f.holder, f.column])));
+
+  // FS3. portrait photos give a portrait frame, which a short window makes narrower and keeps centered
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await batchInto("phl-gallery", `__photo('Tall one.png', 600, 900), __photo('Tall two.png', 600, 900, '#aa3355')`, 2);
+  await batchAdd();
+  const fs3a = await evaluate(FRAME_OF(`AMH.tool.regionFor('phl-gallery').live`));
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 700, deviceScaleFactor: 1, mobile: false });
+  await sleep(600);
+  const fs3b = await evaluate(FRAME_OF(`AMH.tool.regionFor('phl-gallery').live`));
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+  check("frame: portrait photos give a portrait 9:16 frame, which a short window makes narrower and keeps centered",
+    fs3a.portrait && Math.abs(fs3a.ratio - 0.5625) < 0.005 && fs3b.portrait && fs3b.holder < fs3b.column &&
+    Math.abs(fs3b.left - fs3b.right) <= 1 && Math.abs(fs3b.viewH - 0.85 * fs3b.screen) <= 2,
+    JSON.stringify({ first: fs3a, shortWindow: fs3b }));
+
+  // FS4. a panorama widens its frame, a 3:1 one up to 20:9 and no further
+  await batchInto("cog-gallery", `__photo('Wide three.png', 1500, 500)`, 1);
+  await batchAdd();
+  await batchInto("cvr-gallery", `__photo('Wide two.png', 1000, 500)`, 1);
+  await batchAdd();
+  const fs4 = await evaluate(`({ three: ${FRAME_OF("AMH.tool.regionFor('cog-gallery').live")},
+    two: ${FRAME_OF("AMH.tool.regionFor('cvr-gallery').live")} })`);
+  check("frame: a panorama widens its frame, a 3:1 one to 20:9 and no further, and a 2:1 one to 2:1",
+    fs4.three.landscape && Math.abs(fs4.three.ratio - 20 / 9) < 0.01 && fs4.two.landscape && Math.abs(fs4.two.ratio - 2) < 0.01,
+    JSON.stringify(fs4));
+
+  // FS5. the PHOTOS box offers the frame on a carousel; Cancel after a change asks, and Portrait with Apply takes
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').chip.click()`);
+  await sleep(400);
+  const fs5open = await evaluate(FRAME_GROUP);
+  await evaluate(FRAME_BTN("landscape"));
+  await evaluate(BOX_BTN("Cancel"));
+  await sleep(250);
+  const fs5ask = await evaluate(`({ ask: !!document.querySelector('.ced-ask'), title: (document.querySelector('.ced-ask .ced-slug') || {}).textContent })`);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Discard changes')?.click()`);
+  await sleep(300);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(FRAME_BTN("portrait"));
+  const fs5pressed = await evaluate(FRAME_GROUP);
+  await evaluate(BOX_BTN("Apply"));
+  await sleep(600);
+  const fs5after = await evaluate(FRAME_OF(`AMH.tool.regionFor('fr2-gallery').live`));
+  check("frame: the PHOTOS box offers Auto, Landscape and Portrait; Cancel after a change asks, and Portrait with Apply takes",
+    JSON.stringify(fs5open) === JSON.stringify(["Auto (landscape)*", "Landscape", "Portrait"]) &&
+    fs5ask.ask === true && fs5ask.title === "Discard your changes?" &&
+    JSON.stringify(fs5pressed) === JSON.stringify(["Auto (landscape)", "Landscape", "Portrait*"]) &&
+    fs5after.word === "portrait" && fs5after.portrait && Math.abs(fs5after.ratio - 0.5625) < 0.005,
+    JSON.stringify({ open: fs5open, ask: fs5ask, pressed: fs5pressed, after: fs5after }));
+
+  // FS6. the page's bytes carry the choice in the region's open tag, and nothing else changes
+  const fs6a = await BUILT("index.html");
+  const fs6exact = exportIsByteExact("index.html", fs6a, ["fr2-gallery", "phl-gallery", "cog-gallery", "cvr-gallery"]);
+  await evaluate(`AMH.tool.regionFor('phl-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(FRAME_BTN("portrait"));
+  await evaluate(BOX_BTN("Apply"));
+  await sleep(500);
+  const fs6b = await BUILT("index.html");
+  await evaluate(`AMH.tool.regionFor('phl-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(FRAME_BTN(""));
+  await evaluate(BOX_BTN("Apply"));
+  await sleep(500);
+  const fs6c = await BUILT("index.html");
+  const servedHome = servedSource("index.html");
+  check("frame: the page's bytes carry the choice in the region's open tag, Auto gives the tag back as it was, and nothing else changes",
+    openTagOf(fs6a, "fr2-gallery") === '<div class="gallery" data-shape="portrait">' && fs6exact.ok &&
+    openTagOf(fs6b, "phl-gallery") === '<div class="gallery" data-shape="portrait">' &&
+    openTagOf(fs6c, "phl-gallery") === openTagOf(servedHome, "phl-gallery") &&
+    openTagOf(servedHome, "phl-gallery") === '<div class="gallery">',
+    JSON.stringify({ fr2: openTagOf(fs6a, "fr2-gallery"), exact: fs6exact.detail,
+      portrait: openTagOf(fs6b, "phl-gallery"), auto: openTagOf(fs6c, "phl-gallery") }));
+
+  // FS7. the choice travels to another page, and that page's own PHOTOS box, a gallery section, has no frame
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html?fs=7` });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`window.edit()`);
+  await sleep(600);
+  const fs7text = await BUILT("index.html");
+  await evaluate(`AMH.tool.editPhotos(AMH.gallery.regions()[0])`);
+  await sleep(500);
+  const fs7box = await evaluate(`({ box: !!document.querySelector('.ced-photos'), frame: !!document.querySelector('.ced-photos .ced-frame') })`);
+  await evaluate(BOX_BTN("Cancel"));
+  await sleep(300);
+  await send("Page.navigate", { url: PAGE + "?fs=8" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`window.edit()`);
+  await sleep(800);
+  const fs7back = await evaluate(FRAME_OF(`AMH.tool.regionFor('fr2-gallery').live`));
+  check("frame: the choice travels to another page's export and back onto its carousel, and a gallery section's box has no frame",
+    openTagOf(fs7text, "fr2-gallery") === '<div class="gallery" data-shape="portrait">' &&
+    fs7box.box && !fs7box.frame && fs7back.word === "portrait" && fs7back.portrait,
+    JSON.stringify({ tag: openTagOf(fs7text, "fr2-gallery"), box: fs7box, back: fs7back }));
+
+  // FS8. a deep dive's choice is written into its template, and the drawer opened again builds that frame
+  await evaluate(`[...document.querySelectorAll('.project__more')][0].click()`);
+  await sleep(600);
+  await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').chip.click()`);
+  await sleep(400);
+  const fs8group = await evaluate(FRAME_GROUP);
+  await evaluate(FRAME_BTN("portrait"));
+  await evaluate(BOX_BTN("Apply"));
+  await sleep(500);
+  const fs8tpl = await evaluate(`AMH.tool.regionFor('fr3-dd-gallery').el.getAttribute('data-shape')`);
+  await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(500);
+  await evaluate(`[...document.querySelectorAll('.project__more')][0].click()`);
+  await sleep(600);
+  const fs8again = await evaluate(FRAME_OF(`document.querySelector('.dd__body .gallery')`));
+  await evaluate(`document.querySelector('.dd__close').click()`);
+  await sleep(400);
+  check("frame: a deep dive's choice is written into its template, and the drawer opened again builds that frame",
+    Array.isArray(fs8group) && fs8group.length === 3 && fs8tpl === "portrait" && fs8again.portrait && fs8again.word === "portrait",
+    JSON.stringify({ group: fs8group, template: fs8tpl, again: fs8again }));
+
+  // FS9. revert takes the choice back off the carousel and out of the template
+  await evaluate(`window.edit.revertAll()`);
+  await sleep(600);
+  const fs9 = await evaluate(`({ card: ${FRAME_OF("AMH.tool.regionFor('fr2-gallery').live")},
+    template: AMH.tool.regionFor('fr3-dd-gallery').el.getAttribute('data-shape') })`);
+  check("frame: revert takes the choice back off the carousel and out of the deep dive's template",
+    fs9.card.word === null && fs9.card.landscape && Math.abs(fs9.card.ratio - 16 / 9) < 0.01 && fs9.template === null,
+    JSON.stringify(fs9));
+  await evaluate(`window.edit.pending.clear(); window.edit();`);
+  await sleep(300);
+
+  // FS10. a region's open tag takes the named attributes and keeps every other byte as written
+  const fs10 = await evaluate(`(function () {
+    var S = AMH.tool.spliceRegion;
+    var page = function (tag, inner) {
+      return 'A<!--[edit:x]-->\\n  ' + tag + (inner || '<img src="a.jpg">') + '</div><!--[/edit:x]-->Z';
+    };
+    var cases = [
+      ['<div class="gallery">', { 'data-shape': 'portrait' }, '<div class="gallery" data-shape="portrait">'],
+      ['<div class="gallery" data-shape="portrait">', { 'data-shape': 'portrait' }, '<div class="gallery" data-shape="portrait">'],
+      ['<div class="gallery"  data-shape=\\'landscape\\'>', { 'data-shape': 'portrait' }, '<div class="gallery"  data-shape="portrait">'],
+      ['<div class="gallery" data-shape="portrait">', { 'data-shape': null }, '<div class="gallery">'],
+      ['<div class="gallery" data-next-preview>', { 'data-shape': 'portrait' }, '<div class="gallery" data-next-preview data-shape="portrait">'],
+      ['<div class="gallery" data-next-preview data-shape="portrait">', { 'data-shape': null }, '<div class="gallery" data-next-preview>'],
+      ['<div class="gallery" title="a data-shape=x">', { 'data-shape': 'portrait' }, '<div class="gallery" title="a data-shape=x" data-shape="portrait">'],
+      ['<div class="gallery">', null, '<div class="gallery">']
+    ];
+    return cases.map(function (c) {
+      var got = S(page(c[0]), 'x', 'INNER', c[1]);
+      return got === page(c[2], 'INNER') ? 'ok' : got;
+    });
+  })()`);
+  check("frame: a region's open tag takes the named attributes and keeps every other byte as it was written",
+    fs10.length === 8 && fs10.every((r) => r === "ok"), JSON.stringify(fs10));
+
+  // ============ TP. DISPLAY TRUE PIXEL SIZE ============
+  // The second switch on a photo. With it on, the page shows the original at
+  // its own size: no srcset, never enlarged, and an image of 240 px or less
+  // keeps hard pixel edges. A GIF and a PNG of 480 px or less start with it
+  // on, and the 480 is a setting the console can change.
+  await send("Page.navigate", { url: PAGE + "?tp=1" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(PHOTO_HELPER);
+
+  // TP1. the defaults, and the setting
+  const tp1 = await evaluate(`(function () {
+    var I = AMH.images;
+    var d = function (type, w, h) { var r = I.defaults({ type: type, ow: w, oh: h }); return [r.truesize, r.uhd].join(); };
+    var out = { px: I.SMALL_IMAGE_PX, gif: d('gif', 2000, 1000), p480: d('png', 480, 300), p481: d('png', 481, 100),
+                p32: d('png', 32, 32), jpg: d('jpg', 64, 64), webp: d('webp', 64, 64) };
+    I.SMALL_IMAGE_PX = 64;
+    out.at64 = d('png', 480, 300);
+    I.SMALL_IMAGE_PX = 480;
+    return out;
+  })()`);
+  check("true size: a GIF and a PNG of 480 px or less start with both switches on, any other photo with both off, and 480 is a setting",
+    tp1.px === 480 && tp1.gif === "true,true" && tp1.p480 === "true,true" && tp1.p481 === "false,false" &&
+    tp1.p32 === "true,true" && tp1.jpg === "false,false" && tp1.webp === "false,false" && tp1.at64 === "false,false",
+    JSON.stringify(tp1));
+
+  // TP2. the markup: the original with no srcset, the display copy kept, and
+  // crisp only for an image of 240 px or less
+  const tp2 = await evaluate(`(function () {
+    var I = AMH.images, slot = { sizes: '100vw', widest: 20 };
+    var pairs = function (list) { var o = {}; list.forEach(function (a) { o[a[0]] = a[1]; }); return o; };
+    var entry = function (name, w, h, type) {
+      var base = 'img/work/' + name + '-abc123';
+      return { src: base + '.jpg', sd: base + '_sd.webp', sdw: Math.min(w, 480), w: w, h: h, ow: w, oh: h,
+               original: base + '_original.' + type, bytes: 900, truesize: true };
+    };
+    var icon = pairs(I.attrs(entry('icon', 32, 32, 'png'), slot));
+    var gif = pairs(I.attrs(entry('orbit', 1280, 720, 'gif'), slot));
+    var mid = pairs(I.attrs(entry('mid', 480, 300, 'png'), slot));
+    var im = document.createElement('img');
+    I.attrs(entry('icon', 32, 32, 'png'), slot).forEach(function (a) { im.setAttribute(a[0], a[1]); });
+    var back = I.read(im);
+    return { icon: icon, gifCrisp: 'data-crisp' in gif, gifSrcset: 'srcset' in gif, midCrisp: 'data-crisp' in mid,
+             read: { truesize: back.truesize, uhd: back.uhd, src: back.src } };
+  })()`);
+  check("true size: the markup names the original with no srcset, keeps the display copy in data-hd, and marks crisp only an image of 240 px or less",
+    tp2.icon.src === "img/work/icon-abc123_original.png" && !("srcset" in tp2.icon) && !("sizes" in tp2.icon) &&
+    tp2.icon["data-truesize"] === "1" && tp2.icon["data-uhd"] === "1" && tp2.icon["data-hd"] === "img/work/icon-abc123.jpg" &&
+    tp2.icon["data-crisp"] === "1" && !tp2.gifCrisp && !tp2.gifSrcset && !tp2.midCrisp,
+    JSON.stringify(tp2));
+  check("true size: the markup reads back with True Pixel Size on, UHD on, and the display copy as src",
+    tp2.read.truesize === true && tp2.read.uhd === true && tp2.read.src === "img/work/icon-abc123.jpg",
+    JSON.stringify(tp2.read));
+
+  // TP3. the wizard's rows: the defaults, and the lock on UHD
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await batchInto("cog-gallery", `__photo('Icon.png', 32, 32), __photo('Big Frame.png', 1200, 800, '#553311')`, 2);
+  const TP_ROWS = `${ROWS}.map(function (r) { var t = r.querySelector('.ced-truesize input'), u = r.querySelector('.ced-uhd input');
+    return { ts: !!t && t.checked, uhd: !!u && u.checked, locked: !!u && u.disabled }; })`;
+  const tp3a = await evaluate(TP_ROWS);
+  const tp3b = await evaluate(`(function () { var r = ${ROWS}[0];
+    var t = r.querySelector('.ced-truesize input'), u = r.querySelector('.ced-uhd input');
+    t.click();
+    var off = { ts: t.checked, uhd: u.checked, locked: u.disabled };
+    t.click();
+    return { off: off, on: { ts: t.checked, uhd: u.checked, locked: u.disabled } }; })()`);
+  check("true size: a 32x32 PNG's row starts with True Pixel Size on and UHD on and locked, and a 1200x800 PNG's row with both off",
+    tp3a.length === 2 && tp3a[0].ts && tp3a[0].uhd && tp3a[0].locked && !tp3a[1].ts && !tp3a[1].uhd && !tp3a[1].locked,
+    JSON.stringify(tp3a));
+  check("true size: turning True Pixel Size off leaves UHD on and free, and turning it on locks UHD again",
+    tp3b.off.ts === false && tp3b.off.uhd === true && tp3b.off.locked === false && tp3b.on.ts && tp3b.on.uhd && tp3b.on.locked,
+    JSON.stringify(tp3b));
+  await batchAdd();
+
+  // TP4. a carousel draws the icon at its own size with square pixels, and a
+  // GIF larger than its frame shrinks to fit and is smoothed
+  await batchInto("cvr-gallery", `Promise.resolve(new File([${bytesIn(gifLarge)}], 'Orbit Large.gif', { type: 'image/gif' }))`, 1);
+  const tp4row = await evaluate(TP_ROWS);
+  await batchAdd();
+  /* bring a carousel's photo with the switch on to the front, and into view */
+  const TP_FRONT = (slug) => `(async function () {
+    var g = AMH.tool.regionFor('${slug}').live;
+    g.scrollIntoView({ block: 'center' });
+    for (var i = 0; i < 8; i++) {
+      var a = g.querySelector('.gallery__img.is-active');
+      if (a && a.getAttribute('data-truesize') === '1') return true;
+      var next = g.querySelector('.gallery__nav--next');
+      if (!next) return false;
+      next.click();
+      await new Promise(function (r) { setTimeout(r, 600); });
+    }
+    return false;
+  })()`;
+  const TP_SHOWN = (slug) => `(function () { var a = AMH.tool.regionFor('${slug}').live.querySelector('.gallery__img.is-active');
+    if (!a || a.getAttribute('data-truesize') !== '1' || !a.complete || !a.naturalWidth) return null;
+    return { box: [a.offsetWidth, a.offsetHeight], natural: [a.naturalWidth, a.naturalHeight],
+             rendering: getComputedStyle(a).imageRendering, crisp: a.hasAttribute('data-crisp') }; })()`;
+  await evaluate(TP_FRONT("cog-gallery"), { awaitPromise: true });
+  const tp4icon = await waitFor(TP_SHOWN("cog-gallery"), 10000);
+  await evaluate(TP_FRONT("cvr-gallery"), { awaitPromise: true });
+  const tp4gif = await waitFor(TP_SHOWN("cvr-gallery"), 15000);
+  check("true size: a carousel draws a 32x32 PNG at 32x32 CSS px with square pixels",
+    !!tp4icon && tp4icon.box.join() === "32,32" && tp4icon.rendering === "pixelated" && tp4icon.crisp === true,
+    JSON.stringify(tp4icon));
+  check("true size: a GIF larger than its frame starts with both switches on, shrinks to fit its frame, and is smoothed",
+    tp4row.length === 1 && tp4row[0].ts && tp4row[0].uhd && !!tp4gif && tp4gif.natural[0] === 800 &&
+    tp4gif.box[0] > 0 && tp4gif.box[0] < 800 && tp4gif.rendering === "auto" && tp4gif.crisp === false,
+    JSON.stringify({ row: tp4row, gif: tp4gif }));
+
+  // TP7. the viewer draws the icon at its own size with square pixels, and a
+  // photo without the switch without them
+  await evaluate(TP_FRONT("cog-gallery"), { awaitPromise: true });
+  await evaluate(`AMH.tool.regionFor('cog-gallery').live.querySelector('.gallery__holder').click()`);
+  const tp7a = await waitFor(`(function () { var a = document.querySelector('.lightbox__img--active');
+    if (!AMH.work.lightbox.isOpen() || !a || !a.complete || !a.naturalWidth) return null;
+    return { box: [a.offsetWidth, a.offsetHeight], crisp: a.classList.contains('lightbox__img--crisp'),
+             rendering: getComputedStyle(a).imageRendering }; })()`, 8000);
+  await evaluate(`document.querySelector('.lightbox__nav--next').click()`);
+  await sleep(500);
+  const tp7b = await evaluate(`(function () { var a = document.querySelector('.lightbox__img--active');
+    return { crisp: a.classList.contains('lightbox__img--crisp'), rendering: getComputedStyle(a).imageRendering }; })()`);
+  await evaluate(`AMH.work.lightbox.close()`);
+  await sleep(300);
+  check("true size: the viewer draws the icon at 32x32 CSS px with square pixels, and the next photo without them",
+    !!tp7a && tp7a.box.join() === "32,32" && tp7a.crisp && tp7a.rendering === "pixelated" &&
+    tp7b.crisp === false && tp7b.rendering === "auto",
+    JSON.stringify({ icon: tp7a, next: tp7b }));
+
+  // TP8. Replace in the Photos box with a GIF turns both switches on
+  await evaluate(`AMH.tool.regionFor('cog-gallery').chip.click()`);
+  await sleep(400);
+  const tp8before = await evaluate(`(function () { var r = document.querySelectorAll('.ced-photos .ced-photo')[1];
+    return { ts: r.querySelector('.ced-truesize input').checked, uhd: r.querySelector('.ced-uhd input').checked }; })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-photo')[1].querySelectorAll('.ced-photo__acts .ced-tool')]
+    .find(x => x.textContent === 'Replace').click()`);
+  await evaluate(`window.__choose(document.querySelector('.ced-photos input[type=file]'),
+    new File([${bytesIn(gifMoving)}], 'Moving Orbit.gif', { type: 'image/gif' }))`);
+  const tp8 = await waitFor(`(function () { var r = document.querySelectorAll('.ced-photos .ced-photo')[1];
+    var tag = r ? r.querySelector('.ced-photo__tag') : null;
+    if (!tag) return null;
+    var u = r.querySelector('.ced-uhd input');
+    return { tag: tag.textContent, ts: r.querySelector('.ced-truesize input').checked, uhd: u.checked, locked: u.disabled }; })()`, 10000);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Discard changes')?.click()`);
+  await sleep(300);
+  check("true size: Replace with a GIF in the Photos box turns both switches on and locks UHD",
+    tp8before.ts === false && tp8before.uhd === false && !!tp8 && tp8.tag === "REPLACED" && tp8.ts && tp8.uhd && tp8.locked,
+    JSON.stringify({ before: tp8before, after: tp8 }));
+  await evaluate(`window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(300);
 
   // ============ MULTI-PAGE PUBLISH ============
   // Phase 2 Part 3 turned a page editor into a site editor. gallery.html and
@@ -6526,6 +7216,18 @@ async function main() {
     uhdCard.switches === 2 && uhdCard.before === false && uhdCard.after === true &&
     /900 x 1400/.test(uhdCard.what) && uhdCard.toggles === 2,
     JSON.stringify(uhdCard));
+  // BK6, the read. The preview draws the body as the publish will write it:
+  // the two tags on one line are one carousel. The check that compares the
+  // two is under the stream's own checks, once the publish has written it.
+  const bk6tab = await evaluate(`document.querySelector('.bc-panel').getAttribute('data-tab')`);
+  await evaluate(`document.querySelector('.bc-tab[data-tab="preview"]').click()`);
+  await sleep(500);
+  const bk6preview = await evaluate(`[].map.call(document.querySelectorAll('.bc-preview .bs-post__body .gallery'), function (g) {
+    return { word: g.getAttribute('data-shape') || '', built: g.classList.contains('is-ready'),
+             captions: [].map.call(g.querySelectorAll('.gallery__img'), function (i) { return i.getAttribute('data-caption') || ''; }) };
+  })`);
+  await evaluate(`document.querySelector('.bc-tab[data-tab="${bk6tab}"]').click()`);
+  await sleep(200);
   // rejection: a text file drop shows an error card
   await evaluate(`(function () {
     var f = new File(['nope'], 'notes.txt', { type: 'text/plain' });
@@ -6561,15 +7263,72 @@ async function main() {
     mdBad.length ? mdBad[0].name + ": " + firstDiff(mdOut[mdCases.indexOf(mdBad[0])], mdBad[0].exp) : "");
   check("markdown: the fixture holds the out-of-set case and the mixed case",
     mdCases.some((c) => /out of the set/.test(c.name)) && mdCases.some((c) => /^mixed/.test(c.name)));
-  // MD2. with a date, an image tag run becomes figures through the same
+  // MD2. with a date, an image tag run becomes a carousel through the same
   // tag renderer an HTML post uses; a tag inside code stays code
   const mdFig = await evaluate(`(function () {
     var html = AMH.markdown.render("Text.\\n\\n[img0001,Cap one|Alt one]\\n\\n\`[img0002]\` in code.", { date: "260711" });
     return html;
   })()`);
-  check("markdown: with a date the tag run becomes figures, and a tag in code does not",
-    /<p>Text\.<\/p>\n<figure class="bp-fig"><img src="\.\.\/blog\/260711_img0001\.jpg" loading="lazy" alt="Alt one" \/><figcaption>Cap one<\/figcaption><\/figure>\n?<p><code>&#91;img0002\]<\/code> in code\.<\/p>$/.test(mdFig),
+  check("markdown: with a date the tag run becomes a carousel, and a tag in code does not",
+    /<p>Text\.<\/p>\n<div class="gallery"><img src="\.\.\/blog\/260711_img0001\.jpg" loading="lazy" alt="Alt one" data-caption="Cap one" \/><\/div>\n?<p><code>&#91;img0002\]<\/code> in code\.<\/p>$/.test(mdFig),
     mdFig.slice(0, 220));
+  // TW1. one list of tags through AMH.blog.TAG and through the Markdown
+  // renderer's own copy of the rule, which must give the same answer
+  const tw1 = await evaluate(`(function () {
+    var TAG = new RegExp('^' + AMH.blog.TAG + '$');
+    return ['[img0005]', '[img0005,Fig. A: the dish at dawn]',
+      '[img0005,Fig. A: the dish at dawn|Satellite dish at sunrise]',
+      '[portrait img0005,Fig. A: the dish at dawn|Satellite dish at sunrise]', '[landscape img0005]',
+      '[png0005]', '[Portrait img0005]', '[portait img0005]', '[!portrait img0005]',
+      '[img0005,portrait of the team|Team]'].map(function (t) {
+        return [t, TAG.test(t), AMH.markdown.render(t) === t];
+      });
+  })()`);
+  const tw1want = [true, true, true, true, true, true, false, false, false, true];
+  check("tags: the blog and the Markdown renderer read every tag the same way, frame words included",
+    tw1.length === tw1want.length && tw1.every((r, i) => r[1] === tw1want[i] && r[2] === tw1want[i]),
+    JSON.stringify(tw1));
+  // BK1-BK3. runs follow the lines, the first word in a run sets the frame,
+  // and a Markdown post makes the same carousels as an HTML post
+  const bkRuns = await evaluate(`(function () {
+    var shape = function (html) {
+      var d = document.createElement('div');
+      d.innerHTML = html;
+      return { runs: [].map.call(d.querySelectorAll('.gallery'), function (g) {
+          return g.querySelectorAll('img').length + (g.getAttribute('data-shape') ? ':' + g.getAttribute('data-shape') : '');
+        }).join(' '),
+        figures: d.querySelectorAll('figure').length };
+    };
+    var src = {
+      backToBack: '[img0001,A]\\n[img0002,B]',
+      blankLine: '[img0001,A]\\n\\n[img0002,B]',
+      text: '[img0001,A]\\n\\nwords\\n\\n[img0002,B]',
+      single: '[img0001,A]',
+      wordFirst: '[portrait img0001]\\n[img0002]',
+      wordSecond: '[img0001]\\n[portrait img0002]',
+      twoWords: '[landscape img0001]\\n[portrait img0002]',
+      noWord: '[img0001]\\n[img0002]'
+    };
+    var out = {};
+    Object.keys(src).forEach(function (k) {
+      out[k] = { html: shape(AMH.blog.renderBody(src[k], '260711', '', {})),
+                 md: shape(AMH.markdown.render(src[k], { date: '260711' })) };
+    });
+    return out;
+  })()`);
+  const bkRun = (k) => bkRuns[k].html.runs;
+  check("tags: tags on back-to-back lines are one carousel, a blank line or text starts another, and every image is in one",
+    bkRun("backToBack") === "2" && bkRun("blankLine") === "1 1" && bkRun("text") === "1 1" &&
+    bkRun("single") === "1" &&
+    Object.keys(bkRuns).every((k) => bkRuns[k].html.figures === 0 && bkRuns[k].md.figures === 0),
+    JSON.stringify(bkRuns).slice(0, 400));
+  check("tags: the first frame word in a run sets the carousel's data-shape, and no word leaves the frame to the photos",
+    bkRun("wordFirst") === "2:portrait" && bkRun("wordSecond") === "2:portrait" &&
+    bkRun("twoWords") === "2:landscape" && bkRun("noWord") === "2",
+    JSON.stringify(bkRuns).slice(0, 400));
+  check("tags: a Markdown post makes the same carousels as an HTML post",
+    Object.keys(bkRuns).every((k) => bkRuns[k].md.runs === bkRuns[k].html.runs),
+    JSON.stringify(bkRuns).slice(0, 400));
   // MD3. the plain-text form of the mixed case, for excerpts and search
   const mdMixed = mdCases.find((c) => /^mixed/.test(c.name));
   const mdText = await evaluate(`AMH.markdown.text(${JSON.stringify(mdMixed.src)})`);
@@ -7226,7 +7985,9 @@ async function main() {
     // It is written through the editor's multi-page path, so the byte-exact
     // rule applies to it as much as to a page someone edited by hand.
     const outHome = zipFiles["index.html"].toString("utf8");
-    const srcHome = readFileSync(join(REPO, "index.html"), "utf-8");
+    // The page the suite served, and not the repo's: the carousels in it are
+    // the fixture's, and the repo's hold whatever photos the site has.
+    const srcHome = servedSource("index.html");
     const hlSpan = outHome.slice(outHome.indexOf("<!--[edit:blog-highlights]-->"),
       outHome.indexOf("<!--[/edit:blog-highlights]-->"));
     check("highlights: the published post is listed, linked at its reading view",
@@ -7421,19 +8182,29 @@ async function main() {
       streamSpan.replace(/\s+/g, " ").slice(0, 260));
     check("stream: the body is the whole post, with root paths and no source block",
       streamSpan.includes('<div class="bs-post__body">') &&
-      streamSpan.includes('<figure class="bp-fig"><img src="blog/260711_img0001.jpg"') &&
+      streamSpan.includes('<div class="gallery"><img src="blog/260711_img0001.jpg"') &&
       !streamSpan.includes('src="../blog/') && !streamSpan.includes("x-blog-source") &&
       streamSpan.includes("Tail paragraph with <strong>bold</strong>") &&
       streamSpan.includes('<p class="bm-older bm-older--end">This is the first month.</p>'),
       streamSpan.replace(/\s+/g, " ").slice(0, 200));
+    // BK6. the preview drew the carousels the publish wrote: the same runs,
+    // the same frame words, the same captions in the same order
+    const bk6stream = [...streamSpan.matchAll(/<div class="gallery"(?: data-shape="(\w+)")?>([\s\S]*?)<\/div>/g)]
+      .map((m) => ({ word: m[1] || "", captions: [...m[2].matchAll(/data-caption="([^"]*)"/g)].map((c) => c[1]) }));
+    check("preview: the composer's preview draws the same carousels the publish writes",
+      bk6preview.length === 1 && bk6stream.length === 1 &&
+      bk6preview.every((p, i) => p.built && p.word === bk6stream[i].word &&
+        JSON.stringify(p.captions) === JSON.stringify(bk6stream[i].captions)),
+      JSON.stringify({ preview: bk6preview, stream: bk6stream }));
 
     const month = zipFiles["blog/2607.html"].toString("utf8");
     const srcM = /<scr[i]pt type="text\/x-blog-source" data-format="md">\n([\s\S]*?)\n<\/scr[i]pt>/.exec(month);
     const decoded = srcM ? srcM[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
-    check("month file: article shell + static figures + head parity",
+    check("month file: article shell + a carousel of the run of tags + head parity",
       month.includes('id="p0001"') && month.includes('data-date="260711"') &&
-      month.includes('<figure class="bp-fig">') &&
-      month.includes('alt="Alt one"') && month.includes("<figcaption>Cap two</figcaption>") &&
+      month.includes('<div class="gallery"><img src="../blog/260711_img0001.jpg"') &&
+      !month.includes("<figure") &&
+      month.includes('alt="Alt one"') && month.includes('data-caption="Cap two"') &&
       month.includes('name="twitter:card"') && month.includes("fonts.googleapis.com") &&
       month.includes('href="../site.css"'),
       month.length + " chars");
@@ -7731,8 +8502,8 @@ async function main() {
       post: !!document.getElementById('s0001'),
       title: (document.querySelector('#s0001 .bs-post__title') || {}).textContent || '',
       when: (document.querySelector('#s0001 .bs-post__when') || { getAttribute: () => '' }).getAttribute('href') || '',
-      figs: document.querySelectorAll('#s0001 .bs-post__body figure.bp-fig img').length,
-      imgOk: [...document.querySelectorAll('#s0001 .bs-post__body img')].every(i => i.naturalWidth > 0),
+      figs: document.querySelectorAll('#s0001 .bs-post__body .gallery.is-ready .gallery__img').length,
+      imgOk: [...document.querySelectorAll('#s0001 .bs-post__body .gallery__img')].every(i => i.naturalWidth > 0),
       body: (document.querySelector('#s0001 .bs-post__body') || {}).textContent || '',
       fetches: window.__blogFetches,
     })`);
@@ -7983,11 +8754,11 @@ async function main() {
     await sleep(1800);
     const monthPage = await evaluate(`({
       cls: document.body.className,
-      figs: document.querySelectorAll('figure.bp-fig').length,
+      figs: document.querySelectorAll('.gallery.is-ready .gallery__img').length,
       brand: !!document.querySelector('.site-header .brand__title'),
     })`);
-    // the figures and the brand are in the file; the classes on the body
-    // are the two trunks saying they ran, and nothing else
+    // the carousel and the brand are in the file, and work.js built the
+    // carousel; the classes on the body are the trunks saying they ran
     check("bundle: standalone month page renders statically",
       /^blog-month(?: ga-[dm]-\w+| loaded)*$/.test(monthPage.cls) &&
       monthPage.figs === 2 && monthPage.brand,
@@ -8025,9 +8796,11 @@ async function main() {
       JSON.stringify({ links: chrome.links, current: chrome.current }));
     check("month page: the contact block and its endbar are on the page",
       chrome.contact && chrome.endbar, JSON.stringify(chrome).slice(0, 160));
-    // MC4c. The corner mark, on a month page as on every other page. It
-    // cannot publish from here: a month page carries its month list and not
-    // the counters, so the composer refuses and says where its home is.
+    // MC4c. The corner mark, on a month page as on every other page. A new
+    // post cannot start here: a month page carries its month list and not
+    // the counters. So the composer does not open on this page. The work
+    // moves to blog.html, which opens an empty composer and tidies the
+    // address, and the test comes back to the month page for MC4d.
     const corner = await evaluate(`(function () {
       var el = document.querySelector('.amh-edit');
       if (!el) return { present: false };
@@ -8038,19 +8811,32 @@ async function main() {
       if (!AMH.tool.editorOn()) window.edit();
       return { present: true, visible: cs.visibility === 'visible' && cs.display !== 'none',
                clickable: !!top && (top === el || el.contains(top)),
-               composerSays: String(window.edit.blog()),
-               composerOpened: !!document.querySelector('.bc-write'),
                postButtons: [...document.querySelectorAll('.bs-post button')]
                  .filter(function (b) { return /^Edit p/.test(b.textContent); }).length };
     })()`);
     check("month page: the corner mark is there, seen and clickable, as on every page",
       corner.present && corner.visible && corner.clickable,
       JSON.stringify(corner));
-    check("month page: the composer refuses here and names the page that can publish",
-      /blog\.html/.test(corner.composerSays) && corner.composerOpened === false &&
-      corner.postButtons > 0,
-      JSON.stringify({ says: corner.composerSays, opened: corner.composerOpened,
-                       buttons: corner.postButtons }));
+    const newHere = await evaluate(`(function () {
+      var says = String(window.edit.blog());
+      return { says: says, opened: !!document.querySelector('.bc-write') };
+    })()`);
+    const newArrived = await waitFor(`location.pathname.endsWith('/blog.html') && document.readyState === 'complete' && !!document.querySelector('.bc-panel')`, 15000);
+    const newThere = newArrived ? await evaluate(`({ search: location.search,
+      head: (document.querySelector('.bc-head .ced-slug') || {}).textContent || '',
+      body: (document.querySelector('.bc-write textarea') || {}).value })`) : null;
+    check("month page: a new post moves to the blog page, which opens an empty composer and tidies the address",
+      /opening blog\.html/.test(newHere.says) && newHere.opened === false && corner.postButtons > 0 &&
+      !!newThere && newThere.search === "" && newThere.head === "New blog post" && newThere.body === "",
+      JSON.stringify({ month: newHere, buttons: corner.postButtons, blog: newThere }));
+    if (newThere) {
+      await evaluate(`(function () { var x = document.querySelector('.bc-panel > .ced-modal__x'); if (x) x.click(); })()`);
+      await sleep(300);
+    }
+    await send("Page.navigate", { url: "http://127.0.0.1:8124/blog/2607.html" });
+    await sleep(1600);
+    await evaluate(`AMH.tool.editorOn() || window.edit()`);
+    await sleep(300);
 
     // MC4d. Editing a post from a month page moves the work to the page that
     // has the manifest, rather than refusing. The address is tidied on
@@ -8374,7 +9160,7 @@ async function main() {
     // MP2. a month page has the bar with its own picker, folds nothing,
     // and zooms
     const monthPage = await evaluate(`(function () {
-      var img = document.querySelector('.bp-fig img');
+      var img = document.querySelector('.gallery.is-ready .gallery__holder');
       var out = {
         bar: !!document.getElementById('blogBar'),
         barPosition: getComputedStyle(document.querySelector('.bs-bar')).position,
@@ -8552,7 +9338,7 @@ async function main() {
     check("month page: the pill is there too, and its hits are sibling month files",
       monthFind.pill && monthFind.open && monthFind.href === "2607.html?post=p0001#p0001",
       JSON.stringify(monthFind));
-    check("month page: an image zooms there too, and Escape closes the viewer",
+    check("month page: a carousel opens the viewer there too, and Escape closes it",
       monthPage.cursor === "zoom-in" && monthPage.zoomed && monthPage.closed,
       JSON.stringify(monthPage).slice(0, 180));
 
@@ -8771,7 +9557,7 @@ async function main() {
         hard: post('9004', ps(60)),
         both: post('9005', ps(3) + '<span class="bp-cut" data-cut="hard"></span>' + ps(6) +
                             '<span class="bp-cut" data-cut="soft"></span>' + ps(6)),
-        fig: post('9006', ps(11) + '<figure class="bp-fig"><img alt="" /><figcaption>cap</figcaption></figure>' + ps(6)),
+        fig: post('9006', ps(11) + '<div class="gallery"><img alt="" data-caption="cap" /></div>' + ps(6)),
         head: post('9007', ps(11) + '<h3>A heading</h3>' + ps(6)),
         chars: post('9008', '<p>' + new Array(200).join('word ') + '</p><p>a</p><p>b</p>')
       };
@@ -8809,8 +9595,8 @@ async function main() {
       JSON.stringify(cuts.hard));
     check("cuts: a hard flag before the soft cut wins, and the soft cut is dropped",
       cuts.both.kind === "hard" && cuts.both.shown === 3, JSON.stringify(cuts.both));
-    check("cuts: the block that crosses the limit is shown whole, so a figure is never split",
-      cuts.fig.kind === "soft" && cuts.fig.lastShown === "FIGURE" && cuts.fig.shown === 12,
+    check("cuts: the block that crosses the limit is shown whole, so a carousel is never split",
+      cuts.fig.kind === "soft" && cuts.fig.lastShown === "DIV" && cuts.fig.shown === 12,
       JSON.stringify(cuts.fig));
     check("cuts: a heading is never left with nothing under it",
       cuts.head.kind === "soft" && cuts.head.lastShown === "P" && cuts.head.shown === 13,
@@ -8867,39 +9653,55 @@ async function main() {
       reveal.second.href === "blog/2607.html?post=p9009#p9009",
       JSON.stringify(reveal.second));
 
-    // ZM1. a click on any image in a post opens the shared viewer at that
-    // image, and the set is that post's own images in order
-    const zoom = await evaluate(`(function () {
+    // VG1. a photo in a post opens the viewer on every photo of that post,
+    // from its first carousel to its last, and a carousel outside a post
+    // opens its own photos only
+    const vg1 = await evaluate(`(function () {
       var stream = document.getElementById('blogStream');
       var a = document.createElement('article');
       a.className = 'bs-post'; a.id = 's9100'; a.setAttribute('data-id', '9100');
       a.setAttribute('data-date', '260711');
-      a.innerHTML = '<div class="bs-post__body">' +
-        '<figure class="bp-fig"><img src="blog/260711_img0001.jpg" alt="Alt one" />' +
-        '<figcaption>Cap one</figcaption></figure>' +
-        '<figure class="bp-fig"><img src="blog/260711_img0002.png" alt="Alt two" />' +
-        '<figcaption>Cap two</figcaption></figure></div>';
+      a.innerHTML = '<div class="bs-post__body">' + AMH.blog.renderBody(
+        '[img0001,Cap one|Alt one]\\n[png0002,Cap two|Alt two]\\n\\n[img0003,Cap three|Alt three]', '260711', '', {}) + '</div>';
       stream.appendChild(a);
-      var second = a.querySelectorAll('.bp-fig img')[1];
-      second.click();
+      var loose = document.createElement('div');
+      loose.innerHTML = AMH.blog.renderBody('[img0004,Loose one]\\n\\n[img0005,Loose two]', '260711', '', {});
+      stream.appendChild(loose);
+      AMH.work.buildGalleries();
+      var active = function () { return (document.querySelector('.lightbox__img--active') || { getAttribute: function () { return ''; } }).getAttribute('src') || ''; };
+      var caption = function () { return (document.querySelector('.lightbox__caption') || {}).textContent || ''; };
+      var out = { carousels: a.querySelectorAll('.gallery.is-ready').length,
+                  cursor: getComputedStyle(a.querySelector('.gallery__holder')).cursor };
+      a.querySelectorAll('.gallery__holder')[1].click();
       return new Promise(function (res) { setTimeout(function () {
-        var lb = document.querySelector('.lightbox');
-        var out = { open: !!lb && AMH.work.lightbox.isOpen(),
-                    cursor: getComputedStyle(second).cursor,
-                    caption: (document.querySelector('.lightbox__caption') || {}).textContent || '',
-                    src: (document.querySelector('.lightbox__img--active') || {}).getAttribute('src') || '' };
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        out.open = AMH.work.lightbox.isOpen();
+        out.third = { src: active(), caption: caption() };
+        document.querySelector('.lightbox__nav--next').click();
         setTimeout(function () {
-          out.closed = !AMH.work.lightbox.isOpen();
-          a.remove();
-          res(out);
-        }, 500);
+          out.next = { src: active(), caption: caption() };
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          setTimeout(function () {
+            out.closed = !AMH.work.lightbox.isOpen();
+            loose.querySelectorAll('.gallery__holder')[1].click();
+            setTimeout(function () {
+              out.loose = active();
+              document.querySelector('.lightbox__nav--next').click();
+              setTimeout(function () {
+                out.looseNext = active();
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                setTimeout(function () { a.remove(); loose.remove(); res(out); }, 500);
+              }, 400);
+            }, 600);
+          }, 500);
+        }, 400);
       }, 700); });
     })()`, { awaitPromise: true });
-    check("zoom: a click on a figure opens the viewer at that image, and Escape closes it",
-      zoom.open && /260711_img0002\.png$/.test(zoom.src) && /Cap two/.test(zoom.caption) &&
-      zoom.cursor === "zoom-in" && zoom.closed,
-      JSON.stringify(zoom).slice(0, 200));
+    check("viewer: a photo in a post opens every photo of the post, first carousel to last, and a carousel outside a post opens its own",
+      vg1.carousels === 2 && vg1.cursor === "zoom-in" && vg1.open &&
+      /260711_img0003\.jpg$/.test(vg1.third.src) && vg1.third.caption === "Cap three" &&
+      /260711_img0001\.jpg$/.test(vg1.next.src) && vg1.next.caption === "Cap one" && vg1.closed &&
+      /260711_img0005\.jpg$/.test(vg1.loose) && /260711_img0005\.jpg$/.test(vg1.looseNext),
+      JSON.stringify(vg1).slice(0, 400));
 
     // FT1. a tag chip filters the feed in place: it does not leave the
     // page, the posts without the tag go, and the line says what is on
@@ -9196,6 +9998,15 @@ async function main() {
     // ST-B. the loader at the root: the older month is appended into the
     // stream, its paths lose the step up, its ids become "s", and the
     // address bar stays on blog.html
+    // BK5 needs the older month to hold a carousel, with the step up on every
+    // path the engine writes. The file is given one for this load, and is
+    // put back as it was straight after.
+    const juneFile = join(bdir, "blog/2606.html");
+    const juneBytes = readFileSync(juneFile, "utf8");
+    writeFileSync(juneFile, juneBytes.replace("<p>June body.</p>", "<p>June body.</p>\n" +
+      '<div class="gallery"><img src="../blog/260610_img0009.jpg" srcset="../blog/260610_img0009_sd.webp 480w, ../blog/260610_img0009.jpg 1920w"' +
+      ' sizes="(max-width: 700px) 80vw, 520px" width="1920" height="1080" data-sd="../blog/260610_img0009_sd.webp"' +
+      ' data-original="../blog/260610_img0009_original.png" loading="lazy" alt="June photo" data-caption="June photo" /></div>'));
     await evaluate(`document.querySelector('.bm-older').click()`);
     await sleep(1200);
     const walkedRoot = await evaluate(`({
@@ -9227,6 +10038,64 @@ async function main() {
     const appendedImgs = await evaluate(`[...document.querySelectorAll('#blogStream img')].map(i => i.getAttribute('src')).join(' ')`);
     check("P2: no appended path keeps the step up out of blog/",
       !/\.\.\//.test(appendedImgs), appendedImgs.slice(0, 160));
+    writeFileSync(juneFile, juneBytes);
+    // BK5. the appended month's carousel is built, and no path the carousel
+    // or the viewer reads keeps the step up: srcset, data-sd, data-original
+    const bk5 = await evaluate(`(function () {
+      var gs = [].slice.call(document.querySelectorAll('#blogStream .bs-post[data-date^="2606"] .gallery'));
+      var up = [].slice.call(document.querySelectorAll('#blogStream [srcset],#blogStream [data-sd],#blogStream [data-original],#blogStream [data-hd]'))
+        .filter(function (e) {
+          return ['srcset', 'data-sd', 'data-original', 'data-hd'].some(function (a) {
+            return /(^|,\\s*)\\.\\.\\//.test(e.getAttribute(a) || '');
+          });
+        }).length;
+      return { carousels: gs.length, built: gs.filter(function (g) { return g.classList.contains('is-ready'); }).length, up: up };
+    })()`);
+    check("chain: an appended month's carousel is built, and no path the carousel or the viewer reads keeps the step up",
+      juneBytes.includes("<p>June body.</p>") && bk5.carousels === 1 && bk5.built === 1 && bk5.up === 0,
+      JSON.stringify(bk5));
+    // NP1. with the editor on, one New post pill ends the bar and one follows
+    // the last post; a month the loader appends moves it; the top pill opens
+    // the composer; the editor off takes every pill with it
+    await evaluate(`window.edit()`);
+    await sleep(700);
+    const np1 = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      var pills = function () { return document.querySelectorAll('.bs-newpost'); };
+      var last = function () { var p = stream.querySelectorAll('.bs-post'); return p[p.length - 1]; };
+      var footAfter = function (post) {
+        return !!(post && post.nextElementSibling && post.nextElementSibling.classList.contains('bs-newpost--foot'));
+      };
+      var out = { count: pills().length, top: !!document.querySelector('#blogBar .bs-newpost'),
+                  foot: footAfter(last()), words: [].map.call(pills(), function (p) { return p.textContent; }).join('|'),
+                  edits: stream.querySelectorAll('.bs-retry').length };
+      /* what the loader does after an append: a post arrives, and the pills are drawn again */
+      var extra = document.createElement('article');
+      extra.className = 'bs-post'; extra.id = 's9300';
+      extra.setAttribute('data-id', '9300'); extra.setAttribute('data-date', '260601');
+      stream.appendChild(extra);
+      AMH.blog.editButtons();
+      out.moved = footAfter(extra);
+      out.countAfter = pills().length;
+      extra.remove();
+      AMH.blog.editButtons();
+      out.back = footAfter(last());
+      return out;
+    })()`);
+    await evaluate(`document.querySelector('#blogBar .bs-newpost').click()`);
+    await sleep(700);
+    const np1open = await evaluate(`!!document.querySelector('.bc-panel')`);
+    await evaluate(`(function () { var x = document.querySelector('.bc-panel > .ced-modal__x'); if (x) x.click(); })()`);
+    await sleep(400);
+    await evaluate(`window.edit()`);
+    await sleep(500);
+    const np1off = await evaluate(`({ pills: document.querySelectorAll('.bs-newpost').length,
+      edits: document.querySelectorAll('.bs-retry').length, on: AMH.tool.editorOn() })`);
+    check("pills: with the editor on, New post ends the bar and follows the last post, moves with an append, opens the composer, and goes with the editor",
+      np1.count === 2 && np1.top && np1.foot && np1.words === "New post|New post" && np1.edits > 0 &&
+      np1.moved && np1.countAfter === 2 && np1.back && np1open &&
+      np1off.pills === 0 && np1off.edits === 0 && np1off.on === false,
+      JSON.stringify({ np1, open: np1open, off: np1off }));
 
     // CUT4. the picker, with June already on the page: it scrolls to that
     // month's first post rather than leaving the page
@@ -9292,6 +10161,70 @@ async function main() {
         firstDiff(stripSpans(was, ["blog-stream"]).replace(stampLines, ""), stripSpans(now, ["blog-stream"]).replace(stampLines, "")));
       writeBundle(zip3);
     }
+
+    // TP6. True Pixel Size on the blog. A new card for a 32x32 PNG starts with
+    // it on, before UHD, and UHD locked. A published image flips it, and the
+    // publish writes the flag beside uhd, a new stamp, and a month file whose
+    // image shows the original with no srcset.
+    await send("Page.navigate", { url: B + "blog.html?tp=6" });
+    await sleep(2200);
+    await evaluate(`window.edit.blog()`);
+    await sleep(900);
+    const tp6dropped = await evaluate(`(function () {
+      var zone = document.querySelector('.bc-panel .bc-drop');
+      if (!zone) return false;
+      var cv = document.createElement('canvas'); cv.width = 32; cv.height = 32;
+      cv.getContext('2d').fillRect(4, 4, 24, 24);
+      return new Promise(function (res) { cv.toBlob(function (b) {
+        try {
+          var dt = new DataTransfer(); dt.items.add(new File([b], 'icon.png', { type: 'image/png' }));
+          zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          res(true);
+        } catch (err) { res(false); }
+      }, 'image/png'); });
+    })()`, { awaitPromise: true });
+    const tp6card = tp6dropped ? await waitFor(`(function () { var c = document.querySelector('.bc-panel .bc-card');
+      if (!c) return null;
+      var t = c.querySelector('.bc-truesize input'), u = c.querySelector('.bc-uhd input');
+      return { ts: !!t && t.checked, uhd: !!u && u.checked, locked: !!u && u.disabled,
+               first: !!t && c.querySelector('label') === t.parentNode }; })()`, 12000) : null;
+    check("true size: a blog card draws True Pixel Size before UHD, on for a 32x32 PNG, with UHD on and locked",
+      !!tp6card && tp6card.ts && tp6card.uhd && tp6card.locked && tp6card.first,
+      JSON.stringify({ dropped: tp6dropped, card: tp6card }));
+    await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+    await sleep(400);
+    await send("Page.navigate", { url: B + "blog.html" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.edit("0001")`);
+    await sleep(1200);
+    const tp6flip = await evaluate(`(function () {
+      var card = [...document.querySelectorAll('.bc-card')].find(function (c) {
+        return /^0002/.test(c.querySelector('.bc-card__meta').textContent); });
+      if (!card) return null;
+      var t = card.querySelector('.bc-truesize input'), u = card.querySelector('.bc-uhd input');
+      var before = { ts: t.checked, uhd: u.checked, locked: u.disabled };
+      t.click();
+      return { before: before, after: { ts: t.checked, uhd: u.checked, locked: u.disabled } };
+    })()`);
+    await pressPublish();
+    const zipTp6 = await capturePublish();
+    const wasTp6 = readFileSync(join(bdir, "blog.html"), "utf8");
+    const manTp6 = zipTp6 && zipTp6["blog.html"] ? zipTp6["blog.html"].toString("utf8") : "";
+    const moTp6 = zipTp6 && zipTp6["blog/2607.html"] ? zipTp6["blog/2607.html"].toString("utf8") : "";
+    const imgTp6 = (moTp6.match(/<img[^>]*_img0002[^>]*>/) || [""])[0];
+    const stampOf = (text) => (/\nstamp:([0-9a-z]{6})/.exec(text) || [])[1] || "";
+    check("true size: a published image's switch flips, and the publish writes the flag beside uhd under a new stamp",
+      !!tp6flip && tp6flip.before.ts === false && tp6flip.before.uhd === true &&
+      tp6flip.after.ts === true && tp6flip.after.uhd === true && tp6flip.after.locked === true &&
+      /\nimage:0002=260711 png 900x1400 \d+ uhd truesize\n/.test(manTp6) &&
+      !!stampOf(manTp6) && stampOf(manTp6) !== stampOf(wasTp6),
+      JSON.stringify({ flip: tp6flip, lines: (manTp6.match(/\nimage:[^\n]*/g) || []).join(" | ") }));
+    check("true size: the month file's image shows the original with data-truesize and no srcset",
+      /src="\.\.\/blog\/260711_img0002_original\.png"/.test(imgTp6) && /data-truesize="1"/.test(imgTp6) &&
+      /data-uhd="1"/.test(imgTp6) && !/srcset=/.test(imgTp6) && !/data-crisp=/.test(imgTp6),
+      imgTp6.slice(0, 400));
+    if (zipTp6) writeBundle(zipTp6);
 
     // P2-4. retitle + cross-month date move (2607 -> 2606) with image renames
     await send("Page.navigate", { url: B + "blog.html" });
@@ -9724,7 +10657,36 @@ async function main() {
         t6.posts.map((e) => e.id + ":" + e.thumb.length).join(" "));
       check("P2: rebuild is idempotent (matches the deployed month byte-for-byte)",
         zip6["blog/2606.html"].equals(readFileSync(join(bdir, "blog/2606.html"))));
+      // BK8. a rebuild writes every month file and the stream with carousels,
+      // and no figure anywhere
+      const bk8pages = Object.keys(zip6).filter((k) => /^blog\/\d{4}\.html$/.test(k) || k === "blog.html");
+      check("rebuild: every month file and the stream are written with carousels, and no figure",
+        bk8pages.length >= 2 && bk8pages.every((k) => !zip6[k].toString("utf8").includes("bp-fig")) &&
+        bk8pages.some((k) => /^blog\/\d{4}\.html$/.test(k) && zip6[k].toString("utf8").includes('<div class="gallery">')) &&
+        zip6["blog.html"].toString("utf8").includes('<div class="gallery">'),
+        bk8pages.map((k) => k + ":" + (zip6[k].toString("utf8").match(/<div class="gallery"/g) || []).length).join(" "));
       writeBundle(zip6);
+    }
+
+    // NP2. a month page carries both pills, and its pill opens the composer on
+    // blog.html, which takes the edit parameter out of the address
+    await send("Page.navigate", { url: B + "blog/2606.html?np=2" });
+    await sleep(2000);
+    await evaluate(`window.edit()`);
+    await sleep(700);
+    const np2 = await evaluate(`({ count: document.querySelectorAll('.bs-newpost').length,
+      top: !!document.querySelector('#blogBar .bs-newpost'), foot: !!document.querySelector('.bs-newpost--foot') })`);
+    await evaluate(`document.querySelector('.bs-newpost--foot').click()`);
+    const np2arrived = await waitFor(`location.pathname.endsWith('/blog.html') && document.readyState === 'complete' && !!document.querySelector('.bc-panel')`, 15000);
+    const np2there = np2arrived ? await evaluate(`({ search: location.search, editor: AMH.tool.editorOn(),
+      composer: !!document.querySelector('.bc-panel') })`) : null;
+    check("pills: a month page carries both pills, and one opens the composer on blog.html with the edit parameter taken out",
+      np2.count === 2 && np2.top && np2.foot && !!np2there && np2there.composer && np2there.editor &&
+      !/edit=/.test(np2there.search),
+      JSON.stringify({ month: np2, blog: np2there }));
+    if (np2there) {
+      await evaluate(`(function () { var x = document.querySelector('.bc-panel > .ced-modal__x'); if (x) x.click(); })()`);
+      await sleep(300);
     }
 
     // P2-8. the manifest is derivable. A rebuild takes the entry list from
@@ -9914,7 +10876,7 @@ async function main() {
       blk11.includes('<time datetime="2026-06-15T18:39">June 15, 2026 · 6:39 pm</time>' +
         '<span class="bs-post__zone">EDT</span>') &&
       blk11.includes("<table>") && blk11.includes('<span class="bp-cut" data-cut="soft"></span>') &&
-      blk11.includes('<figure class="bp-fig"><img src="../blog/260615_img' + nextImg + '.jpg"') &&
+      blk11.includes('<div class="gallery"><img src="../blog/260615_img' + nextImg + '.jpg"') &&
       blk11.includes('data-format="md"') && blk11.includes(MD_SRC),
       blk11.slice(0, 300).replace(/\s+/g, " ") || "no block");
     // the stream shows the newest month, which is June, and this post is
@@ -11863,6 +12825,76 @@ async function main() {
     splitFold.kind === "hard" && splitFold.shownText.indexOf("The intro") !== -1 &&
     splitFold.shownText.indexOf("and the rest") === -1 && splitFold.hidden >= 1,
     JSON.stringify(splitFold));
+
+  // BK7. the composer and the frame word: a caption typed into a card keeps
+  // the word its tag has, Insert tag writes none, the help lists both forms
+  // and no png0001, and a search reads the caption and never the word.
+  // The block above closed its composer, so this opens its own. A step
+  // that finds no composer answers false and fails its check; it never
+  // leaves a promise waiting.
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await sleep(900);
+  const bk7entry = await evaluate(`(function () {
+    var e = AMH.publish.searchEntry({ id: "0043", date: "260903", time: "", zone: "", title: "Words", tags: "",
+      format: "html", source: "<p>Words.</p>\\n[portrait img0001,Cap one|Alt one]", staticBody: "" }, "");
+    return { caps: e.caps, text: e.text };
+  })()`);
+  const bk7cards = await evaluate(`document.querySelectorAll('.bc-panel .bc-card').length`);
+  const bk7dropped = await evaluate(`(function () {
+    var zone = document.querySelector('.bc-panel .bc-drop');
+    if (!zone) return false;
+    var cv = document.createElement('canvas'); cv.width = 600; cv.height = 900;
+    cv.getContext('2d').fillRect(0, 0, 600, 900);
+    return new Promise(function (res) { cv.toBlob(function (b) {
+      try {
+        var dt = new DataTransfer(); dt.items.add(new File([b], 'tall.png', { type: 'image/png' }));
+        zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        res(true);
+      } catch (err) { res(false); }
+    }, 'image/png'); });
+  })()`, { awaitPromise: true });
+  if (bk7dropped) await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === ${bk7cards + 1}`, 12000);
+  const bk7 = await evaluate(`(function () {
+    var cards = document.querySelectorAll('.bc-panel .bc-card');
+    var card = cards[cards.length - 1];
+    var body = document.querySelector('.bc-panel .bc-write textarea');
+    var help = document.querySelector('.bc-panel .ced-spec__btn');
+    if (!card || !body || !help) return { card: !!card, body: !!body, help: !!help };
+    var num = (/(\\d{4})/.exec(card.querySelector('.bc-card__meta').textContent) || [])[1] || '';
+    var before = body.value;
+    body.value = '[portrait img' + num + ',Old words|Alt words]';
+    var cap = card.querySelector('.bc-card__mid input[type=text]');
+    cap.dispatchEvent(new Event('focus'));
+    cap.value = 'New words';
+    cap.dispatchEvent(new Event('input', { bubbles: true }));
+    var afterCaption = body.value;
+    body.value = afterCaption + '\\n';
+    body.selectionStart = body.selectionEnd = body.value.length;
+    [].slice.call(card.querySelectorAll('button')).filter(function (b) { return b.textContent === 'Insert tag'; })[0].click();
+    var afterInsert = body.value;
+    body.value = before;
+    /* the help builds its rows as it opens */
+    help.click();
+    var p = document.querySelector('.bc-panel .ced-spec');
+    var out = { num: num, afterCaption: afterCaption, afterInsert: afterInsert, panel: p ? p.textContent : '',
+                codes: p ? [].map.call(p.querySelectorAll('.ced-spec__write'), function (x) { return x.textContent; }) : [] };
+    help.click();
+    return out;
+  })()`);
+  check("composer: a caption typed into a card keeps the frame word its tag has, and Insert tag writes none",
+    bk7dropped && !!bk7.num && bk7.afterCaption === "[portrait img" + bk7.num + ",New words|Alt words]" &&
+    String(bk7.afterInsert || "").split("\n")[1] === "[img" + bk7.num + ",New words|Alt words]",
+    JSON.stringify({ dropped: bk7dropped, ...bk7 }).slice(0, 300));
+  check("composer: the help lists the tag and its frame word and no png0001, and a search reads the caption and never the word",
+    Array.isArray(bk7.codes) && bk7.codes.indexOf("[img0001,caption|alt]") !== -1 &&
+    bk7.codes.indexOf("[portrait img0001,caption|alt]") !== -1 &&
+    !!bk7.panel && bk7.panel.indexOf("png0001") === -1 &&
+    JSON.stringify(bk7entry.caps) === '["Cap one Alt one"]' && bk7entry.text.indexOf("portrait") === -1,
+    JSON.stringify({ codes: bk7.codes, entry: bk7entry }));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(400);
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

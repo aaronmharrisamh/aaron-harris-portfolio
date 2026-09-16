@@ -431,7 +431,41 @@
     };
   }
 
+  /* A photo shown at its own size leaves room in its tile. The room shows
+     the backdrop a carousel draws: the photo's small copy, blurred and
+     dimmed. It goes after the photo, so fig.querySelector("img") still
+     finds the photo. Every draw of a train comes through layoutTrain, so
+     this runs often, and does nothing when the tile has its backdrop. */
+  function tileAmbient(fig) {
+    var img = fig.querySelector("img");
+    if (!img || img.getAttribute("data-truesize") !== "1") return;
+    if (fig.querySelector(".gal-tile__ambient")) return;
+    var sd = img.getAttribute("data-sd");
+    if (!sd) return;
+    var back = doc.createElement("img");
+    back.className = "gal-tile__ambient";
+    back.src = sd;
+    back.alt = "";
+    back.setAttribute("aria-hidden", "true");
+    back.setAttribute("loading", "lazy");
+    back.setAttribute("decoding", "async");
+    fig.insertBefore(back, img.nextSibling);
+  }
+
+  /* A crisp photo keeps hard pixel edges only while its tile holds it at
+     its own size. A packed tile can be narrower than a small photo, and a
+     browser draws a shrink with hard edges too, which is jagged. A pack
+     changes the tile's size, so this runs after each one. */
+  function tileCrisp(fig) {
+    var img = fig.querySelector("img");
+    if (!img || img.getAttribute("data-crisp") !== "1") return;
+    var size = /^(\d+)x(\d+)$/.exec(img.getAttribute("data-original-size") || "");
+    var fits = !!size && +size[1] <= fig.clientWidth && +size[2] <= fig.clientHeight;
+    img.classList.toggle("is-shrunk", !fits);
+  }
+
   function layoutTrain(entry) {
+    entry.tiles.forEach(tileAmbient);
     var cols = columnsOf(entry.el);
     var geom = geometryOf(entry.el, cols);
     var model = entry.tiles.map(function (el) { return modelFor(el, geom); });
@@ -462,6 +496,7 @@
     var same = order.length === entry.tiles.length &&
       order.every(function (el, i) { return entry.el.children[i + 1] === el; });
     if (!same) order.forEach(function (el) { entry.el.appendChild(el); });
+    entry.tiles.forEach(tileCrisp);
     return rows;
   }
 
@@ -498,7 +533,8 @@
           caption: capText(fig),
           alt: im ? (im.getAttribute("alt") || "") : "",
           original: im ? (im.getAttribute("data-original") || "") : "",
-          originalBytes: im ? (parseInt(im.getAttribute("data-original-bytes"), 10) || 0) : 0
+          originalBytes: im ? (parseInt(im.getAttribute("data-original-bytes"), 10) || 0) : 0,
+          crisp: im ? im.getAttribute("data-crisp") === "1" : false
         };
       });
   }
@@ -852,7 +888,7 @@
       /* a photo no save has written shows from its blob: URLs, which are one
          copy each and so go with no slot */
       var held = entry.photo ? AMH.images.preview(entry.photo) : null;
-      if (held) held.uhd = entry.uhd;
+      if (held) { held.uhd = entry.uhd; held.truesize = entry.truesize; }
       if (held) setAttrs(img, AMH.images.attrs(held, null));
       else if (entry.preview && entry.preview !== entry.src) img.src = entry.preview;
       else setAttrs(img, AMH.images.attrs(entry, slotFor(w)));
@@ -1279,7 +1315,8 @@
 
   var TILES_KIND = {
     name: "gallery tiles",
-    readImgs: function (el) { return el.querySelectorAll(".gal-tile img"); },
+    /* a tile's backdrop is drawn, not authored, and is never a photo */
+    readImgs: function (el) { return el.querySelectorAll(".gal-tile img:not(.gal-tile__ambient)"); },
     readEntry: readTile,
     readHead: readHead,
     fields: TILE_FIELDS,

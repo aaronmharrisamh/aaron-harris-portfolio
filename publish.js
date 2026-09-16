@@ -93,9 +93,10 @@
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
   var bcStatus = null, bcCards = null, bcPreviewEl = null;
-  /* {num, caption, alt, uhd, published} and then either photo, the engine's
-     record of a held photo, or the manifest's facts about a published one:
-     src, sd, sdw, original, w, h, ow, oh, bytes, type, animated, date0 */
+  /* {num, caption, alt, uhd, truesize, published} and then either photo,
+     the engine's record of a held photo, or the manifest's facts about a
+     published one: src, sd, sdw, original, w, h, ow, oh, bytes, type,
+     animated, date0 */
   var bcImages = [];
   var bcManAtOpen = null;       /* manifest payload string at composer open (staleness check) */
   var bcImgCounter = 0;         /* session-local offset over manifest next-img */
@@ -248,7 +249,10 @@
 
      the date its files are named for, the ORIGINAL's format, size and
      bytes, and then the flags that hold: uhd when the page shows the
-     original in the display copy's place, gif when it moves.
+     original in the display copy's place, truesize when it shows the
+     original at its own size, gif when it moves. A line with truesize
+     carries uhd as well, so a reader that knows only uhd still shows the
+     original.
 
      The date and the number give every path: blog/<date>_img<num>.jpg,
      _sd.webp and _original.<type>. Nothing else has to be written down.
@@ -258,13 +262,16 @@
     var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line.trim());
     if (!m) return null;
     var flags = m[7].split(/\s+/).filter(Boolean);
+    var truesize = flags.indexOf("truesize") !== -1;
     return { num: m[1], date: m[2], type: m[3], ow: +m[4], oh: +m[5], bytes: +m[6],
-             uhd: flags.indexOf("uhd") !== -1, animated: flags.indexOf("gif") !== -1 };
+             uhd: truesize || flags.indexOf("uhd") !== -1, truesize: truesize,
+             animated: flags.indexOf("gif") !== -1 };
   }
   function bcImageLineWrite(img) {
     return "image:" + img.num + "=" + img.date + " " + img.type + " " +
       img.ow + "x" + img.oh + " " + img.bytes +
-      (img.uhd ? " uhd" : "") + (img.animated ? " gif" : "");
+      (img.uhd || img.truesize ? " uhd" : "") + (img.truesize ? " truesize" : "") +
+      (img.animated ? " gif" : "");
   }
   /* The three paths one image line names. */
   function bcImagePaths(img) {
@@ -369,10 +376,11 @@
       }
     }).then(function (photo) {
       AMH.images.hold(photo);
+      /* the engine says which switches a new photo starts with */
+      var starts = AMH.images.defaults(photo);
       var im = {
         num: num, caption: "", alt: TOOL.imageRegion.humanize(photo.from),
-        /* a GIF is taken to move, so it shows its original to begin with */
-        uhd: photo.type === "gif",
+        uhd: starts.uhd, truesize: starts.truesize,
         published: false, photo: photo, date0: date
       };
       bcImages.push(im);
@@ -417,32 +425,36 @@
   /* The entry the renderer and the manifest both work from. A held photo
      answers from itself; a published one from its manifest line. */
   /* ---------------- tags in the body ---------------- */
-  /* Always img. A tag written before the engine may say png, and every
-     reader still takes it as a synonym, but nothing writes one: what a
-     page shows is a fact in the manifest now, not a format baked into a
-     file name. */
-  function bcBuildTag(im) {
-    return "[img" + im.num +
+  /* Always img, and never a frame word of its own. A tag written before the
+     engine may say png, and every reader still takes it as a synonym, but
+     nothing writes one: what a page shows is a fact in the manifest now,
+     not a format baked into a file name. The frame word is the author's to
+     type, and a rewrite keeps the one a tag already has. */
+  function bcBuildTag(im, word) {
+    return "[" + (word ? word + " " : "") + "img" + im.num +
       (im.caption || im.alt ? "," + im.caption : "") +
       (im.alt ? "|" + im.alt : "") + "]";
   }
+  /* The tags for one number, from the tag's one pattern in blog.js, with its
+     groups: the word, img or png, the number, the caption, the alt. */
   function bcTagRe(num, global) {
     /* global flag for rewrites (a tag can be duplicated in the body);
        plain for .test - a /g regex's lastIndex makes repeated tests lie */
-    return new RegExp("\\[(?:img|png)" + num + "(?:,[^\\]|]*)?(?:\\|[^\\]]*)?\\]", global ? "g" : "");
+    return new RegExp(AMH.blog.TAG.replace("(\\d{4})", "(" + num + ")"), global ? "g" : "");
   }
   function bcFindTag(num) { return bcTagRe(num).test(bcBody.value); }
   /* pull the tag's current caption/alt into the card before its inputs make
      their first rewrite, so typed-in-tag values are never clobbered */
   function bcHarvestTag(im) {
-    var m = new RegExp("\\[(?:img|png)" + im.num +
-      "(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]").exec(bcBody.value);
+    var m = bcTagRe(im.num).exec(bcBody.value);
     if (!m) return;
-    if (m[1] !== undefined) im.caption = m[1];
-    if (m[2] !== undefined) im.alt = m[2];
+    if (m[4] !== undefined) im.caption = m[4];
+    if (m[5] !== undefined) im.alt = m[5];
   }
   function bcRewriteTag(im) {
-    bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), bcBuildTag(im));
+    bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), function (tag, word) {
+      return bcBuildTag(im, word);
+    });
   }
   function bcClean(s) { return s.replace(/[\]|]/g, "").trim(); }
 
@@ -554,16 +566,20 @@
     ".bc-keepmeta{display:flex;align-items:center;gap:.5rem;margin-top:.6rem;" +
     "font-size:.78rem;color:var(--text-soft);cursor:pointer;}" +
     ".bc-keepmeta input{accent-color:var(--accent);}" +
-    /* Display Maximum UHD, drawn as a switch on a card */
-    ".bc-uhd{display:inline-flex;align-self:flex-start;align-items:center;gap:.4rem;" +
+    /* Display True Pixel Size and Display Maximum UHD, drawn as switches on a card */
+    ".bc-truesize,.bc-uhd{display:inline-flex;align-self:flex-start;align-items:center;gap:.4rem;" +
     "font-size:.74rem;color:var(--text-soft);cursor:pointer;white-space:nowrap;}" +
-    ".bc-uhd input{-webkit-appearance:none;appearance:none;margin:0;flex:none;width:28px;height:16px;" +
-    "border-radius:999px;background:var(--line);position:relative;cursor:pointer;transition:background .15s;}" +
-    ".bc-uhd input::before{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;" +
-    "border-radius:50%;background:var(--text-soft);transition:transform .15s,background .15s;}" +
-    ".bc-uhd input:checked{background:var(--accent);}" +
-    ".bc-uhd input:checked::before{transform:translateX(12px);background:#fff;}" +
-    ".bc-uhd input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".bc-truesize input,.bc-uhd input{-webkit-appearance:none;appearance:none;margin:0;flex:none;" +
+    "width:28px;height:16px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;" +
+    "transition:background .15s;}" +
+    ".bc-truesize input::before,.bc-uhd input::before{content:'';position:absolute;top:2px;left:2px;" +
+    "width:12px;height:12px;border-radius:50%;background:var(--text-soft);transition:transform .15s,background .15s;}" +
+    ".bc-truesize input:checked,.bc-uhd input:checked{background:var(--accent);}" +
+    ".bc-truesize input:checked::before,.bc-uhd input:checked::before{transform:translateX(12px);background:#fff;}" +
+    ".bc-truesize input:focus-visible,.bc-uhd input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    /* UHD held on by True Pixel Size: still on, and not a control while it lasts */
+    ".bc-uhd.is-locked{cursor:default;opacity:.62;}" +
+    ".bc-uhd.is-locked input{cursor:default;}" +
     ".bc-uhd__what{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
     ".bc-card{display:flex;gap:.7rem;align-items:center;padding:.55rem;border:1px solid var(--line);" +
     "border-radius:10px;margin-top:.6rem;background:var(--bg-deep);}" +
@@ -822,9 +838,21 @@
       if (bcFindTag(im.num)) bcRewriteTag(im);
     });
     mid.appendChild(alt);
-    /* Display Maximum UHD. A published image can flip it too: what the page
-       shows is a line in the manifest, not a format baked into a file. */
+    /* Display True Pixel Size, then Display Maximum UHD. A published image
+       can flip both: what the page shows is a line in the manifest, not a
+       format baked into a file. While True Pixel Size is on, the page shows
+       the original, so UHD shows on and is locked. Turning True Pixel Size
+       off leaves UHD on and free to change. */
     if (im.original || im.photo) {
+      var size = doc.createElement("label");
+      size.className = "bc-truesize";
+      var sizeOn = doc.createElement("input");
+      sizeOn.type = "checkbox";
+      sizeOn.setAttribute("role", "switch");
+      sizeOn.checked = !!im.truesize;
+      size.appendChild(sizeOn);
+      size.appendChild(doc.createTextNode("Display True Pixel Size"));
+      mid.appendChild(size);
       var sw = doc.createElement("label");
       sw.className = "bc-uhd";
       var onOff = doc.createElement("input");
@@ -844,6 +872,18 @@
         (seen.ow && seen.oh ? " · " + seen.ow + " x " + seen.oh : "");
       sw.appendChild(what);
       mid.appendChild(sw);
+      var lockUhd = function () {
+        if (im.truesize) { im.uhd = true; onOff.checked = true; }
+        onOff.disabled = !!im.truesize;
+        sw.classList.toggle("is-locked", !!im.truesize);
+        sw.title = im.truesize ? "On while Display True Pixel Size is on" : "";
+      };
+      sizeOn.addEventListener("change", function () {
+        im.truesize = sizeOn.checked;
+        lockUhd();
+        bcSetStatus(im.num + (im.truesize ? " shows at its own size." : " no longer shows at its own size."));
+      });
+      lockUhd();
     }
     card.appendChild(mid);
     var btns = doc.createElement("div");
@@ -886,10 +926,11 @@
     if (im.photo) {
       return { num: im.num, date: date, type: im.photo.type,
                ow: im.photo.ow, oh: im.photo.oh, bytes: im.photo.bytes,
-               uhd: !!im.uhd, animated: !!im.photo.animated };
+               uhd: !!(im.uhd || im.truesize), truesize: !!im.truesize, animated: !!im.photo.animated };
     }
     return { num: im.num, date: date, type: im.type, ow: im.ow, oh: im.oh,
-             bytes: im.bytes, uhd: !!im.uhd, animated: !!im.animated };
+             bytes: im.bytes, uhd: !!(im.uhd || im.truesize), truesize: !!im.truesize,
+             animated: !!im.animated };
   }
 
   /* What the preview renders from: what the site holds, with this
@@ -972,7 +1013,7 @@
     /* the deployed manifest plus what this composer is holding, so a card's
        switch shows in the preview before anything is published */
     body.innerHTML = B.renderBody(bcMode === "md" ? AMH.markdown.render(src) : src,
-                                  date, "stream", "", bcPreviewImages(date));
+                                  date, "", bcPreviewImages(date));
     /* A held photo is not on the server yet, so the preview paints it from
        its blobs. Every path it carries is swapped, the small copy included:
        the carousel builds its blurred backdrop from data-sd, and a path to
@@ -987,7 +1028,7 @@
            browser could choose between */
         img.removeAttribute("srcset");
         img.removeAttribute("sizes");
-        img.src = im.uhd ? urls.original : urls.hd;
+        img.src = im.uhd || im.truesize ? urls.original : urls.hd;
         img.setAttribute("data-sd", urls.sd);
         img.setAttribute("data-original", urls.original);
         if (img.getAttribute("data-hd")) img.setAttribute("data-hd", urls.hd);
@@ -1096,8 +1137,12 @@
                  does: f.does + " The line splits where you write it." };
       }) : [];
     out.push({ write: "[img0001,caption|alt]", where: "on its own line",
-               does: "Places an image from the Images view. Use png0001 for a .png. " +
+               does: "Places an image from the Images view in a carousel frame. Tags on " +
+                     "back-to-back lines are one carousel, and a blank line starts a new one. " +
                      "The caption and the alt text are both optional." });
+    out.push({ write: "[portrait img0001,caption|alt]", where: "the first tag of a carousel",
+               does: "On the first tag of a carousel, portrait or landscape fixes its frame. " +
+                     "With no word the frame follows the photos." });
     if (md) {
       out.push({ write: "# A heading", where: "the first line of the post",
                  does: "Becomes the post's name in the stream, the month list and the " +
@@ -1440,7 +1485,8 @@
     bcBody.placeholder = bcMode === "html"
       ? "<p>This post is HTML, and stays HTML.</p>"
       : "Write the post in Markdown. # for a heading, - for a list, **bold**, *italic*.\n\n" +
-        "Drop images on the Images view, then place them with [img####,caption|alt] tags on their own lines. " +
+        "Drop images on the Images view, then place them with [img####,caption|alt] tags: tags on " +
+        "back-to-back lines are one carousel, and a blank line starts a new one. " +
         "{expandformore} and {pagebreak} alone on a line tell the feed where to fold.";
     bcBody.addEventListener("input", bcRefreshCounts);
     /* the first heading is the name, so the section that says so has to
@@ -2728,7 +2774,9 @@
      Every generated file says so in its first comment. A machine-owned file
      is written again at the next publish, and a hand edit is lost.
      ========================================================== */
-  var BC_TAG_RE_G = /\[(img|png)(\d{4})(?:,[^\]|]*)?(?:\|[^\]]*)?\]/g;
+  /* Every image tag in a body, from the tag's one pattern in blog.js. The
+     groups: the word, img or png, the number, the caption, the alt. */
+  var BC_TAG_RE_G = new RegExp(AMH.blog.TAG, "g");
 
   /* meta is {format, time, zone, tags}: the format is "md" or "html", the
      time is HHMM or "", the zone and the tags are text. The article carries
@@ -3161,17 +3209,17 @@
      an image is. A number with no line is an image from before the engine:
      its card says so, and Remove is all it offers. */
   function bcLoadPublishedImages(source, date0) {
-    var re = /\[(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g, m;
+    var re = new RegExp(AMH.blog.TAG, "g"), m;
     var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
     var seen = {};
     while ((m = re.exec(source))) {
-      if (seen[m[2]]) continue;
-      seen[m[2]] = true;
-      var line = (man.images || {})[m[2]];
+      if (seen[m[3]]) continue;
+      seen[m[3]] = true;
+      var line = (man.images || {})[m[3]];
       var im = {
-        num: m[2], caption: (m[3] || "").trim(), alt: (m[4] || "").trim(),
+        num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
         published: true, photo: null, date0: line ? line.date : date0,
-        uhd: !!(line && line.uhd)
+        uhd: !!(line && line.uhd), truesize: !!(line && line.truesize)
       };
       if (line) {
         var paths = bcImagePaths(line);
@@ -3183,7 +3231,7 @@
         im.type = line.type; im.animated = line.animated;
       } else {
         /* before the engine: one file, and the manifest says nothing */
-        im.src = "blog/" + date0 + "_img" + m[2] + (m[1] === "png" ? ".png" : ".jpg");
+        im.src = "blog/" + date0 + "_img" + m[3] + (m[2] === "png" ? ".png" : ".jpg");
         im.sd = ""; im.original = ""; im.before = true;
       }
       bcImages.push(im);
@@ -3265,7 +3313,7 @@
     var esc = TOOL.escAttr;
     var body = post.source === null ? post.staticBody
       : B.renderBody(post.format === "md" ? AMH.markdown.render(post.source) : post.source,
-                     post.date, "static", where.img, bcSiteImages);
+                     post.date, where.img, bcSiteImages);
     /* a carried body was rendered for a page in blog/; in the stream the
        one step up comes off its paths */
     if (post.source === null && where.img === "") body = bcStreamStatic(body);
@@ -3455,16 +3503,14 @@
     var text = post.format === "md" && post.source !== null && AMH.markdown
       ? AMH.markdown.text(bare)
       : bare.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    /* A scan of its own, and one that captures. This file's tag regex
-       skips the caption and the alt with non-capturing groups, because
-       every other caller only needs the number; here they are the whole
-       point. It is also fresh each time, so no other caller's lastIndex
-       can start this scan in the middle of the body. */
-    var scan = /\[(?:img|png)\d{4}(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
+    /* A scan of its own, fresh each time, so no other caller's lastIndex can
+       start it in the middle of the body. A tag's caption and alt are what
+       a search finds; its frame word is an instruction, and is not. */
+    var scan = new RegExp(AMH.blog.TAG, "g");
     var caps = [];
     var m;
     while ((m = scan.exec(String(post.source || "")))) {
-      var words = [(m[1] || "").trim(), (m[2] || "").trim()].filter(Boolean).join(" ");
+      var words = [(m[4] || "").trim(), (m[5] || "").trim()].filter(Boolean).join(" ");
       if (words) caps.push(words);
     }
     return { id: post.id, date: post.date, time: post.time || "", zone: post.zone || "",
@@ -3481,11 +3527,11 @@
   function bcFirstImage(post, images) {
     var m = new RegExp(BC_TAG_RE_G.source).exec(String(post.source || ""));
     if (!m) return "";
-    var line = images && images[m[2]];
+    var line = images && images[m[3]];
     if (line) return bcImagePaths(line).sd;
     /* an image from before the engine has no small copy: the entry carries
        the one file it has, which is what an <img> could always take */
-    return "blog/" + post.date + "_img" + m[2] + (m[1] === "png" ? ".png" : ".jpg");
+    return "blog/" + post.date + "_img" + m[3] + (m[2] === "png" ? ".png" : ".jpg");
   }
 
   /* Read a deployed file that is not a page and not a month. Same shape
@@ -4143,7 +4189,7 @@
     var refs = {}, m2;
     BC_TAG_RE_G.lastIndex = 0;
     while ((m2 = BC_TAG_RE_G.exec(source))) {
-      refs[m2[2]] = m2[1];
+      refs[m2[3]] = m2[2];
     }
     var known = {};
     bcImages.forEach(function (im) { known[im.num] = im; });
@@ -4495,12 +4541,12 @@
     var imgOrphans = [];
     var goneNums = [];
     var manNow = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
-    var re = /\[(img|png)(\d{4})(?:,[^\]|]*)?(?:\|[^\]]*)?\]/g, m;
+    var re = new RegExp(AMH.blog.TAG, "g"), m;
     while ((m = re.exec(bcEditing.source0))) {
-      if (goneNums.indexOf(m[2]) === -1) goneNums.push(m[2]);
-      var line = (manNow.images || {})[m[2]];
+      if (goneNums.indexOf(m[3]) === -1) goneNums.push(m[3]);
+      var line = (manNow.images || {})[m[3]];
       var was = line ? bcImagePaths(line)
-        : { src: "blog/" + date0 + "_img" + m[2] + "." + (m[1] === "png" ? "png" : "jpg") };
+        : { src: "blog/" + date0 + "_img" + m[3] + "." + (m[2] === "png" ? "png" : "jpg") };
       [was.src, was.sd, was.original].forEach(function (f) {
         if (f && imgOrphans.indexOf(f) === -1) imgOrphans.push(f);
       });
@@ -4805,7 +4851,7 @@
     entries.forEach(function (e) { maxId = Math.max(maxId, parseInt(e.id, 10) || 0); });
     found.forEach(function (p) {
       BC_TAG_RE_G.lastIndex = 0;
-      while ((m = BC_TAG_RE_G.exec(p.source))) maxImg = Math.max(maxImg, parseInt(m[2], 10) || 0);
+      while ((m = BC_TAG_RE_G.exec(p.source))) maxImg = Math.max(maxImg, parseInt(m[3], 10) || 0);
     });
     return { entries: entries,
              nextPost: Math.max(man.nextPost, maxId + 1),
@@ -4931,18 +4977,20 @@
   /* The editor turning on is the other moment the layer may be shown:
      tool.js calls this when it does. */
   AMH.publish.staged = function () { return bcLayerOnto(); };
-  /* A month page cannot publish, so its Edit button sends the reader here
-     with the post named in the address. Answer it once, then take it out of
-     the address, so a reload is a plain blog page and Back is not a loop. */
+  /* A month page cannot publish, so its Edit pill sends the reader here with
+     the post named in the address, ?edit=pNNNN, and its New post pill with
+     ?edit=new. Answer it once, then take it out of the address, so a reload
+     is a plain blog page and Back is not a loop. */
   function bcArriveEdit() {
     bcArrive();
-    var m = /[?&]edit=p(\d{4})/.exec(location.search);
+    var m = /[?&]edit=(p(\d{4})|new)(?:&|$)/.exec(location.search);
     if (!m) return;
     /* only the edit parameter goes. Rebuilding from the path took every
        reader parameter with it, and null took the visit as well. */
     AMH.site.setUrl(AMH.site.paramUrl({ edit: null }), false);
     if (!TOOL.editorOn()) window.edit();
-    bcLoadPost(m[1]);
+    if (m[1] === "new") window.edit.blog();
+    else bcLoadPost(m[2]);
   }
   if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", bcArriveEdit, { once: true });
   else bcArriveEdit();

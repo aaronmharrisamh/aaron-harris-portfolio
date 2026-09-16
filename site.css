@@ -854,16 +854,31 @@ body.nav-open { overflow: hidden; }
 
 .gallery.is-ready { display: block; width: 100%; min-width: 0; }
 
-/* Fixed 16:9 showcase. The frame owns all chrome now: image, ambient
-   backdrop, HUD, progress timeline, and optional preview chip. */
+/* The holder stacks the view and, when a photo has a caption, the caption
+   strip under it. The frame layer fills the holder behind both: the ambient
+   backdrop, the progress timeline, and the optional preview chip.
+
+   Its width keeps the view no taller than --gallery-screen of the screen's
+   height, so a tall frame gets narrower and stays centered. work.js writes
+   both numbers: the ratio on the holder, the share of the screen on the
+   body. The vh line stands in for a browser that has no svh. */
 .gallery__holder {
   position: relative;
   width: 100%;
+  width: min(100%, calc(var(--gallery-screen, .85) * 100vh * var(--gallery-ratio, 1.7778)));
+  width: min(100%, calc(var(--gallery-screen, .85) * 100svh * var(--gallery-ratio, 1.7778)));
   max-width: 100%;
-  aspect-ratio: 16 / 9;
+  margin-inline: auto;
   isolation: isolate;
   cursor: zoom-in;          /* the image area opens the lightbox */
   touch-action: pan-y;      /* vertical scroll stays native; horizontal = swipe */
+}
+
+/* The view: the photo area, in the frame's shape. work.js works the shape
+   out from the photos or takes the wrapper's data-shape; see its section 5. */
+.gallery__view {
+  position: relative;
+  aspect-ratio: var(--gallery-ratio, 16 / 9);
 }
 
 /* Glassy media surface. The active image is also mirrored into a blurred
@@ -942,6 +957,13 @@ body.nav-open { overflow: hidden; }
   filter: drop-shadow(0 20px 34px rgba(0,0,0,.46));
 }
 .gallery__img.is-active { opacity: 1; transform: translateZ(0) scale(1); }
+/* Display True Pixel Size. The frame already draws a photo at its own size.
+   Its corners are not rounded, because a rounded corner clips the pixels
+   of a small image. A small photo keeps hard pixel edges where a screen
+   draws it larger than its file; the engine writes data-crisp only on a
+   photo that small. */
+.gallery__img[data-truesize] { border-radius: 0; }
+.gallery__img[data-crisp] { image-rendering: pixelated; }
 
 .gallery__hud {
   position: absolute;
@@ -950,13 +972,27 @@ body.nav-open { overflow: hidden; }
   pointer-events: none;
 }
 
-/* Lower-left editorial label. The caption becomes a quiet annotation instead
-   of part of a control bar, so the image keeps breathing room. */
+/* THE CAPTION STRIP. It sits under the view, on the frame's backdrop, so a
+   caption never covers a photo and never waits for a hover. It holds the
+   label at the left and the arrow rocker at the right. A carousel whose
+   photos have no caption has no strip. The strip takes no pointer: a tap on
+   it falls through to the frame and opens the viewer, as a tap on the photo
+   does, and the rocker asks for the pointer back. */
+.gallery__strip {
+  position: relative;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 0 clamp(10px, 2.2%, 18px) clamp(12px, 2vw, 18px);
+  pointer-events: none;
+}
+
+/* The editorial label: a left rule, a dot, and the caption, always shown. */
 .gallery__caption {
-  position: absolute;
-  left: 0;
-  bottom: clamp(12px, 2vw, 18px);
-  max-width: min(62%, 420px);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(100%, 36rem);
   pointer-events: none;     /* a quiet label; taps fall through to swipe / lightbox */
   display: flex;
   align-items: center;
@@ -971,27 +1007,10 @@ body.nav-open { overflow: hidden; }
     0 18px 44px -30px rgba(0,0,0,.95);
   -webkit-backdrop-filter: blur(14px) saturate(1.14);
           backdrop-filter: blur(14px) saturate(1.14);
-  /* Hidden at rest on every device; it glides in only at the right moment
-     (desktop: hover / focus below; touch: a transient .is-visible on change). */
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity .62s var(--ease-soft), transform .62s var(--ease-soft);
 }
-.gallery__caption.is-empty { display: none; }
-/* Desktop pointer: the subtitle only whispers in while hovering or focused. */
-@media (hover: hover) and (pointer: fine) {
-  .gallery__holder:hover .gallery__caption,
-  .gallery__holder:focus-within .gallery__caption {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-/* Touch: JS adds .is-visible on each image change, then drops it after a
-   gracious beat so the frame settles back to pure minimalism. */
-.gallery__caption.is-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+/* A photo with no caption keeps the label's place, so the strip keeps one
+   height from photo to photo. */
+.gallery__caption.is-empty { visibility: hidden; }
 .gallery__caption::before {
   content: "";
   flex: 0 0 auto;
@@ -1002,18 +1021,35 @@ body.nav-open { overflow: hidden; }
   background: var(--accent-bright);
   box-shadow: 0 0 18px rgba(74,165,232,.35);
 }
-/* Blank images get a non-breaking space (set in JS); long captions clip to
-   one line with an ellipsis. */
-.gallery__caption-text {
+/* One grid cell holds the caption on screen and a hidden copy of every
+   caption in the carousel, so the cell is as tall as the longest caption at
+   its width. A caption takes two lines at most. */
+.gallery__caption-cell {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gallery__caption-text,
+.gallery__caption-sizer {
+  grid-area: 1 / 1;
+  align-self: center;       /* a short caption sits in the middle of a tall cell, not at its top */
   min-width: 0;
   text-align: left;
   color: rgba(235,238,244,.94);
   font-size: .75rem;
   font-weight: 780;
   letter-spacing: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   text-shadow: 0 1px 12px rgba(0,0,0,.5);
 }
+.gallery__caption-sizer { visibility: hidden; }
+/* the display rule above would otherwise keep a hidden caption on screen */
+.gallery__caption-text[hidden] { display: none; }
 .gallery__counter {
   position: absolute;
   top: 0;
@@ -1080,6 +1116,14 @@ body.nav-open { overflow: hidden; }
   width: 1px;
   background: rgba(255,255,255,.09);
   transform: translateX(-50%);
+}
+/* In the strip the rocker is part of the row, at its right end. */
+.gallery__strip .gallery__nav-cluster {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  flex: none;
+  margin-left: auto;
 }
 
 /* PREV / NEXT ARROWS — built once per used location (image / bar / dots) and
@@ -1236,12 +1280,13 @@ body.nav-open { overflow: hidden; }
 @media (max-width: 880px) {
   .gallery__stage { inset: clamp(10px, 2.8%, 18px); }
   .gallery__hud { inset: 9px; }
+  .gallery__strip { padding: 0 9px 10px; }
   .gallery__caption {
-    max-width: 58%;
     min-height: 2.08rem;
     padding: .4rem .62rem;
   }
-  .gallery__caption-text { font-size: .72rem; }
+  .gallery__caption-text,
+  .gallery__caption-sizer { font-size: .72rem; }
   .gallery__counter { min-width: 3rem; font-size: .62rem; }
   .gallery__nav-cluster { padding: .2rem; }
   .gallery__nav--bar { width: 1.82rem; height: 1.82rem; }
@@ -1249,9 +1294,10 @@ body.nav-open { overflow: hidden; }
 }
 
 @media (max-width: 440px) {
-  .gallery__caption { max-width: 56%; padding-inline: .54rem; }
+  .gallery__caption { padding-inline: .54rem; }
   .gallery__caption::before { width: .34rem; height: .34rem; margin-right: .42rem; }
-  .gallery__caption-text { font-size: .68rem; }
+  .gallery__caption-text,
+  .gallery__caption-sizer { font-size: .68rem; }
   .gallery__counter { min-width: 2.72rem; font-size: .58rem; }
   .gallery__nav--bar { width: 1.66rem; height: 1.66rem; }
   .gallery__nav--bar svg { width: 13px; height: 13px; }
@@ -1259,7 +1305,7 @@ body.nav-open { overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter, .gallery__caption { transition: none; }
+  .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter { transition: none; }
 }
 
 /* ============================================================
@@ -1344,6 +1390,22 @@ body.nav-open { overflow: hidden; }
   height: var(--gal-row);
 }
 .gal-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Display True Pixel Size: the photo at its own size and centered, and
+   contained when it is larger than the tile. gallery.js puts the carousel's
+   blurred backdrop behind it, and the caption stays above both. */
+.gal-tile img[data-truesize] { object-fit: scale-down; position: relative; z-index: 1; }
+/* gallery.js marks a crisp photo is-shrunk while its tile is smaller than it */
+.gal-tile img[data-crisp]:not(.is-shrunk) { image-rendering: pixelated; }
+.gal-tile img.gal-tile__ambient {
+  position: absolute; inset: -16%;
+  width: 132%; height: 132%;
+  object-fit: cover;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .46;
+  filter: blur(34px) saturate(1.16) brightness(.72);
+}
+.gal-tile img[data-truesize] ~ .gal-tile__cap { z-index: 2; }
 .gal-tile__cap {
   position: absolute; left: 0; right: 0; bottom: 0;
   padding: 1.4rem .75rem .55rem;
@@ -1472,6 +1534,8 @@ body.lb-open { overflow: hidden; }
 .lightbox__img--active   { z-index: 1; }
 .lightbox__img--incoming { z-index: 0; opacity: 0; pointer-events: none; }   /* hidden until a drag reveals it */
 .lightbox__img.is-zoomed { cursor: grab; }
+/* a photo the engine marked crisp keeps square pixels, in a pinch as well */
+.lightbox__img--crisp { image-rendering: pixelated; }
 
 .lightbox__close,
 .lightbox__nav {
@@ -2508,17 +2572,16 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 .bm-divider + .blog-post { border-top: 0; }
 
 
-/* THE FIGURES. Full column width, and a click opens the viewer. A cut
-   flag's marker is read by the fold and seen by nobody. */
+/* A post's images are carousels, one for each run of tags, and work.js
+   draws them as it draws the home page's. A cut flag's marker is read by
+   the fold and seen by nobody. */
+.bs-post__body .gallery { margin: 1.1rem 0 0; }
 .bp-cut { display: none; }
-figure.bp-fig { margin: 1.1rem 0 0; }
-figure.bp-fig img {
-  width: 100%; display: block; border-radius: var(--radius-sm);
-  border: 1px solid var(--line); cursor: zoom-in;
-}
-figure.bp-fig figcaption {
-  margin-top: .45rem; color: var(--dim); font-size: .76rem; line-height: 1.5;
-}
+
+/* The editor's New post pills: one at the end of the bar, after the month
+   picker, and one centered under the last post. Two classes, because the
+   editor's pill paint is injected after this file and sets its display. */
+.bs-newpost.bs-newpost--foot { display: flex; width: fit-content; margin: 1.4rem auto 0; }
 
 /* Shared small parts: the note when a target is not found, and the
    editor's own button on a post. */

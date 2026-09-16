@@ -31,6 +31,10 @@
    its original keeps every frame, so a page that shows the original shows
    it move. That is what Display Maximum UHD does: the image's own switch,
    written into its markup, puts the original where the display copy was.
+
+   Display True Pixel Size is the second switch. It shows the original at
+   its own size, never enlarged, and a small image keeps hard pixel edges.
+   A GIF and a small PNG start with it on.
    ============================================================ */
 /* ==========================================================
    1. SETUP
@@ -72,6 +76,16 @@
      upload that file by hand. */
   var GIT_FILE_LIMIT_MB = 100;
 
+  /* The longest side, in pixels, of a small image. A PNG this small starts
+     with Display True Pixel Size on.
+
+     An image at most half this size is also crisp: it keeps hard pixel
+     edges when a screen draws it larger than its file. The limit is half
+     because a browser draws a shrink with hard edges too, and a shrunk
+     image with hard edges is jagged. At half, it fits a carousel on a
+     390 px phone at its own size. */
+  var SMALL_IMAGE_PX = 480;
+
   /* The formats the engine reads, and the extension each is written with. */
   var TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 
@@ -83,8 +97,8 @@
      renditions can have. A file named any other way is never an orphan,
      however it got into the folder.
 
-     The blog's display copy is still a JPG or a PNG, because the blog
-     composer writes its own files until it moves onto this engine. */
+     A blog display copy named .png is an image from before the engine.
+     That is the one reason the blog's rule still takes .png. */
   var SITE_NAME = /^img\/work\/[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-z]{6}(?:_sd\.webp|\.jpg|_original\.(?:jpg|png|webp|gif))$/;
   var BLOG_NAME = /^blog\/\d{6}_img\d{4}(?:_sd\.webp|\.(?:jpg|png)|_original\.(?:jpg|png|webp|gif))$/;
   /* Either scheme, found inside a page's text. Each match is tested
@@ -809,6 +823,8 @@
        original   the original
        bytes      the original's size
        uhd        true to show the original where the display copy was
+       truesize   true to show the original at its own size; it turns
+                  uhd on with it
 
      An image with only a src, a seed or a hand-written image, has none of
      the others, and gets its src back and nothing else. */
@@ -830,9 +846,13 @@
      is the small copy on its own, which the carousel's dots and backdrop
      read, and data-original is what the viewer offers. */
   function attrs(entry, slot, opts) {
+    /* Display True Pixel Size: the original at its own size. It is UHD
+       with no srcset, because with a srcset a browser draws the picture at
+       the slot's width and not at its own. */
+    var truesize = !!(entry.truesize && entry.original);
     /* Display Maximum UHD: the original stands where the display copy
        stood, and the small copy still serves a small slot */
-    var uhd = !!(entry.uhd && entry.original);
+    var uhd = truesize || !!(entry.uhd && entry.original);
     var gif = extOf(entry.original) === "gif";
     /* A page in a folder says where the root is. Every candidate carries
        it, because a browser resolves a srcset against the page and not
@@ -848,7 +868,7 @@
     var out = [["src", src || ""]];
     /* A GIF shown whole writes no srcset. Its small copy is a still, and a
        phone would be handed the still. */
-    if (slot && entry.sd && entry.sdw && srcWidth && srcWidth >= slot.widest && !(uhd && gif)) {
+    if (slot && entry.sd && entry.sdw && srcWidth && srcWidth >= slot.widest && !(uhd && gif) && !truesize) {
       out.push(["srcset", sd + " " + entry.sdw + "w, " + src + " " + srcWidth + "w"]);
       out.push(["sizes", slot.sizes]);
     }
@@ -864,6 +884,13 @@
       out.push(["data-uhd", "1"]);
       out.push(["data-hd", put(entry.src)]);
     }
+    if (truesize) {
+      out.push(["data-truesize", "1"]);
+      /* A paint hint, written from the original's size and never read
+         back: a small image keeps hard pixel edges when it is drawn
+         larger than its file. */
+      if (isCrisp(entry.ow, entry.oh)) out.push(["data-crisp", "1"]);
+    }
     if (entry.sd) out.push(["data-sd", sd]);
     if (entry.original) {
       out.push(["data-original", put(entry.original)]);
@@ -875,17 +902,19 @@
 
   /* The file fields of an <img>, read from what attrs() wrote. src is the
      display copy's path whichever copy the page shows. type is the
-     original's format, from its extension. */
+     original's format, from its extension. An image with data-truesize
+     shows its original, so it reads uhd too, with or without data-uhd. */
   function read(el) {
     function get(name) { return el.getAttribute(name) || ""; }
-    var uhd = get("data-uhd") === "1";
+    var truesize = get("data-truesize") === "1";
+    var uhd = truesize || get("data-uhd") === "1";
     var size = /^(\d+)x(\d+)$/.exec(get("data-original-size"));
     var out = { src: uhd ? (get("data-hd") || get("src")) : get("src"),
                 sd: get("data-sd"), sdw: 0,
                 w: count(get("width")), h: count(get("height")),
                 ow: size ? +size[1] : 0, oh: size ? +size[2] : 0,
                 original: get("data-original"), bytes: count(get("data-original-bytes")),
-                uhd: uhd, type: extOf(get("data-original")) };
+                uhd: uhd, truesize: truesize, type: extOf(get("data-original")) };
     if (out.sd) {
       get("srcset").split(",").forEach(function (candidate) {
         var m = /^\s*(\S+)\s+(\d+)w\s*$/.exec(candidate);
@@ -893,6 +922,31 @@
       });
     }
     return out;
+  }
+
+  /* True when a longest side of w and h is known and is at most
+     SMALL_IMAGE_PX. The setting is read from the API each time, so the
+     console can try another value. */
+  function isSmall(w, h) {
+    var longest = Math.max(w || 0, h || 0);
+    return longest > 0 && longest <= api.SMALL_IMAGE_PX;
+  }
+
+  /* True for an image that keeps hard pixel edges: a longest side of at
+     most half of SMALL_IMAGE_PX. See SMALL_IMAGE_PX for why half. */
+  function isCrisp(w, h) {
+    var longest = Math.max(w || 0, h || 0);
+    return longest > 0 && longest <= api.SMALL_IMAGE_PX / 2;
+  }
+
+  /* The two switches a photo starts with when it is added, as { uhd,
+     truesize }. A GIF is taken to move and a small PNG to be an icon, so
+     both show the original at its own size. Every other photo starts with
+     both off. An image already on a page keeps the switches it has. */
+  function defaults(photo) {
+    var p = photo || {};
+    var on = p.type === "gif" || (p.type === "png" && isSmall(p.ow, p.oh));
+    return { uhd: on, truesize: on };
   }
 
   /* The file fields a new entry takes from a photo: the paths a save
@@ -997,13 +1051,14 @@
      7. PUBLIC API
      ----------------------------------------------------------
      AMH.images is the engine, for tool.js and every consumer.
-     The two settings are read from here at each intake, so the
-     console and the tests can try a lower Git limit or another
-     rendition without an edit to this file.
+     The settings are read from here each time they are used, so
+     the console and the tests can try a lower Git limit, another
+     rendition or another small size without an edit to this file.
      ========================================================== */
   var api = {
     RENDITIONS: RENDITIONS,
     GIT_FILE_LIMIT_MB: GIT_FILE_LIMIT_MB,
+    SMALL_IMAGE_PX: SMALL_IMAGE_PX,
     MAX_SIDE: MAX_SIDE,
     ACCEPT: Object.keys(TYPES).join(","),
     DELETE_DIR: DELETE_DIR,
@@ -1022,6 +1077,7 @@
     attrs: attrs,              /* an entry, as <img> attributes */
     read: read,                /* an <img>, as an entry's file fields */
     fields: fieldsOf,          /* a photo, as an entry's file fields */
+    defaults: defaults,        /* the two switches a new photo starts with */
     preview: previewOf,        /* the same, on blob: URLs */
     baseOf: baseOf,            /* a file path, as its photo's base path */
     copySize: copySize,        /* the size a copy is drawn at, from the original's */

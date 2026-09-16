@@ -591,13 +591,13 @@
      them off an <img> and writes them back, so the markup is spelt out
      there and not here. An authored image with a src alone has none.
 
-     Two ways in. A dropped file on the gallery page records a path, and a
-     HEAD request confirms the file is on the server; copying it into
-     img/work/ is the reader's step. A photo added to a carousel goes
-     through the image engine instead (see HELD PHOTOS), and a save writes
-     its files. Every field except preview and photo survives a page
-     navigation, which is what carries an edit across pages; the held
-     photo comes back from the engine's store.
+     One way in. A photo added to any region goes through the image engine
+     (see HELD PHOTOS), and a save writes its files. An image a page
+     already names is read back through the engine too, which is how its
+     entry keeps the display copy when the page shows the original. Every
+     field except preview and photo survives a page navigation, which is
+     what carries an edit across pages; the held photo comes back from the
+     engine's store.
 
      The core owns the model and the export form. A consumer owns its DOM:
      how many images it shows at once is not the core's business.
@@ -607,7 +607,7 @@
   /* The file fields, in the order an export form carries them. A field an
      image does not have is left off, and so is a switch that is off, so a
      seed's form stays src, alt and caption. */
-  var FILE_FIELDS = ["sd", "sdw", "w", "h", "ow", "oh", "original", "bytes", "uhd"];
+  var FILE_FIELDS = ["sd", "sdw", "w", "h", "ow", "oh", "original", "bytes", "uhd", "truesize"];
   function copyFiles(en, from) {
     FILE_FIELDS.forEach(function (k) { if (from && from[k]) en[k] = from[k]; });
     return en;
@@ -645,14 +645,21 @@
        keep a preferred width and a priority there. The core carries them and
        never reads them - what they mean is the consumer's business. */
     fromImg: function (im, kind) {
-      var src = im.getAttribute("src") || "";
+      /* The entry's src is the display copy, and the page's src is the file
+         it shows. The two differ when Display Maximum UHD shows the original:
+         read() takes the display copy from data-hd. An entry built from the
+         attribute wrote the original into data-hd at the next save, and the
+         display copy was then an orphan. */
+      var shown = im.getAttribute("src") || "";
+      var files = engine().read(im);
+      var src = files.src || shown;
       var en = {
         src: src, alt: im.getAttribute("alt") || "",
         caption: im.getAttribute("data-caption") || "",
-        preview: src, empty: false,
+        preview: shown, empty: false,
         isSeed: imageRegion.isSeed(src), imgId: null, orig: null
       };
-      copyFiles(en, engine().read(im));
+      copyFiles(en, files);
       if (kind && kind.readEntry) {
         var extra = kind.readEntry(im) || {};
         Object.keys(extra).forEach(function (k) { en[k] = extra[k]; });
@@ -667,9 +674,9 @@
 
     /* Build an entry from a photo the image engine made. The one way in.
 
-       carry is taken as it stands: its caption, its alt, its UHD switch and
-       a kind's own fields, so an alt the reader emptied stays empty. Its
-       file fields are not: they name the files being replaced. With no
+       carry is taken as it stands: its caption, its alt, its two switches
+       and a kind's own fields, so an alt the reader emptied stays empty.
+       Its file fields are not: they name the files being replaced. With no
        carry the alt is the file's name. */
     fromPhoto: function (photo, carry, kind) {
       var en = {
@@ -681,6 +688,7 @@
       };
       copyFiles(en, engine().fields(photo));
       if (carry && carry.uhd) en.uhd = true;
+      if (carry && carry.truesize) { en.truesize = true; en.uhd = true; }
       var defaults = (kind && kind.defaults) || {};
       imageRegion.fieldsOf(kind).forEach(function (k) {
         en[k] = (carry && carry[k] !== undefined) ? carry[k] : defaults[k];
@@ -772,6 +780,17 @@
       return (kind && kind.serialize)
         ? kind.serialize(entries, indent, head)
         : imageRegion.serialize(entries, indent, kind);
+    },
+
+    /* The attributes a region's head writes onto the region's own open tag,
+       as a map for spliceRegion, or null for none. A carousel's head holds
+       its frame choice, which lives on its wrapper; an empty choice is Auto
+       and removes the attribute. The rule is the core's and not a kind's:
+       an export made for another page has no kind for a carousel, because
+       carousels claim no slugs, and it has the stored head. */
+    openAttrs: function (head) {
+      if (!head || typeof head.shape !== "string") return null;
+      return { "data-shape": head.shape || null };
     },
 
     /* One attribute a line: the src first, then what the browser reads to
@@ -924,12 +943,23 @@
                       which srcset needs; no srcset is written without it
        single         ADD PHOTO takes one file, and a second replaces it,
                       for a consumer that holds one image
+       shapes         true for a kind that shows one photo at a time in a
+                      frame: its PHOTOS box offers Auto, Landscape and
+                      Portrait, and its head carries the choice as shape
        rowNote        suffix for the region's rows in the panel
        lastImageNote(r) warning shown before the last image is deleted
        readHead(el)   the region's non-image fields, read off the markup
        adopt(r)       wire an element this trunk did not see at load
        drop(r)        the inverse, before the region is forgotten
      ------------------------------------------------------------ */
+  /* A carousel's head: its frame choice, as its wrapper writes it. The word
+     is kept as written, so an export that did not change it writes the open
+     tag back as it was. work.js reads anything but landscape or portrait as
+     Auto, and says so in the console. */
+  function readShapeHead(el) {
+    return { shape: (el && el.getAttribute("data-shape")) || "" };
+  }
+
   var KIND = {
 
     /* The seven project carousels. Built by work.js at load, so by the time
@@ -947,6 +977,8 @@
       seedFallback: true,
       mayBeEmpty: false,
       slot: CARD_SLOT,
+      shapes: true,
+      readHead: readShapeHead,
       rowNote: "",
       lastImageNote: function (r) {
         return r.seeds.length
@@ -968,6 +1000,8 @@
       seedFallback: false,
       mayBeEmpty: true,
       slot: DRAWER_SLOT,
+      shapes: true,
+      readHead: readShapeHead,
       rowNote: ' <span class="ced-hidden">(dd)</span>',
       lastImageNote: function () {
         return "\n\nThis is the last image: the deep-dive gallery will show nothing.";
@@ -1158,7 +1192,7 @@
       else {
         var held = preview && en.photo;
         var shown = held ? engine().preview(en.photo) : en;
-        if (held) shown.uhd = en.uhd;
+        if (held) { shown.uhd = en.uhd; shown.truesize = en.truesize; }
         engine().attrs(shown, held ? null : slot)
           .forEach(function (a) { im.setAttribute(a[0], a[1]); });
       }
@@ -1169,11 +1203,25 @@
     });
   }
 
+  /* A carousel's frame choice lives on its wrapper, where work.js reads it
+     at the next build: the word, or no attribute for Auto. A head with no
+     shape field is not a carousel's, and changes nothing. */
+  function writeShape(el, head) {
+    if (!el || !head || typeof head.shape !== "string") return;
+    if (head.shape) el.setAttribute("data-shape", head.shape);
+    else el.removeAttribute("data-shape");
+  }
+  /* The head a view shows: the published one in the before view. */
+  function shownHead(g) {
+    return viewing === "before" && g.headOriginal ? JSON.parse(g.headOriginal) : g.head;
+  }
+
   /* A deep dive's carousel is also written into its template, which stays in
      clean export form: no blob previews and no slots. Template content always
      reports isConnected false, so a bare null check is the right guard. */
   function syncGallerySource(g, list) {
     if (!g.kind.syncSource || !g.el) return;
+    writeShape(g.el, shownHead(g));
     setGalleryImgs(g.el, list.filter(function (e) { return !e.empty; }), false, null, g.kind.slot);
   }
 
@@ -1200,6 +1248,7 @@
         if (live.parentNode) live.parentNode.removeChild(live);
         g.live = null;
       } else {
+        writeShape(live, shownHead(g));
         setGalleryImgs(live, list, true, PHOTO_TILE, g.kind.slot);
         live.classList.remove("is-ready", "gallery--single");
         if (AMH.work) AMH.work.buildGalleries();
@@ -1690,9 +1739,10 @@
     ".ced-chip--img{width:auto;min-width:26px;padding:0 8px;border-radius:999px;font-size:8.5px;}" +
     ".ced-chip--plus{font-size:14px;font-weight:800;}" +
     ".ced-chip--trash svg{width:13px;height:13px;display:block;}" +
-    /* THE CAPTION PENCIL sits at the end of a carousel's caption label and
-       comes and goes with it. The label ignores the pointer so a tap falls
-       through to the carousel, so the pencil asks for the pointer back. */
+    /* THE CAPTION PENCIL sits at the end of a carousel's caption label, which
+       is always on screen in the caption strip. The label ignores the pointer
+       so a tap falls through to the carousel, so the pencil asks for the
+       pointer back. */
     ".gallery__caption .ced-cappen{flex:none;display:grid;place-items:center;width:22px;height:22px;" +
     "margin-left:.55rem;padding:0;border:1px solid rgba(111,188,242,.6);border-radius:50%;" +
     "background:rgba(6,9,14,.6);color:var(--accent-bright);cursor:pointer;pointer-events:auto;" +
@@ -1702,10 +1752,12 @@
     ".gallery__caption .ced-cappen:focus-visible{outline:2px solid var(--accent-bright);outline-offset:2px;}" +
     ".gallery__caption .ced-cappen svg{width:12px;height:12px;display:block;}" +
     ".gallery__caption .ced-cappen[hidden]{display:none;}" +
-    /* While a caption is edited its label holds still, takes the pointer and
-       widens toward the frame, so a long caption has room to be read. */
-    ".gallery__caption.ced-capediting{opacity:1;transform:none;pointer-events:auto;" +
+    /* While a caption is edited its label takes the pointer and widens across
+       the strip, so a long caption has room to be read. The caption cell and
+       its hidden copies step aside for the field. */
+    ".gallery__caption.ced-capediting{pointer-events:auto;" +
     "width:min(34rem,calc(100% - 1rem));max-width:calc(100% - 1rem);}" +
+    ".gallery__caption.ced-capediting .gallery__caption-cell{display:none;}" +
     ".gallery__caption .ced-capedit{flex:1 1 auto;min-width:0;padding:.28rem .5rem;" +
     "border:1px solid var(--accent);border-radius:6px;background:rgba(6,9,14,.78);" +
     "color:var(--text);font:600 .78rem var(--font);}" +
@@ -1850,6 +1902,11 @@
     ".ced-photos{width:min(880px,94vw);}" +
     ".ced-photos__body{flex:1 1 auto;min-height:0;overflow:auto;padding:.8rem 1.1rem .4rem;}" +
     ".ced-photos__list{list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}" +
+    /* THE FRAME GROUP: a carousel's shape, three buttons with one pressed */
+    ".ced-frame{display:inline-flex;align-items:center;gap:.3rem;margin-left:.2rem;}" +
+    ".ced-frame__label{font:600 .72rem var(--font);color:var(--dim);margin-right:.1rem;}" +
+    ".ced-frame .ced-btn[aria-pressed=true]{border-color:var(--accent);color:var(--accent-bright);" +
+    "background:rgba(74,165,232,.14);}" +
     ".ced-photo{display:grid;grid-template-columns:auto 132px minmax(0,1fr) auto;gap:.75rem;" +
     "align-items:start;padding:.6rem;border:1px solid var(--line);border-radius:10px;" +
     "background:var(--bg-deep);}" +
@@ -1870,16 +1927,21 @@
     "padding:2px 4px;border-radius:3px;background:var(--c-yellow);color:var(--bg-deep);" +
     "vertical-align:1px;text-transform:none;}" +
     ".ced-altmark[hidden]{display:none;}" +
-    /* Display Maximum UHD, drawn as a switch: a checkbox with the switch role */
-    ".ced-uhd{display:inline-flex;align-items:center;gap:.4rem;font-size:.72rem;" +
+    /* Display True Pixel Size and Display Maximum UHD, drawn as switches:
+       each a checkbox with the switch role */
+    ".ced-truesize,.ced-uhd{display:inline-flex;align-items:center;gap:.4rem;font-size:.72rem;" +
     "color:var(--text-soft);cursor:pointer;}" +
-    ".ced-uhd input{-webkit-appearance:none;appearance:none;margin:0;flex:none;width:28px;height:16px;" +
-    "border-radius:999px;background:var(--line);position:relative;cursor:pointer;transition:background .15s;}" +
-    ".ced-uhd input::before{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;" +
-    "border-radius:50%;background:var(--text-soft);transition:transform .15s,background .15s;}" +
-    ".ced-uhd input:checked{background:var(--accent);}" +
-    ".ced-uhd input:checked::before{transform:translateX(12px);background:#fff;}" +
-    ".ced-uhd input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".ced-truesize input,.ced-uhd input{-webkit-appearance:none;appearance:none;margin:0;flex:none;" +
+    "width:28px;height:16px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;" +
+    "transition:background .15s;}" +
+    ".ced-truesize input::before,.ced-uhd input::before{content:'';position:absolute;top:2px;left:2px;" +
+    "width:12px;height:12px;border-radius:50%;background:var(--text-soft);transition:transform .15s,background .15s;}" +
+    ".ced-truesize input:checked,.ced-uhd input:checked{background:var(--accent);}" +
+    ".ced-truesize input:checked::before,.ced-uhd input:checked::before{transform:translateX(12px);background:#fff;}" +
+    ".ced-truesize input:focus-visible,.ced-uhd input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    /* UHD held on by True Pixel Size: still on, and not a control while it lasts */
+    ".ced-uhd.is-locked{cursor:default;opacity:.62;}" +
+    ".ced-uhd.is-locked input{cursor:default;}" +
     ".ced-uhd__what{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
     /* the controls a kind adds of its own, under the facts */
     ".ced-photo__extras{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .9rem;" +
@@ -3141,9 +3203,26 @@
     return (type ? type.toUpperCase() : "") + (ow && oh ? " · " + ow + " x " + oh : "");
   }
 
+  /* One switch on a photo's row: a checkbox with the switch role, and its
+     words. onChange is told each new value. Returns { label, input }. */
+  function photoSwitch(cls, words, on, onChange) {
+    var label = doc.createElement("label");
+    label.className = cls;
+    var input = doc.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("role", "switch");
+    input.checked = !!on;
+    input.addEventListener("change", function () { onChange(input.checked); });
+    var text = doc.createElement("span");
+    text.textContent = words;
+    label.appendChild(input);
+    label.appendChild(text);
+    return { label: label, input: input };
+  }
+
   /* One photo's row, the shape both boxes draw: a number, the picture, the
-     caption and the alt text, a line of facts with the UHD switch, and the
-     row's moves.
+     caption and the alt text, a line of facts with the two switches, and
+     the row's moves.
 
        o.n, o.pic             the row's number and picture
        o.caption, o.alt       the words it opens with
@@ -3151,12 +3230,17 @@
                               alt is still that name, the field is marked
        o.file                 an element for the line above the facts
        o.facts                pieces from photoFacts
-       o.uhd                  { on, what } for the switch, or null for none
+       o.truesize             { on } for Display True Pixel Size, or null
+       o.uhd                  { on, what } for Display Maximum UHD, or null
        o.extras               a kind's own controls, under the facts
        o.acts                 the buttons, in order
        o.onCaption, o.onAlt   told each new value
-       o.onUhd                told the switch's new value
+       o.onTruesize, o.onUhd  told each switch's new value
        o.onEnter              Enter in the caption or the alt
+
+     While True Pixel Size is on, UHD shows on and is locked, and a UHD
+     that was off is turned on and told. Turning True Pixel Size off leaves
+     UHD on and free to change.
 
      Returns { li, cap, alt }. */
   function photoRow(o) {
@@ -3209,26 +3293,36 @@
       facts.appendChild(s);
     });
     meta.appendChild(facts);
-    if (o.uhd) {
-      var sw = doc.createElement("label");
-      sw.className = "ced-uhd";
-      var onOff = doc.createElement("input");
-      onOff.type = "checkbox";
-      onOff.setAttribute("role", "switch");
-      onOff.checked = !!o.uhd.on;
-      onOff.addEventListener("change", function () { if (o.onUhd) o.onUhd(onOff.checked); });
-      var words = doc.createElement("span");
-      words.textContent = "Display Maximum UHD";
-      sw.appendChild(onOff);
-      sw.appendChild(words);
+    /* True Pixel Size first, because it decides the switch after it */
+    var size = o.truesize ? photoSwitch("ced-truesize", "Display True Pixel Size", o.truesize.on,
+      function (on) {
+        if (o.onTruesize) o.onTruesize(on);
+        lockUhd();
+      }) : null;
+    if (size) meta.appendChild(size.label);
+    var uhd = o.uhd ? photoSwitch("ced-uhd", "Display Maximum UHD", o.uhd.on,
+      function (on) { if (o.onUhd) o.onUhd(on); }) : null;
+    if (uhd) {
       if (o.uhd.what) {
         var what = doc.createElement("span");
         what.className = "ced-uhd__what";
         what.textContent = o.uhd.what;
-        sw.appendChild(what);
+        uhd.label.appendChild(what);
       }
-      meta.appendChild(sw);
+      meta.appendChild(uhd.label);
     }
+    function lockUhd() {
+      if (!uhd) return;
+      var locked = !!(size && size.input.checked);
+      if (locked && !uhd.input.checked) {
+        uhd.input.checked = true;
+        if (o.onUhd) o.onUhd(true);
+      }
+      uhd.input.disabled = locked;
+      uhd.label.classList.toggle("is-locked", locked);
+      uhd.label.title = locked ? "On while Display True Pixel Size is on" : "";
+    }
+    lockUhd();
     fields.appendChild(meta);
     if (o.extras) fields.appendChild(o.extras);
     var acts = doc.createElement("div");
@@ -3439,8 +3533,10 @@
           "ced-tool--danger");
         var row = photoRow({
           n: i + 1, pic: r.photo.urls.sd, caption: r.caption, alt: r.alt, autoAlt: r.autoAlt,
-          facts: photoFacts(r.photo), uhd: { on: r.uhd, what: uhdWhat(r.photo) },
+          facts: photoFacts(r.photo), truesize: { on: r.truesize },
+          uhd: { on: r.uhd, what: uhdWhat(r.photo) },
           acts: [up, down, out],
+          onTruesize: function (on) { r.truesize = on; },
           onUhd: function (on) { r.uhd = on; },
           /* Enter moves on to the next photo's caption, and past the last
              photo it moves on to the next step */
@@ -3639,8 +3735,10 @@
               rows = [];
             }
             var auto = imageRegion.humanize(made.from);
-            /* a GIF is taken to move, so it shows its original to begin with */
-            rows.push({ photo: made, caption: "", alt: auto, autoAlt: auto, uhd: made.type === "gif" });
+            /* the engine says which switches a new photo starts with */
+            var starts = engine().defaults(made);
+            rows.push({ photo: made, caption: "", alt: auto, autoAlt: auto,
+                        uhd: starts.uhd, truesize: starts.truesize });
           }, function (err) {
             refused.push(err && err.message ? err.message : String(err));
           });
@@ -3677,7 +3775,7 @@
       syncRows();
       var entries = rows.map(function (r) {
         return imageRegion.fromPhoto(r.photo,
-          { caption: r.caption.trim(), alt: r.alt.trim(), uhd: r.uhd }, g.kind);
+          { caption: r.caption.trim(), alt: r.alt.trim(), uhd: r.uhd, truesize: r.truesize }, g.kind);
       });
       rows = [];                 /* the target holds them now */
       target.putAll(entries, at);
@@ -3740,12 +3838,14 @@
     }
     var rows = g.model.filter(realEntry).map(function (en) {
       return { en: en, caption: en.caption || "", alt: en.alt || "", autoAlt: en.alt || "",
-               uhd: !!en.uhd, values: valuesOf(en), swap: null, fresh: false };
+               uhd: !!en.uhd, truesize: !!en.truesize, values: valuesOf(en), swap: null, fresh: false };
     });
+    /* the frame choice, for a kind that shows its photos in a frame */
+    var shapeNow = g.kind.shapes && g.head && typeof g.head.shape === "string" ? g.head.shape : "";
     function sig() {
-      return JSON.stringify(rows.map(function (r) {
-        return [r.en.src, r.caption, r.alt, r.uhd, r.swap ? r.swap.files.hd : "", r.values];
-      }));
+      return JSON.stringify({ shape: shapeNow, rows: rows.map(function (r) {
+        return [r.en.src, r.caption, r.alt, r.uhd, r.truesize, r.swap ? r.swap.files.hd : "", r.values];
+      }) });
     }
     var was = sig();
     var said = describeRegion(g);
@@ -3817,13 +3917,56 @@
       putAll: function (entries, at) {
         Array.prototype.splice.apply(rows, [at, 0].concat(entries.map(function (en) {
           return { en: en, caption: en.caption, alt: en.alt, autoAlt: en.alt, uhd: !!en.uhd,
-                   values: valuesOf(en), swap: null, fresh: true };
+                   truesize: !!en.truesize, values: valuesOf(en), swap: null, fresh: true };
         })));
         draw(at);
         say(entries.length > 1 ? "Added. Press Apply to keep them." : "Added. Press Apply to keep it.");
       }
     };
     var addBtn = btn("Add a photo", "", function () { addPhotoBox(g, { target: draft }); });
+
+    /* THE FRAME. Auto follows the photos in the box as they stand, and its
+       label says what it would give; Landscape and Portrait are the author's
+       word, which the frame keeps whatever the photos are. */
+    var frameBtns = [];
+    if (g.kind.shapes) {
+      var group = doc.createElement("span");
+      group.className = "ced-frame";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", "Frame");
+      var groupWords = doc.createElement("span");
+      groupWords.className = "ced-frame__label";
+      groupWords.textContent = "Frame";
+      group.appendChild(groupWords);
+      [["", "Auto"], ["landscape", "Landscape"], ["portrait", "Portrait"]].forEach(function (pair) {
+        var b = doc.createElement("button");
+        b.type = "button";
+        b.className = "ced-btn";
+        b.setAttribute("data-shape", pair[0]);
+        b.addEventListener("click", function () {
+          shapeNow = pair[0];
+          drawFrame();
+          say("Frame: " + (pair[0] || "Auto") + ". Press Apply to keep it.");
+        });
+        frameBtns.push({ el: b, word: pair[0], label: pair[1] });
+        group.appendChild(b);
+      });
+      btns.appendChild(group);
+    }
+    function drawFrame() {
+      if (!frameBtns || !frameBtns.length) return;
+      var auto = AMH.work && AMH.work.frameShape
+        ? AMH.work.frameShape(rows.map(function (r) {
+            var p = r.swap;
+            return p ? { w: p.w, h: p.h } : { w: +r.en.w || 0, h: +r.en.h || 0 };
+          }), "").orientation
+        : "";
+      var chosen = shapeNow === "landscape" || shapeNow === "portrait" ? shapeNow : "";
+      frameBtns.forEach(function (f) {
+        f.el.textContent = f.word ? f.label : "Auto" + (auto ? " (" + auto + ")" : "");
+        f.el.setAttribute("aria-pressed", String(f.word === chosen));
+      });
+    }
     var sp = doc.createElement("span");
     sp.className = "ced-spacer";
     btns.appendChild(sp);
@@ -3868,12 +4011,14 @@
         n: i + 1, pic: r.swap ? r.swap.urls.sd : (r.en.preview || r.en.src),
         caption: r.caption, alt: r.alt, autoAlt: r.autoAlt, file: file,
         facts: photoFacts(photo, r.en),
-        /* the switch is for a photo that has an original to show */
+        /* the switches are for a photo that has an original to show */
+        truesize: (r.swap || r.en.original) ? { on: r.truesize } : null,
         uhd: (r.swap || r.en.original) ? { on: r.uhd, what: uhdWhat(photo, r.en) } : null,
         extras: extras,
         acts: [up, down, rep, bin],
         onCaption: function (v) { r.caption = v; },
         onAlt: function (v) { r.alt = v; },
+        onTruesize: function (on) { r.truesize = on; },
         onUhd: function (on) { r.uhd = on; }
       }).li;
     }
@@ -3885,6 +4030,7 @@
         ? "No photos yet. The placeholder photos show until you add one."
         : "No photos yet.";
       rows.forEach(function (r, i) { list.appendChild(rowEl(r, i)); });
+      drawFrame();
       var li = typeof focusRow === "number" ? list.children[focusRow] : null;
       if (li) {
         li.scrollIntoView({ block: "nearest" });
@@ -3918,11 +4064,15 @@
         if (shut || rows.indexOf(r) === -1) { engine().letGo(made); return; }
         if (r.swap) engine().letGo(r.swap);
         r.swap = made;
-        /* a GIF is taken to move, the way the wizard takes one */
-        var gifTurnedOn = made.type === "gif" && !r.uhd;
-        if (gifTurnedOn) r.uhd = true;
+        /* The engine's defaults, the way the wizard takes a photo. A default
+           turns a switch on and never off: a switch the author turned on
+           stays on for the new file. */
+        var starts = engine().defaults(made);
+        var turnedOn = (starts.truesize && !r.truesize) || (starts.uhd && !r.uhd);
+        if (starts.truesize) r.truesize = true;
+        if (starts.uhd) r.uhd = true;
         draw(rows.indexOf(r));
-        say(gifTurnedOn ? "Replaced. A GIF shows its original, so its switch is on. Press Apply to keep it."
+        say(turnedOn ? "Replaced. This photo shows at its own size, so its switches are on. Press Apply to keep it."
           : "Replaced. Press Apply to keep it.");
       }, function (err) {
         if (!shut) say(err && err.message ? err.message : String(err));
@@ -3963,7 +4113,8 @@
         }
         en.caption = r.caption.trim();
         en.alt = r.alt.trim();
-        en.uhd = r.uhd;
+        en.uhd = r.uhd || r.truesize;
+        en.truesize = r.truesize;
         /* last, so a replaced photo keeps the numbers set in this box rather
            than the ones fromPhoto carried over with the file */
         Object.keys(r.values).forEach(function (k) { en[k] = r.values[k]; });
@@ -3971,6 +4122,7 @@
       });
       g.model.forEach(function (en) { if (next.indexOf(en) === -1) imageRegion.revokePreview(en); });
       g.model = next;
+      if (g.kind.shapes) g.head = { shape: shapeNow };
       if (!next.length && !g.seeds.length && g.kind.mayBeEmpty) {
         g.model.push(imageRegion.emptySlot(g.kind));
       }
@@ -6334,7 +6486,9 @@
 
      Export therefore needs the page over HTTP, not file://.
      ========================================================== */
-  function spliceRegion(src, slug, inner) {
+  /* attrs, when given, is a map of attribute names to a value or null, for
+     the region's own open tag. See setTagAttrs. */
+  function spliceRegion(src, slug, inner, attrs) {
     var open = "<!--[edit:" + slug + "]-->";
     var close = "<!--[/edit:" + slug + "]-->";
     var a = src.indexOf(open);
@@ -6352,7 +6506,60 @@
     var gt = lt + openTag[0].length - 1;
     var lastClose = span.lastIndexOf("</");
     if (lastClose <= gt) return null;
-    return src.slice(0, start) + span.slice(0, gt + 1) + inner + span.slice(lastClose) + src.slice(b);
+    var tag = attrs ? setTagAttrs(openTag[0], attrs) : openTag[0];
+    return src.slice(0, start) + span.slice(0, lt) + tag + inner + span.slice(lastClose) + src.slice(b);
+  }
+
+  /* Rewrite the named attributes of one opening tag, and leave every other
+     byte of it as it was written. It is the one change to a region's open
+     tag the export makes, and the tag is inside the region's markers.
+
+       tag     '<div class="gallery" data-next-preview>'
+       attrs   { name: value }; null takes the attribute out
+
+     A value the tag already holds leaves the tag as it was. A new value is
+     written in double quotes where the attribute stood, after the same
+     white space. An attribute the tag lacks is added after one space,
+     before the tag's end. null takes the attribute out with the white
+     space before it. */
+  function setTagAttrs(tag, attrs) {
+    var out = tag;
+    Object.keys(attrs).forEach(function (name) {
+      var value = attrs[name];
+      var found = findTagAttr(out, name);
+      if (value === null || value === undefined) {
+        if (found) out = out.slice(0, found.start) + out.slice(found.end);
+        return;
+      }
+      var written = name + '="' + escAttr(value) + '"';
+      if (found) {
+        if (found.value === escAttr(value)) return;
+        out = out.slice(0, found.start) + found.space + written + out.slice(found.end);
+        return;
+      }
+      var end = /\s*\/?>$/.exec(out);
+      out = out.slice(0, end.index) + " " + written + out.slice(end.index);
+    });
+    return out;
+  }
+
+  /* One attribute of an opening tag: where it starts, with the white space
+     before it, where it ends, that white space, and its value as written,
+     without quotes. The attributes are read one after another from the tag
+     name, so a name inside another attribute's quoted value is never taken
+     for an attribute. */
+  function findTagAttr(tag, name) {
+    var re = /(\s+)([^\s=\/>"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?/y;
+    re.lastIndex = (/^<[a-zA-Z][\w-]*/.exec(tag) || [""])[0].length;
+    var m;
+    while ((m = re.exec(tag))) {
+      if (m[2].toLowerCase() === name) {
+        var raw = m[3] || "";
+        return { start: m.index, end: re.lastIndex, space: m[1],
+                 value: /^["']/.test(raw) ? raw.slice(1, -1) : raw };
+      }
+    }
+    return null;
   }
 
   function escAttr(s) {
@@ -6455,7 +6662,8 @@
     if (!entries.length && !g.kind.mayBeEmpty) {
       console.warn("[site editor] " + g.slug + " exports EMPTY - no images and no seed fallback.");
     }
-    return spliceRegion(src, g.slug, imageRegion.serializeFor(entries, ind, g.kind, g.head));
+    return spliceRegion(src, g.slug, imageRegion.serializeFor(entries, ind, g.kind, g.head),
+      imageRegion.openAttrs(g.head));
   }
 
   /* ---------------- pages and their pristine bytes ---------------- */
@@ -8299,7 +8507,8 @@
       var out = spliceRegion(src, slug, kept !== undefined
         ? indentBlock(kept, ind)
         : imageRegion.serializeFor(galleries[slug], ind, kindForSlug(slug),
-                                   (more.heads || {})[slug]));
+                                   (more.heads || {})[slug]),
+        imageRegion.openAttrs((more.heads || {})[slug]));
       if (out === null) failed.push(slug);
       else src = out;
     });
@@ -8454,6 +8663,10 @@
          set. Cleared on teardown, which is why the stream also strips the
          buttons it already drew. */
       AMH.tool.editPost = function (id) { api.blog.edit(id); };
+      /* AMH.tool.newPost()
+         blog.js draws a New post pill at the top and at the foot of the blog
+         while this is set, and a pill opens the composer through it. */
+      AMH.tool.newPost = function () { api.blog(); };
       /* the blog page renders its stream at load, before this point, so the
          posts already on screen have to be decorated now */
       if (AMH.blog && AMH.blog.editButtons) AMH.blog.editButtons();
@@ -8463,9 +8676,11 @@
       console.info("[site editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
     } else {
       AMH.tool.editPost = null;
-      /* strip any Edit buttons the stream rendered while we were active */
+      AMH.tool.newPost = null;
+      /* strip the pills the blog drew while we were active: the Edit pill on
+         each post, and the two New post pills */
       Array.prototype.forEach.call(
-        doc.querySelectorAll("#blogFeed article header .bs-retry"),
+        doc.querySelectorAll(".bs-retry, .bs-newpost"),
         function (b) { b.remove(); });
       if (viewing === "before") api.after();   /* never leave the page showing the before view */
       /* unfilled (+) slots are editor scaffolding - never leave their
@@ -8767,6 +8982,12 @@
   var BLOG_ELSEWHERE = "the blog composer lives on " + BLOG_PAGE;
 
   api.blog = function () {
+    /* A month page cannot publish, so a new post is written on the blog
+       page, which opens the composer as it loads. */
+    if (onMonthPage()) {
+      location.href = "../" + BLOG_PAGE + "?edit=new";
+      return "opening " + BLOG_PAGE + " for a new post";
+    }
     if (!blogHere()) return BLOG_ELSEWHERE;
     injectStyles();
     scan();

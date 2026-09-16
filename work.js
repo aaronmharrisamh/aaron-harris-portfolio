@@ -33,7 +33,9 @@
      attribute holds that photo's blob: URL, so the viewer shows it as well.
 
      original and originalBytes name the file as it came, from the markup
-     the image engine writes. An image without an original has neither. */
+     the image engine writes. An image without an original has neither.
+     crisp is true for a small image the engine marked with data-crisp:
+     the viewer keeps its pixels square. */
   /* A file's size the way a reader says it: "212 KB", "3.1 MB", "48 MB".
      Published, so the editor's boxes say a size the same way. */
   function sizeText(bytes) {
@@ -50,7 +52,8 @@
         caption: im.getAttribute("data-caption") || "",
         alt: im.getAttribute("alt") || "",
         original: im.getAttribute("data-original") || "",
-        originalBytes: parseInt(im.getAttribute("data-original-bytes"), 10) || 0
+        originalBytes: parseInt(im.getAttribute("data-original-bytes"), 10) || 0,
+        crisp: im.getAttribute("data-crisp") === "1"
       };
     });
   }
@@ -82,11 +85,12 @@
        lightbox.close()
        lightbox.isOpen()
 
-     items is a list of { src, caption, alt, original, originalBytes },
-     the last two optional. That is deliberately the subset the image-region
-     core in tool.js already produces, so a consumer passes its model
-     straight through with no adapter. Use itemsFromImgs() above to build
-     the list from markup.
+     items is a list of { src, caption, alt, original, originalBytes,
+     crisp }, the last three optional. That is deliberately the subset the
+     image-region core in tool.js already produces, so a consumer passes
+     its model straight through with no adapter. Use itemsFromImgs() above
+     to build the list from markup. A crisp item is drawn with square
+     pixels, so a small icon enlarged by a pinch stays sharp.
 
      opts, all optional:
        nav     false hides the prev and next controls, for a consumer
@@ -232,7 +236,8 @@
       images = (items || []).filter(function (it) { return it && it.src; })
         .map(function (it) {
           return { src: it.src, caption: it.caption || "", alt: it.alt || "",
-                   original: it.original || "", originalBytes: it.originalBytes || 0 };
+                   original: it.original || "", originalBytes: it.originalBytes || 0,
+                   crisp: !!it.crisp };
         });
       if (!images.length) return false;
       opts = opts || {};
@@ -275,6 +280,7 @@
       var im = images[current];
       imgEl.src = im.src;
       imgEl.alt = im.alt;
+      imgEl.classList.toggle("lightbox__img--crisp", im.crisp);
       if (im.caption) { captionEl.textContent = im.caption; captionEl.classList.remove("is-empty"); }
       else { captionEl.textContent = ""; captionEl.classList.add("is-empty"); }
       if (im.original) {
@@ -396,7 +402,11 @@
           e.preventDefault();
           var n = images.length;
           var tgt = dx < 0 ? (current + 1) % n : (current - 1 + n) % n;
-          if (tgt !== swipe.target) { swipe.target = tgt; imgInEl.src = images[tgt].src; }
+          if (tgt !== swipe.target) {
+            swipe.target = tgt;
+            imgInEl.src = images[tgt].src;
+            imgInEl.classList.toggle("lightbox__img--crisp", images[tgt].crisp);
+          }
           var prog = Math.min(1, Math.abs(dx) / (swipe.width * 0.6));
           imgEl.style.transition = "none";
           imgEl.style.transform = "translateX(" + dx + "px)";
@@ -638,9 +648,8 @@
       });
       buildGalleries();
       /* drawer galleries: keep the keyboard/AT affordance the old dd figure
-         had - focusable, labelled, Enter/Space opens the lightbox - and give
-         the caption a transient reveal so touch users see it at least once
-         (a single-image gallery never fires the image-change reveal). */
+         had - focusable, labelled, Enter/Space opens the lightbox. A caption
+         needs nothing here: it is always on screen, in its strip. */
       Array.prototype.forEach.call(bodyEl.querySelectorAll(".gallery__holder"), function (h) {
         h.setAttribute("tabindex", "0");
         h.setAttribute("role", "button");
@@ -650,11 +659,6 @@
             e.preventDefault(); h.click();
           }
         });
-        var cap = h.querySelector(".gallery__caption");
-        if (cap && !cap.classList.contains("is-empty")) {
-          cap.classList.add("is-visible");
-          window.setTimeout(function () { cap.classList.remove("is-visible"); }, 3800);
-        }
       });
       /* make single photos keyboard-focusable + labelled for zoom */
       Array.prototype.forEach.call(bodyEl.querySelectorAll("figure.dd-figure img"), function (im) {
@@ -710,31 +714,100 @@
      on desktop), then fades out. This single switch covers desktop and mobile. */
   var GALLERY_SHOW_COUNTER = false;
 
+  /* The frame's shape, as width / height. A landscape frame is never squarer
+     than FRAME_LANDSCAPE.least or wider than FRAME_LANDSCAPE.most, and a
+     portrait frame never squarer than FRAME_PORTRAIT.least or taller than
+     FRAME_PORTRAIT.most. */
+  var FRAME_LANDSCAPE = { least: 16 / 9, most: 20 / 9 };
+  var FRAME_PORTRAIT  = { least: 9 / 16, most: 9 / 20 };
+
+  /* The most of the screen's height a frame's photo area takes. A taller
+     frame gets narrower instead, and stays centered. */
+  var FRAME_MOST_OF_SCREEN = 0.85;
+
   doc.body.classList.add("ga-d-" + GALLERY_ARROWS_DESKTOP);
   doc.body.classList.add("ga-m-" + GALLERY_ARROWS_MOBILE);
+  doc.body.style.setProperty("--gallery-screen", String(FRAME_MOST_OF_SCREEN));
   var GA_IMAGE = GALLERY_ARROWS_DESKTOP === "image" || GALLERY_ARROWS_MOBILE === "image";
   var GA_BAR   = GALLERY_ARROWS_DESKTOP === "bar"   || GALLERY_ARROWS_MOBILE === "bar";
   var GA_DOTS  = GALLERY_ARROWS_DESKTOP === "dots"  || GALLERY_ARROWS_MOBILE === "dots";
 
-  /* On touch (no hover), the subtitle + count are hidden at rest and only
-     glide in for a moment on each image change; on hover devices CSS handles
-     the subtitle on hover, so the JS transient reveal there is for the count
-     only. Re-evaluated live so a resized desktop window stays correct. */
-  var GA_TOUCH_MQ = window.matchMedia ? window.matchMedia("(hover: none)") : null;
+  /* The slide count, when it is on, glides in for a moment on each image
+     change and then fades. A caption never does: it stays in its strip. */
   var GA_COUNTER_HOLD = 2600;   /* ms the slide count stays up before it fades */
-  var GA_CAPTION_HOLD = 3800;   /* ms the subtitle stays up; longer, it is read */
 
   /* ==========================================================
      5. CAROUSELS
      ----------------------------------------------------------
      Turn each authored `.gallery`, a plain list of <img>, into a holder
-     with a framed backdrop, a padded stage, cross-fade navigation, a
-     progress timeline, an optional in-frame HUD, and an optional next-
-     image preview (opt in with data-next-preview).
+     with a framed backdrop, a view that holds the padded stage, cross-
+     fade navigation, a progress timeline, an optional HUD in the view,
+     and an optional next-image preview (opt in with data-next-preview).
+
+     A carousel with any caption also gets a caption strip under the view.
+     The strip shows the caption at all times and holds the arrows, so a
+     caption never covers a photo and never waits for a hover.
+
+     The view takes the frame's shape: landscape or portrait, from the
+     wrapper's data-shape or from its photos, at a ratio kept between the
+     limits in section 4. See frameShape.
 
      Arrows, pips and the preview are hidden for a one-image gallery.
      The active image carries a data-lightbox hook for section 2.
      ========================================================== */
+  /* The shape of a carousel's frame.
+
+     The orientation is the author's word when it is landscape or portrait.
+     Without one the photos decide: a photo taller than it is wide is
+     portrait, and every other photo is landscape, a square one included.
+     The frame is portrait when more than half of the photos with a known
+     size are, so a tie and a carousel of photos with no size are landscape.
+
+     The ratio is the middle photo's of that orientation, counted from the
+     least stretched, the first of the two middles for an even count, and
+     kept between the orientation's limits. The middle and not the widest,
+     so one panorama among camera photos does not make the rest smaller.
+     With no photo of that orientation, which only a word can cause, the
+     frame takes the orientation's least stretched shape.
+
+       sizes   [{ w, h }], the photos' declared sizes, 0 where one has none
+       word    the wrapper's data-shape; any other value is no word
+
+     Returns { orientation, ratio }. It reads no page, so a test can call it. */
+  function frameShape(sizes, word) {
+    var known = (sizes || []).filter(function (s) { return s && s.w > 0 && s.h > 0; });
+    var tall = known.filter(function (s) { return s.h > s.w; });
+    var orientation = word === "landscape" || word === "portrait" ? word
+      : (tall.length * 2 > known.length ? "portrait" : "landscape");
+    var portrait = orientation === "portrait";
+    var limits = portrait ? FRAME_PORTRAIT : FRAME_LANDSCAPE;
+    var ratios = known
+      .filter(function (s) { return (s.h > s.w) === portrait; })
+      .map(function (s) { return s.w / s.h; })
+      .sort(function (a, b) { return portrait ? b - a : a - b; });
+    var ratio = ratios.length ? ratios[Math.floor((ratios.length - 1) / 2)] : limits.least;
+    var lo = Math.min(limits.least, limits.most);
+    var hi = Math.max(limits.least, limits.most);
+    return { orientation: orientation, ratio: Math.min(hi, Math.max(lo, ratio)) };
+  }
+
+  /* THE VIEWER'S SET. A carousel opens the viewer on its own photos, unless
+     the page says the carousels inside one element are one set: the blog
+     does, so a post's photos page through from its first carousel to its
+     last. fn(gallery) returns that element, or null for the carousel's own.
+     The set is read at the click, so a carousel built later is in it. */
+  var viewerScopeOf = null;
+  function viewerScope(fn) {
+    viewerScopeOf = typeof fn === "function" ? fn : null;
+  }
+  function viewerSet(gallery, imgs, index) {
+    var scope = viewerScopeOf ? viewerScopeOf(gallery) : null;
+    if (!scope) return { imgs: imgs, at: index };
+    var all = Array.prototype.slice.call(scope.querySelectorAll(".gallery.is-ready .gallery__img"));
+    var at = all.indexOf(imgs[index]);
+    return at === -1 ? { imgs: imgs, at: index } : { imgs: all, at: at };
+  }
+
   function buildGalleries() {
     var galleries = doc.querySelectorAll(".gallery");
     Array.prototype.forEach.call(galleries, function (gallery) {
@@ -747,14 +820,24 @@
       var wantsPreview = gallery.hasAttribute("data-next-preview");
       var single = imgs.length === 1;
       var anyCaption = imgs.some(function (im) { return !!im.getAttribute("data-caption"); });
+      /* the frame's shape, from the author's word or from the photos' sizes */
+      var word = gallery.getAttribute("data-shape") || "";
+      if (word && word !== "landscape" && word !== "portrait") {
+        console.warn('[carousel] data-shape="' + word + '" is not landscape or portrait, ' +
+          "so this frame follows its photos.", gallery);
+      }
+      var shape = frameShape(imgs.map(function (im) {
+        return { w: parseInt(im.getAttribute("width"), 10) || 0,
+                 h: parseInt(im.getAttribute("height"), 10) || 0 };
+      }), word);
       var index = 0;
       var ambient = null;        /* blurred active-image backdrop */
-      var hud = null;            /* in-frame control layer */
-      var caption = null;        /* lower-left caption label */
-      var captionText = null;    /* the caption text span inside it */
+      var hud = null;            /* the view's control layer */
+      var strip = null;          /* the caption strip under the view */
+      var caption = null;        /* the caption label, in the strip */
+      var captionText = null;    /* the caption on screen, inside the label */
       var counterText = null;    /* current slide count */
       var counterTimer = 0;      /* transient reveal after image changes */
-      var captionTimer = 0;      /* transient subtitle reveal (touch only) */
       var navCluster = null;     /* floating prev/next rocker */
       var previewImg = null;
       var dotButtons = [];
@@ -763,8 +846,14 @@
 
       var holder = doc.createElement("div");
       holder.className = "gallery__holder";
+      holder.style.setProperty("--gallery-ratio", String(shape.ratio));
       var frame = doc.createElement("div");
       frame.className = "gallery__frame";
+      /* The view is the photo area, and it keeps the frame's shape. The
+         frame layer fills the holder behind the view and the strip, so both
+         stand on one backdrop. */
+      var view = doc.createElement("div");
+      view.className = "gallery__view";
       ambient = doc.createElement("img");
       ambient.className = "gallery__ambient";
       ambient.alt = "";
@@ -781,7 +870,8 @@
       holder.setAttribute("tabindex", "-1");   /* focusable so the lightbox can return focus here */
       holder.addEventListener("click", function () {
         if (justSwiped) { justSwiped = false; return; }
-        lightbox.open(itemsFromImgs(imgs), index, { opener: holder });
+        var set = viewerSet(gallery, imgs, index);
+        lightbox.open(itemsFromImgs(set.imgs), set.at, { opener: holder });
       });
 
       function makeNav(dir, location, label) {
@@ -812,27 +902,12 @@
         }, GA_COUNTER_HOLD);
       }
 
-      /* Touch only: fade the subtitle in on an image change, then let it
-         dissolve back out after a gracious beat. On hover devices the subtitle
-         is hover-revealed by CSS, so we leave it alone here. */
-      function revealCaption() {
-        if (!caption || !captionText) return;
-        if (!GA_TOUCH_MQ || !GA_TOUCH_MQ.matches) return;
-        if (caption.classList.contains("is-empty")) return;   /* nothing to show */
-        caption.classList.add("is-visible");
-        if (captionTimer) window.clearTimeout(captionTimer);
-        captionTimer = window.setTimeout(function () {
-          captionTimer = 0;
-          caption.classList.remove("is-visible");
-        }, GA_CAPTION_HOLD);
-      }
-
       var preview = null;
       if (!single) {
         /* image-mode arrows overlay the photo's edges (built only if used) */
         if (GA_IMAGE) {
-          holder.appendChild(makeNav("prev", "image", "Previous image"));
-          holder.appendChild(makeNav("next", "image", "Next image"));
+          view.appendChild(makeNav("prev", "image", "Previous image"));
+          view.appendChild(makeNav("next", "image", "Next image"));
         }
 
         if (wantsPreview) {
@@ -871,38 +946,69 @@
       }
 
       frame.appendChild(ambient);
+      frame.appendChild(dots);
+      view.appendChild(stage);
+      holder.appendChild(frame);
+      holder.appendChild(view);
       gallery.appendChild(holder);
-      /* In-frame HUD: caption, counter, and arrows each get their own zone. */
-      if (anyCaption || !single) {
+
+      /* The arrow rocker, when this carousel has one. It goes into the
+         strip below, or over the photo when there is no strip. */
+      if (!single && GA_BAR) {
+        navCluster = doc.createElement("div");
+        navCluster.className = "gallery__nav-cluster";
+        navCluster.appendChild(makeNav("prev", "bar", "Previous image"));
+        navCluster.appendChild(makeNav("next", "bar", "Next image"));
+      }
+
+      /* THE CAPTION STRIP. One cell holds the caption on screen and a hidden
+         copy of every caption in the carousel. The cell is as tall as the
+         longest caption at the width it has, so the strip keeps one height
+         as the photos change, and nothing has to measure it. The strip takes
+         no pointer, so a tap on it opens the viewer as a tap on the photo
+         does, and a click on the rocker stops here. */
+      if (anyCaption) {
+        strip = doc.createElement("div");
+        strip.className = "gallery__strip";
+        strip.addEventListener("click", function (e) { e.stopPropagation(); });
+        caption = doc.createElement("div");
+        caption.className = "gallery__caption";
+        var cell = doc.createElement("span");
+        cell.className = "gallery__caption-cell";
+        captionText = doc.createElement("span");
+        captionText.className = "gallery__caption-text";
+        cell.appendChild(captionText);
+        imgs.forEach(function (im) {
+          var words = im.getAttribute("data-caption") || "";
+          if (!words) return;
+          var sizer = doc.createElement("span");
+          sizer.className = "gallery__caption-sizer";
+          sizer.setAttribute("aria-hidden", "true");
+          sizer.textContent = words;
+          cell.appendChild(sizer);
+        });
+        caption.appendChild(cell);
+        strip.appendChild(caption);
+        if (navCluster) strip.appendChild(navCluster);
+        holder.appendChild(strip);
+      }
+
+      /* The view's HUD: the slide count, and the rocker when no strip holds it. */
+      var rockerInView = !!navCluster && !strip;
+      if (rockerInView || (!single && GALLERY_SHOW_COUNTER)) {
         hud = doc.createElement("div");
         hud.className = "gallery__hud";
         hud.addEventListener("click", function (e) { e.stopPropagation(); });
-        if (anyCaption) {
-          caption = doc.createElement("div");
-          caption.className = "gallery__caption";
-          captionText = doc.createElement("span");
-          captionText.className = "gallery__caption-text";
-          caption.appendChild(captionText);
-          hud.appendChild(caption);
-        }
         if (!single && GALLERY_SHOW_COUNTER) {
           counterText = doc.createElement("span");
           counterText.className = "gallery__counter";
           hud.appendChild(counterText);
         }
-        if (!single && GA_BAR) {
-          navCluster = doc.createElement("div");
-          navCluster.className = "gallery__nav-cluster";
-          navCluster.appendChild(makeNav("prev", "bar", "Previous image"));
-          navCluster.appendChild(makeNav("next", "bar", "Next image"));
-          hud.appendChild(navCluster);
-        }
-        frame.appendChild(hud);
+        if (rockerInView) hud.appendChild(navCluster);
+        view.appendChild(hud);
       }
-      frame.appendChild(dots);
-      frame.appendChild(stage);
-      holder.appendChild(frame);
-      gallery.classList.add("is-ready");
+      gallery.classList.remove("gallery--landscape", "gallery--portrait");
+      gallery.classList.add("is-ready", "gallery--" + shape.orientation);
       if (single) gallery.classList.add("gallery--single");
 
       function show(i, revealOnChange) {
@@ -918,7 +1024,7 @@
           if (caption) caption.classList.toggle("is-empty", !cap);
         }
         if (counterText) { counterText.textContent = countLabel(index, n); }
-        if (revealOnChange && changed) { revealCounter(); revealCaption(); }
+        if (revealOnChange && changed) revealCounter();
         if (ambient) {
           var active = imgs[index];
           ambient.src = active.getAttribute("data-sd") || active.currentSrc || active.src;
@@ -1032,6 +1138,10 @@
      anything already built, so a repeat call is safe. */
   AMH.work = {
     buildGalleries: buildGalleries,
+    /* the frame's shape for a list of photo sizes and a word; see section 5 */
+    frameShape: frameShape,
+    /* name the element whose carousels are one set for the viewer; see section 5 */
+    viewerScope: viewerScope,
     lightbox: lightbox,
     sizeText: sizeText,
     /* The template the open deep-dive drawer was cloned from, or null. */
