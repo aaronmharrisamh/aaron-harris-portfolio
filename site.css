@@ -1531,6 +1531,36 @@ body.lb-open { overflow: hidden; }
 .lightbox__caption.is-empty { display: none; }
 .lightbox__caption.is-visible { opacity: 1; transform: translateY(0); }
 
+/* See original: the file as it came, at the lower right, opposite the
+   caption and at its size. It fades with the caption and returns on the
+   same signals, and a keyboard focus shows it at once. A faded link takes
+   no click, so an empty-looking corner never opens a tab. */
+.lightbox__original {
+  position: absolute;
+  right: clamp(20px, 8vw, 96px);
+  bottom: clamp(58px, 10vh, 96px);
+  z-index: 3;
+  max-width: min(40%, 320px);
+  padding: .5rem .9rem;
+  border-right: 2px solid rgba(111,188,242,.78);
+  border-radius: 8px 0 0 8px;
+  background: linear-gradient(270deg, rgba(6,9,14,.86), rgba(6,9,14,.5) 76%, rgba(6,9,14,0));
+  -webkit-backdrop-filter: blur(14px) saturate(1.14);
+          backdrop-filter: blur(14px) saturate(1.14);
+  color: rgba(235,238,244,.95);
+  font-size: .9rem; font-weight: 700; line-height: 1.3;
+  text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 12px rgba(0,0,0,.5);
+  pointer-events: none;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .6s var(--ease-soft), transform .6s var(--ease-soft), color .25s, border-color .25s;
+}
+.lightbox__original[hidden] { display: none; }
+.lightbox__original.is-visible,
+.lightbox__original:focus-visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.lightbox__original:hover { color: #fff; border-color: var(--accent-bright); }
+.lightbox__original:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @media (max-width: 560px) {
   .lightbox__close { width: 42px; height: 42px; top: 10px; right: 10px; }
   .lightbox__nav { width: 44px; height: 44px; }
@@ -1544,10 +1574,21 @@ body.lb-open { overflow: hidden; }
     font-size: .8rem;
   }
   .lightbox__caption::before { width: .4rem; height: .4rem; margin-right: .46rem; }
+  /* a phone has no room beside the caption, so the link takes the free
+     corner opposite the close button */
+  .lightbox__original {
+    top: 10px; left: clamp(14px, 5vw, 28px); right: auto; bottom: auto;
+    max-width: calc(100% - 90px);
+    padding: .42rem .72rem;
+    border-right: 0; border-left: 2px solid rgba(111,188,242,.78);
+    border-radius: 0 8px 8px 0;
+    background: linear-gradient(90deg, rgba(6,9,14,.86), rgba(6,9,14,.5) 76%, rgba(6,9,14,0));
+    font-size: .8rem;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .lightbox { animation: none; }
-  .lightbox__nav, .lightbox__close, .lightbox__caption, .lightbox__img { transition: none; }
+  .lightbox__nav, .lightbox__close, .lightbox__caption, .lightbox__img, .lightbox__original { transition: none; }
 }
 
 /* ------------------------------------------------------------

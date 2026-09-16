@@ -155,6 +155,7 @@ here before they exist on disk.
 | `site.css` | All page style. Replaces the inline style block. |
 | `site.js` | Shared page behavior for every page. |
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
+| `imagesengine.js` | The image engine: what an upload becomes, the photos held until a save, the markup an image carries, and orphans. Every page. |
 | `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |

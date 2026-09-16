@@ -6,11 +6,15 @@
    manifest and the reading engine are both on that page, and a
    publish needs all three.
 
-   Write a post, drop images, publish -> one zip bundle:
+   Write a post, drop photos, publish -> one bundle:
    blog.html (manifest spliced) + blog/YYMM.html + sitemap.xml +
-   robots.txt + the images + the originals under imgsources/.
+   robots.txt + three files for each photo, all of them under blog/.
    Month pages link site.css from the repo, so no stylesheet is
    generated.
+
+   A photo goes through imagesengine.js, the one engine every image on
+   the site is made with. What a page shows of it is a line in the
+   manifest, not a format baked into a file name.
 
    Seven sections:
      1. HEADER AND SETUP         5. GENERATORS
@@ -89,11 +93,14 @@
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
   var bcStatus = null, bcCards = null, bcPreviewEl = null;
-  var bcImages = [];            /* {num, fmt, caption, alt, blob, previewURL, origBlob, origName, w, h} */
+  /* {num, caption, alt, uhd, published} and then either photo, the engine's
+     record of a held photo, or the manifest's facts about a published one:
+     src, sd, sdw, original, w, h, ow, oh, bytes, type, animated, date0 */
+  var bcImages = [];
   var bcManAtOpen = null;       /* manifest payload string at composer open (staleness check) */
   var bcImgCounter = 0;         /* session-local offset over manifest next-img */
   var bcPublished = false;
-  var bcIntakeChain = Promise.resolve();   /* serializes drops: numbers follow drop order */
+  var bcTakeChain = Promise.resolve();   /* serializes drops: numbers follow drop order */
   var bcEditing = null;         /* null = new post; else {id, date0, title0, source0, format0, time, zone, tags} */
   var bcMode = "md";            /* "md" for a new post; "html" for a post written in HTML */
   var bcOrphans = [];           /* server files this session's edits made unreferenced */
@@ -203,15 +210,15 @@
 
      The lines: next-post and next-img are the counters; stamp names the
      publish that wrote the manifest; month:YYMM=stamp names the publish
-     that last wrote that month file; months: is the month list a month
-     page states outright, having no entries of its own; every other line
-     is entries. A line that matches nothing is reported and skipped.
-     blog.js reads the same shape from the live tag, and the two must
-     agree line for line. */
+     that last wrote that month file; image:NNNN= is one image on the site;
+     months: is the month list a month page states outright, having no
+     entries of its own; every other line is entries. A line that matches
+     nothing is reported and skipped. blog.js reads the same shape from the
+     live tag, and the two must agree line for line. */
   function bcManifestFrom(srcText) {
     var m = /<script id="blogManifest"[^>]*>([\s\S]*?)<\/script>/.exec(srcText);
     var out = { nextPost: 1, nextImg: 1, entries: [], stamp: "", monthStamps: {},
-                months: [], payload: m ? m[1] : "" };
+                months: [], images: {}, payload: m ? m[1] : "" };
     if (!m) return out;
     m[1].split("\n").map(function (l) { return l.trim(); }).forEach(function (l) {
       if (!l) return;
@@ -220,6 +227,11 @@
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
+      else if (/^image:\d{4}=/.test(l)) {
+        var img = bcImageLineRead(l);
+        if (img) out.images[img.num] = img;
+        else console.warn("[blog] manifest image line not understood, skipped: " + l);
+      }
       else {
         l.split("|").forEach(function (e) {
           var em = /^(\d{6})(\d{4})(.*)$/.exec(e);
@@ -230,15 +242,52 @@
     });
     return out;
   }
+  /* One image on the site, as the manifest states it:
+
+       image:0001=260903 png 4032x3024 3145728 uhd
+
+     the date its files are named for, the ORIGINAL's format, size and
+     bytes, and then the flags that hold: uhd when the page shows the
+     original in the display copy's place, gif when it moves.
+
+     The date and the number give every path: blog/<date>_img<num>.jpg,
+     _sd.webp and _original.<type>. Nothing else has to be written down.
+
+     blog.js reads the same line, and the two must agree. */
+  function bcImageLineRead(line) {
+    var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line.trim());
+    if (!m) return null;
+    var flags = m[7].split(/\s+/).filter(Boolean);
+    return { num: m[1], date: m[2], type: m[3], ow: +m[4], oh: +m[5], bytes: +m[6],
+             uhd: flags.indexOf("uhd") !== -1, animated: flags.indexOf("gif") !== -1 };
+  }
+  function bcImageLineWrite(img) {
+    return "image:" + img.num + "=" + img.date + " " + img.type + " " +
+      img.ow + "x" + img.oh + " " + img.bytes +
+      (img.uhd ? " uhd" : "") + (img.animated ? " gif" : "");
+  }
+  /* The three paths one image line names. */
+  function bcImagePaths(img) {
+    var base = "blog/" + img.date + "_img" + img.num;
+    return { src: base + ".jpg", sd: base + "_sd.webp",
+             original: base + "_original." + img.type };
+  }
+
   /* stamps is {publish, months}. With none given the payload has the shape
-     from before V044, which is what the empty page carries. */
-  function bcManifestPayload(nextPost, nextImg, entries, stamps) {
+     from before V044, which is what the empty page carries. images is the
+     map of every image on the site, written after the months. */
+  function bcManifestPayload(nextPost, nextImg, entries, stamps, images) {
     var line = entries.map(function (e) { return e.date + e.id + e.title; }).join("|");
     var head = "\nnext-post:" + pad4(nextPost) + "\nnext-img:" + pad4(nextImg);
     if (stamps) {
       if (stamps.publish) head += "\nstamp:" + stamps.publish;
       Object.keys(stamps.months).sort().forEach(function (mo) {
         head += "\nmonth:" + mo + "=" + stamps.months[mo];
+      });
+    }
+    if (images) {
+      Object.keys(images).sort().forEach(function (num) {
+        head += "\n" + bcImageLineWrite(images[num]);
       });
     }
     return head + (line ? "\n" + line : "") + "\n";
@@ -255,7 +304,7 @@
      before it. A stamp equal to the previous one is rehashed with a counter
      until it differs: the live check tells pending from live by the two
      being different. */
-  function bcStamps(man, nextPost, nextImg, entries, touched) {
+  function bcStamps(man, nextPost, nextImg, entries, touched, images) {
     var months = {};
     var has = {};
     entries.forEach(function (e) { has[e.date.slice(0, 4)] = true; });
@@ -263,92 +312,117 @@
       if (has[mo]) months[mo] = man.monthStamps[mo];
     });
     Object.keys(touched).forEach(function (mo) { months[mo] = touched[mo]; });
-    var bare = bcManifestPayload(nextPost, nextImg, entries, { publish: "", months: months });
+    /* the image lines are hashed with the rest, so a switch flipped on a
+       published image changes the stamp, which is what makes it a publish */
+    var bare = bcManifestPayload(nextPost, nextImg, entries,
+                                 { publish: "", months: months }, images);
     var publish = TOOL.stamp(man.stamp + "\n" + bare);
     for (var n = 1; publish === man.stamp; n++) {
       publish = TOOL.stamp(man.stamp + "\n" + bare + "\n" + n);
     }
     return { publish: publish, months: months,
              payload: bcManifestPayload(nextPost, nextImg, entries,
-                                        { publish: publish, months: months }) };
+                                        { publish: publish, months: months }, images) };
   }
 
   /* ==========================================================
      3. IMAGE INTAKE
      ----------------------------------------------------------
-     A dropped file is decoded, re-encoded at a publish size, and given a
-     four-digit number. The number is permanent: it is the name of the file
-     the bundle ships and the number the body tag refers to.
+     A dropped file goes through the image engine, the same one the site
+     pages use. It comes back as three files: a small copy, the copy a
+     page shows, and the original with its location and camera data cut
+     out unless the author keeps them.
+
+     The number is permanent: it is the name of the files the bundle
+     ships and the number the body tag refers to. The DATE is not. A post
+     can be given another date before it is published, so the held photo
+     is renamed at publish rather than named again here.
      ========================================================== */
-  var BC_TYPES = { "image/jpeg": 1, "image/png": 1, "image/webp": 1 };
-  function bcEncode(bitmap, fmt) {
-    var scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-    var w = Math.max(1, Math.round(bitmap.width * scale));
-    var h = Math.max(1, Math.round(bitmap.height * scale));
-    var cv = doc.createElement("canvas");
-    cv.width = w; cv.height = h;
-    var cx = cv.getContext("2d");
-    if (fmt === "jpg") { cx.fillStyle = "#16181d"; cx.fillRect(0, 0, w, h); }  /* flatten alpha */
-    cx.drawImage(bitmap, 0, 0, w, h);
-    return new Promise(function (resolve, reject) {
-      cv.toBlob(function (b) {
-        if (b) resolve({ blob: b, w: w, h: h });
-        else reject(new Error("encode failed"));
-      }, fmt === "png" ? "image/png" : "image/jpeg", 0.85);
-    });
+
+  /* The base path one blog photo is written under. */
+  function bcImgBase(date, num) { return "blog/" + date + "_img" + num; }
+
+  /* The date the composer would publish under, as the files are named. */
+  function bcDateNow() {
+    return /^\d{6}$/.test(bcDate.value.trim()) ? bcDate.value.trim() : bcTodayYYMMDD();
   }
-  function bcDecode(file) {
-    if (window.createImageBitmap) {
-      return createImageBitmap(file, { imageOrientation: "from-image" })
-        .catch(function () { return createImageBitmap(file); });
-    }
-    return new Promise(function (resolve, reject) {
-      var url = URL.createObjectURL(file);
-      var im = new Image();
-      im.onload = function () { URL.revokeObjectURL(url); resolve(im); };
-      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("decode failed")); };
-      im.src = url;
-    });
-  }
-  function bcIntake(file) {
-    if (!BC_TYPES[file.type]) return Promise.reject(new Error("unsupported type " + (file.type || "?") + " (jpg/png/webp only; gif would lose animation)"));
-    if (file.size > 40 * 1024 * 1024) return Promise.reject(new Error("over 40 MB"));
-    return bcDecode(file).then(function (bmp) {
-      if (Math.max(bmp.width, bmp.height) > 12000) throw new Error("over 12000px on a side");
-      var man = AMH.blog ? AMH.blog.parseManifest() : { nextImg: 1 };
+
+  /* The metadata choice for this page load, the same rule the site's
+     wizard follows: off unless the author turns it on, because the site
+     is public. */
+  var bcKeepMeta = false;
+
+  /* A file, taken and held. The number comes from the manifest's counter
+     plus this session's offset, so numbers follow drop order. */
+  function bcTakePhoto(file) {
+    var date = bcDateNow();
+    var num = "";
+    return AMH.images.intake(file, {
+      keepMeta: bcKeepMeta,
+      /* The number is taken HERE and nowhere earlier. The engine calls this
+         once the photo is made, so a file it refuses never burns a number,
+         and the numbers still follow the order the files were taken in. */
+      name: function () {
+        var man = AMH.blog ? AMH.blog.parseManifest() : { nextImg: 1 };
+        num = pad4(man.nextImg + bcImgCounter++);
+        return bcImgBase(date, num);
+      }
+    }).then(function (photo) {
+      AMH.images.hold(photo);
       var im = {
-        num: pad4(man.nextImg + bcImgCounter++),
-        fmt: "jpg", caption: "", alt: TOOL.imageRegion.humanize(file.name),
-        blob: null, previewURL: "", origBlob: file, origName: file.name,
-        w: 0, h: 0, bmp: bmp
+        num: num, caption: "", alt: TOOL.imageRegion.humanize(photo.from),
+        /* a GIF is taken to move, so it shows its original to begin with */
+        uhd: photo.type === "gif",
+        published: false, photo: photo, date0: date
       };
-      return bcEncode(bmp, "jpg").then(function (r) {
-        im.blob = r.blob; im.w = r.w; im.h = r.h;
-        im.previewURL = URL.createObjectURL(r.blob);
-        bcImages.push(im);
-        return im;
-      });
-    });
-  }
-  function bcToggleFmt(im, card) {
-    var to = im.fmt === "jpg" ? "png" : "jpg";
-    bcEncode(im.bmp, to).then(function (r) {
-      if (im.previewURL) URL.revokeObjectURL(im.previewURL);
-      im.fmt = to; im.blob = r.blob;
-      im.previewURL = URL.createObjectURL(r.blob);
-      /* swap only the tag PREFIX - the caption|alt the author typed in the
-         tag is theirs and must survive a format toggle untouched */
-      bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), function (m) {
-        return "[" + (to === "png" ? "png" : "img") + m.slice(m.search(/\d{4}/));
-      });
-      bcRenderCard(im, card);
-      bcSetStatus(im.num + " re-encoded as ." + to + " (" + Math.round(r.blob.size / 1024) + " KB).");
+      bcImages.push(im);
+      return im;
     });
   }
 
+  /* What one image says about itself, whether it is held or published.
+     A published image knows what the manifest's line says. */
+  function bcImFacts(im) {
+    var out = [];
+    if (im.published) out.push({ text: "published" });
+    if (im.before) {
+      out.push({ text: "added before the image engine", warn: true });
+      out.push({ text: im.src });
+      return out;
+    }
+    /* a held photo says everything about itself; a published one says what
+       the manifest's line for it says */
+    var from = im.photo || im;
+    if (from.type) out.push({ text: from.type.toUpperCase() + " original" });
+    if (from.type === "gif" && from.animated) out.push({ text: "animated" });
+    if (from.ow && from.oh) out.push({ text: from.ow + " x " + from.oh });
+    if (from.bytes) out.push({ text: AMH.work.sizeText(from.bytes) });
+    if (im.photo) {
+      var meta = im.photo.meta || {};
+      var found = meta.location || meta.camera || meta.date;
+      out.push({ text: !found ? "no location or camera data"
+        : "location and camera data " + (meta.kept ? "kept" : "removed") });
+      out.push({ text: "from " + im.photo.from });
+      if (im.photo.overLimit) out.push({ text: "over the Git limit", warn: true });
+    }
+    return out;
+  }
+
+  /* The picture a card shows: the small copy, from the blob for a held
+     photo and from the site for a published one. */
+  function bcImThumb(im) {
+    return im.photo ? im.photo.urls.sd : (im.sd || im.src || "");
+  }
+
+  /* The entry the renderer and the manifest both work from. A held photo
+     answers from itself; a published one from its manifest line. */
   /* ---------------- tags in the body ---------------- */
+  /* Always img. A tag written before the engine may say png, and every
+     reader still takes it as a synonym, but nothing writes one: what a
+     page shows is a fact in the manifest now, not a format baked into a
+     file name. */
   function bcBuildTag(im) {
-    return "[" + (im.fmt === "png" ? "png" : "img") + im.num +
+    return "[img" + im.num +
       (im.caption || im.alt ? "," + im.caption : "") +
       (im.alt ? "|" + im.alt : "") + "]";
   }
@@ -470,17 +544,39 @@
     ".bc-images{overflow-y:auto;display:none;}" +
     ".bc-panel[data-tab=images] .bc-images{display:block;}" +
     ".bc-drop{border:2px dashed var(--line);border-radius:10px;padding:1.1rem;text-align:center;" +
-    "color:var(--muted);font-size:.85rem;transition:border-color .2s;cursor:pointer;}" +
+    "color:var(--muted);font-size:.85rem;transition:border-color .2s;cursor:pointer;" +
+    "display:flex;flex-direction:column;align-items:center;gap:.7rem;}" +
     ".bc-drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
     ".bc-drop.ced-dropping{border-color:var(--accent);color:var(--text);}" +
+    /* the button inside the zone, the shape the site's wizard wears */
+    ".bc-drop .bc-choose{flex:none;}" +
+    /* the metadata choice, under the zone and read when a file is taken */
+    ".bc-keepmeta{display:flex;align-items:center;gap:.5rem;margin-top:.6rem;" +
+    "font-size:.78rem;color:var(--text-soft);cursor:pointer;}" +
+    ".bc-keepmeta input{accent-color:var(--accent);}" +
+    /* Display Maximum UHD, drawn as a switch on a card */
+    ".bc-uhd{display:inline-flex;align-self:flex-start;align-items:center;gap:.4rem;" +
+    "font-size:.74rem;color:var(--text-soft);cursor:pointer;white-space:nowrap;}" +
+    ".bc-uhd input{-webkit-appearance:none;appearance:none;margin:0;flex:none;width:28px;height:16px;" +
+    "border-radius:999px;background:var(--line);position:relative;cursor:pointer;transition:background .15s;}" +
+    ".bc-uhd input::before{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;" +
+    "border-radius:50%;background:var(--text-soft);transition:transform .15s,background .15s;}" +
+    ".bc-uhd input:checked{background:var(--accent);}" +
+    ".bc-uhd input:checked::before{transform:translateX(12px);background:#fff;}" +
+    ".bc-uhd input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".bc-uhd__what{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
     ".bc-card{display:flex;gap:.7rem;align-items:center;padding:.55rem;border:1px solid var(--line);" +
     "border-radius:10px;margin-top:.6rem;background:var(--bg-deep);}" +
     ".bc-card img{width:86px;height:56px;object-fit:cover;border-radius:6px;flex:none;border:1px solid var(--line);}" +
     ".bc-card__mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:.3rem;}" +
-    ".bc-card__mid input{background:var(--panel);color:var(--text);border:1px solid var(--line);" +
-    "border-radius:6px;padding:.3rem .5rem;font:11.5px Consolas,'Courier New',monospace;width:100%;}" +
+    /* the text fields only: the card also carries a switch, and a checkbox
+       given a text field's border and width is a long grey bar */
+    ".bc-card__mid input[type=text]{background:var(--panel);color:var(--text);" +
+    "border:1px solid var(--line);border-radius:6px;padding:.3rem .5rem;" +
+    "font:11.5px Consolas,'Courier New',monospace;width:100%;}" +
     ".bc-card__meta{font:10.5px Consolas,monospace;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
     ".bc-card__meta.bc-err{color:var(--c-orange);}" +
+    ".bc-card__meta .bc-err{color:var(--c-yellow);}" +
     ".bc-card__btns{display:flex;flex-direction:column;gap:.3rem;flex:none;}" +
     ".bc-preview{overflow-y:auto;display:none;background:var(--bg);border:1px solid var(--line);" +
     "border-radius:8px;padding:.4rem 1.2rem 1.2rem;}" +
@@ -690,17 +786,23 @@
     card.className = "bc-card";
     card.innerHTML = "";
     var th = doc.createElement("img");
-    th.src = im.previewURL;
+    th.src = bcImThumb(im);
     th.alt = "";
     card.appendChild(th);
     var mid = doc.createElement("div");
     mid.className = "bc-card__mid";
+    /* the facts line, the shape a photo's row wears in the site editor:
+       what it is, how big, and what the metadata cut did */
     var meta = doc.createElement("div");
     meta.className = "bc-card__meta";
-    meta.textContent = im.published
-      ? im.num + " · ." + im.fmt + " · published (" + im.previewURL + ")"
-      : im.num + " · ." + im.fmt + " · " + im.w + "x" + im.h +
-        " · " + Math.round(im.blob.size / 1024) + " KB · from " + im.origName;
+    meta.appendChild(doc.createTextNode(im.num));
+    bcImFacts(im).forEach(function (part) {
+      meta.appendChild(doc.createTextNode(" · "));
+      var s = doc.createElement("span");
+      if (part.warn) s.className = "bc-err";
+      s.textContent = part.text;
+      meta.appendChild(s);
+    });
     mid.appendChild(meta);
     var cap = doc.createElement("input");
     cap.type = "text"; cap.placeholder = "caption (shown under / on the image)";
@@ -720,6 +822,29 @@
       if (bcFindTag(im.num)) bcRewriteTag(im);
     });
     mid.appendChild(alt);
+    /* Display Maximum UHD. A published image can flip it too: what the page
+       shows is a line in the manifest, not a format baked into a file. */
+    if (im.original || im.photo) {
+      var sw = doc.createElement("label");
+      sw.className = "bc-uhd";
+      var onOff = doc.createElement("input");
+      onOff.type = "checkbox";
+      onOff.setAttribute("role", "switch");
+      onOff.checked = !!im.uhd;
+      onOff.addEventListener("change", function () {
+        im.uhd = onOff.checked;
+        bcSetStatus(im.num + (im.uhd ? " shows its original." : " shows the 1920px copy."));
+      });
+      sw.appendChild(onOff);
+      sw.appendChild(doc.createTextNode("Display Maximum UHD"));
+      var seen = im.photo || im;
+      var what = doc.createElement("span");
+      what.className = "bc-uhd__what";
+      what.textContent = String(seen.type || "").toUpperCase() +
+        (seen.ow && seen.oh ? " · " + seen.ow + " x " + seen.oh : "");
+      sw.appendChild(what);
+      mid.appendChild(sw);
+    }
     card.appendChild(mid);
     var btns = doc.createElement("div");
     btns.className = "bc-card__btns";
@@ -729,25 +854,18 @@
       TOOL.insert(bcBuildTag(im));
       bcSetStatus("Tag for " + im.num + " inserted at the cursor.");
     }, btns);
-    if (!im.published) {
-      /* format is baked into a published file - replacing it means a new
-         image (new number); only pending images can toggle */
-      bcBtn("." + (im.fmt === "jpg" ? "png" : "jpg"), "", function () { bcToggleFmt(im, card); }, btns);
-    }
     bcBtn("Remove", "ced-btn--danger", function () {
       if (!window.confirm("Remove image " + im.num + " from this post?" +
-          (im.published ? "\n\nThe server file becomes an orphan - it will be listed in ORPHANS.txt for manual deletion." : ""))) return;
+          (im.published ? "\n\nIts three files on the server are no longer named by " +
+            "anything. This publish moves them into deletethese/." : ""))) return;
       if (bcFindTag(im.num)) {
         bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), "");
         bcSetStatus("Image " + im.num + " and its tag(s) removed.");
       } else {
         bcSetStatus("Image " + im.num + " removed.");
       }
-      if (im.published) {
-        bcOrphans.push(im.previewURL);
-      } else if (im.previewURL) {
-        URL.revokeObjectURL(im.previewURL);
-      }
+      if (im.published) bcOrphanImage(im);
+      else if (im.photo) AMH.images.letGo(im.photo);
       bcImages.splice(bcImages.indexOf(im), 1);
       card.remove();
     }, btns);
@@ -756,6 +874,35 @@
     return card;
   }
 
+  /* Every file of one published image, on the orphan list. */
+  function bcOrphanImage(im) {
+    [im.src, im.sd, im.original].forEach(function (p) { if (p) pushOrphan(p); });
+  }
+
+  /* One image's manifest line, from a card. A held photo answers from
+     itself; a published one keeps what the manifest said, with the switch
+     the author may have flipped. */
+  function bcImLine(im, date) {
+    if (im.photo) {
+      return { num: im.num, date: date, type: im.photo.type,
+               ow: im.photo.ow, oh: im.photo.oh, bytes: im.photo.bytes,
+               uhd: !!im.uhd, animated: !!im.photo.animated };
+    }
+    return { num: im.num, date: date, type: im.type, ow: im.ow, oh: im.oh,
+             bytes: im.bytes, uhd: !!im.uhd, animated: !!im.animated };
+  }
+
+  /* What the preview renders from: what the site holds, with this
+     composer's cards over the top. */
+  function bcPreviewImages(date) {
+    var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
+    var out = {};
+    Object.keys(man.images || {}).forEach(function (n) { out[n] = man.images[n]; });
+    bcImages.forEach(function (im) { out[im.num] = bcImLine(im, im.published ? im.date0 : date); });
+    return out;
+  }
+
+  var bcTabBtns = [];
   var bcTabBtns = [];
   /* ---------------- the advanced section ----------------
      Shut by default, because a post needs a body and nothing else. It opens
@@ -822,13 +969,28 @@
             return "<a>#" + TOOL.escAttr(t) + "</a>"; }).join(" ") + "</div>"
         : "") + "</article>";
     var body = bcPreviewEl.querySelector(".bs-post__body");
-    body.innerHTML = B.renderBody(bcMode === "md" ? AMH.markdown.render(src) : src, date, "stream");
-    /* pending images do not exist on the server yet: remap to blob previews */
+    /* the deployed manifest plus what this composer is holding, so a card's
+       switch shows in the preview before anything is published */
+    body.innerHTML = B.renderBody(bcMode === "md" ? AMH.markdown.render(src) : src,
+                                  date, "stream", "", bcPreviewImages(date));
+    /* A held photo is not on the server yet, so the preview paints it from
+       its blobs. Every path it carries is swapped, the small copy included:
+       the carousel builds its blurred backdrop from data-sd, and a path to
+       a file that is not there yet would draw nothing. */
     Array.prototype.forEach.call(body.querySelectorAll("img"), function (img) {
-      var m = /_img(\d{4})\.(?:jpg|png)$/.exec(img.getAttribute("src") || "");
+      var m = /_img(\d{4})[._]/.exec(img.getAttribute("src") || "");
       if (!m) return;
       bcImages.forEach(function (im) {
-        if (im.num === m[1] && im.previewURL) img.src = im.previewURL;
+        if (im.num !== m[1] || !im.photo) return;
+        var urls = im.photo.urls;
+        /* one copy, one URL: a srcset of blob: URLs would say nothing a
+           browser could choose between */
+        img.removeAttribute("srcset");
+        img.removeAttribute("sizes");
+        img.src = im.uhd ? urls.original : urls.hd;
+        img.setAttribute("data-sd", urls.sd);
+        img.setAttribute("data-original", urls.original);
+        if (img.getAttribute("data-hd")) img.setAttribute("data-hd", urls.hd);
       });
     });
     if (AMH.work) AMH.work.buildGalleries();
@@ -1067,7 +1229,9 @@
   function bcClose() {
     bcStopTicker();
     if (bcSpec) { bcSpec.destroy(); bcSpec = null; }
-    bcImages.forEach(function (im) { if (im.previewURL) URL.revokeObjectURL(im.previewURL); });
+    /* a photo the composer prepared and did not publish is the store's to
+       release; a photo a page shows is held until a save writes it */
+    bcImages.forEach(function (im) { if (im.photo) AMH.images.letGo(im.photo); });
     bcImages = [];
     if (bcScrim && bcScrim.parentNode) bcScrim.parentNode.removeChild(bcScrim);
     if (bcPanel && bcPanel.parentNode) bcPanel.parentNode.removeChild(bcPanel);
@@ -1340,22 +1504,26 @@
     drop.className = "bc-drop";
     drop.setAttribute("role", "button");
     drop.tabIndex = 0;
-    drop.textContent = "Drop images here, or click to choose them (jpg, png, webp). " +
-      "They are resized to 1600px at jpg quality 85; toggle a card to .png for lossless.";
+    var dropWords = doc.createElement("span");
+    dropWords.innerHTML = "<strong>Drop photos here</strong><br>JPG, PNG, WebP or GIF. " +
+      "Each is saved as a JPG 1920px on its long edge, with a small copy and the " +
+      "original beside it.";
+    drop.appendChild(dropWords);
     var picker = doc.createElement("input");
     picker.type = "file";
     picker.multiple = true;
-    picker.accept = "image/jpeg,image/png,image/webp";
+    picker.accept = AMH.images.ACCEPT;
     picker.style.display = "none";
     picker.tabIndex = -1;
     /* intake is async (decode + encode); chain it so numbers are always
        assigned in drop order, even across rapid multi-drops */
     function takeImages(list) {
       Array.prototype.slice.call(list || []).forEach(function (f) {
-        bcIntakeChain = bcIntakeChain.then(function () {
-          return bcIntake(f).then(function (im) {
+        bcTakeChain = bcTakeChain.then(function () {
+          return bcTakePhoto(f).then(function (im) {
             bcCards.appendChild(bcRenderCard(im, null));
-            bcSetStatus(im.num + " added (" + Math.round(im.blob.size / 1024) + " KB). Use Insert tag to place it.");
+            bcSetStatus(im.num + " added (" + AMH.work.sizeText(im.photo.bytes) +
+              "). Use Insert tag to place it.");
           }).catch(function (err) {
             var note = doc.createElement("div");
             note.className = "bc-card__meta bc-err";
@@ -1379,9 +1547,30 @@
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); picker.click(); }
     });
     picker.addEventListener("change", function () { takeImages(picker.files); picker.value = ""; });
+    /* The button inside the zone. A click on the zone does the same job, so
+       a click on the button stops at the button: one press, one picker. */
+    var choose = doc.createElement("button");
+    choose.type = "button";
+    choose.className = "ced-btn bc-choose";
+    choose.textContent = "Choose a photo";
+    choose.tabIndex = -1;
+    choose.addEventListener("click", function (e) { e.stopPropagation(); picker.click(); });
+    drop.appendChild(choose);
     bcDrop = drop;
     imagesEl.appendChild(drop);
     imagesEl.appendChild(picker);
+    /* Read when a file is taken, which is why it is beside the zone and not
+       on a card: the cut happens once, as the photo is made. */
+    var keep = doc.createElement("label");
+    keep.className = "bc-keepmeta";
+    var keepIn = doc.createElement("input");
+    keepIn.type = "checkbox";
+    keepIn.checked = bcKeepMeta;
+    keepIn.tabIndex = -1;
+    keepIn.addEventListener("change", function () { bcKeepMeta = keepIn.checked; });
+    keep.appendChild(keepIn);
+    keep.appendChild(doc.createTextNode("Keep location and camera data in the originals"));
+    imagesEl.appendChild(keep);
     /* The one thing on the site that cannot travel between pages. Copy and
        gallery edits are strings, so they wait in sessionStorage and follow you.
        These are real resized bytes, held in memory for the zip, and a
@@ -2355,8 +2544,16 @@
       ? [["review", "Review the diff"]]
       : [["extract", "Extract <code>" + esc(rec.zip) + "</code> at the repo root"],
          ["review", "Review the diff"]];
+    /* The files nothing names any more. A folder write moved them itself,
+       so the reader only has to look; a zip cannot move anything, so the
+       list is here and the paths are named. */
     if (rec.orphans && rec.orphans.length) {
-      items.push(["orphans", "Delete the files in <code>ORPHANS.txt</code>"]);
+      items.push(["orphans", rec.moved && rec.moved.length
+        ? rec.moved.length + " file" + (rec.moved.length === 1 ? "" : "s") +
+          " nothing uses any more moved into <code>deletethese/</code> - " +
+          "empty that folder when you are sure"
+        : "Move these out of the repo, nothing names them any more: <code>" +
+          rec.orphans.map(esc).join("</code> <code>") + "</code>"]);
     }
     items.push(["commit", "Commit"], ["push", "Push"]);
     var shows = rec.kind === "delete" ? "The site no longer shows the post"
@@ -2556,6 +2753,13 @@
      render that has the meta in hand, so it is set there rather than
      threaded through bcRenderArticle's four callers. */
   var bcBrand = "AARON M. HARRIS";
+  /* Every image on the site, as the manifest states it, keyed by number.
+
+     Set once at the start of a build and read wherever a post body is
+     rendered, the way bcBrand is. It is not a parameter because a body is
+     rendered four layers down from the build, and a fact about the whole
+     site is not something each layer should carry. */
+  var bcSiteImages = {};
   /* The manifest needs a name for every post. With no title it is the
      first six words of the body, cut on a word, with no trailing
      punctuation. The entry does not say it is derived; the article's empty
@@ -2811,6 +3015,7 @@
       "</scr" + "ipt>\n" +
       '  <script defer src="../site.js"></script>\n' +
       '  <script defer src="../work.js"></script>\n' +
+      '  <script defer src="../imagesengine.js"></script>\n' +
       '  <script defer src="../blog.js"></script>\n' +
       /* The editor comes here too, so the corner mark is on every page of
          the site rather than on three of them. It cannot publish from here:
@@ -2951,20 +3156,36 @@
 
   /* image tags in a published post become locked cards: thumbnail from the
      server, number/format fixed, caption/alt editable, Remove orphans the file */
+  /* A card for each image the post already uses. Its facts come from the
+     manifest's line for that number, which is where the site records what
+     an image is. A number with no line is an image from before the engine:
+     its card says so, and Remove is all it offers. */
   function bcLoadPublishedImages(source, date0) {
     var re = /\[(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g, m;
+    var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
     var seen = {};
     while ((m = re.exec(source))) {
       if (seen[m[2]]) continue;
       seen[m[2]] = true;
-      var fmt = m[1] === "png" ? "png" : "jpg";
+      var line = (man.images || {})[m[2]];
       var im = {
-        num: m[2], fmt: fmt,
-        caption: (m[3] || "").trim(), alt: (m[4] || "").trim(),
-        blob: null, previewURL: "blog/" + date0 + "_img" + m[2] + "." + fmt,
-        origBlob: null, origName: "(published)", w: 0, h: 0, bmp: null,
-        published: true, date0: date0
+        num: m[2], caption: (m[3] || "").trim(), alt: (m[4] || "").trim(),
+        published: true, photo: null, date0: line ? line.date : date0,
+        uhd: !!(line && line.uhd)
       };
+      if (line) {
+        var paths = bcImagePaths(line);
+        var hd = AMH.images.copySize(line.ow, line.oh, "hd");
+        var sd = AMH.images.copySize(line.ow, line.oh, "sd");
+        im.src = paths.src; im.sd = paths.sd; im.original = paths.original;
+        im.sdw = sd.w; im.w = hd.w; im.h = hd.h;
+        im.ow = line.ow; im.oh = line.oh; im.bytes = line.bytes;
+        im.type = line.type; im.animated = line.animated;
+      } else {
+        /* before the engine: one file, and the manifest says nothing */
+        im.src = "blog/" + date0 + "_img" + m[2] + (m[1] === "png" ? ".png" : ".jpg");
+        im.sd = ""; im.original = ""; im.before = true;
+      }
       bcImages.push(im);
       bcCards.appendChild(bcRenderCard(im, null));
     }
@@ -3044,7 +3265,7 @@
     var esc = TOOL.escAttr;
     var body = post.source === null ? post.staticBody
       : B.renderBody(post.format === "md" ? AMH.markdown.render(post.source) : post.source,
-                     post.date, "static", where.img);
+                     post.date, "static", where.img, bcSiteImages);
     /* a carried body was rendered for a page in blog/; in the stream the
        one step up comes off its paths */
     if (post.source === null && where.img === "") body = bcStreamStatic(body);
@@ -3197,14 +3418,14 @@
      script. A script tag loads from disk and a fetch does not, and
      reading this site from disk has to work.
 
-     The thumbnails are the one large part, so they are kept tiny: 48 px
-     on the long side, WebP, about a kilobyte each, and only for a post
-     that has an image.
+     A post's thumbnail is the PATH of its first image's small copy, which
+     the engine already wrote and the manifest already names. Nothing is
+     drawn, and nothing is fetched: an entry is remade from a source and a
+     manifest line, which is what lets a rebuild work from disk.
 
      blog.js owns the unpacker, and this file reads the deployed index
      through it, so the writer and the reader cannot disagree. */
   var SEARCH_FILE = "search.js";
-  var THUMB_PX = 48;
 
   /* The file's text: the table as readable JSON, assigned to a global.
 
@@ -3250,40 +3471,24 @@
              title: post.title || "", tags: post.tags || "", text: text, caps: caps,
              thumb: thumb || "" };
   }
-  /* A thumbnail from a bitmap the composer already holds, so a publish
-     needs no fetch to make one. */
-  function bcThumb(bmp) {
-    var scale = Math.min(1, THUMB_PX / Math.max(bmp.width, bmp.height));
-    var cv = doc.createElement("canvas");
-    cv.width = Math.max(1, Math.round(bmp.width * scale));
-    cv.height = Math.max(1, Math.round(bmp.height * scale));
-    cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
-    return new Promise(function (resolve) {
-      cv.toBlob(function (b) {
-        if (!b) { resolve(""); return; }
-        var fr = new FileReader();
-        fr.onload = function () { resolve(String(fr.result)); };
-        fr.onerror = function () { resolve(""); };
-        fr.readAsDataURL(b);
-      }, "image/webp", 0.6);
-    });
-  }
-  /* The same, from a deployed image. Only a rebuild uses it, and only
-     over http: from disk there is nothing to fetch, and the entry keeps
-     the thumbnail it had. */
-  function bcThumbFromURL(url) {
-    if (TOOL.onDisk()) return Promise.resolve("");
-    return fetch(url, { cache: "no-store" })
-      .then(function (res) { return res.ok ? res.blob() : null; })
-      .then(function (b) { return b ? createImageBitmap(b) : null; })
-      .then(function (bmp) { return bmp ? bcThumb(bmp) : ""; })
-      .catch(function () { return ""; });
-  }
-  /* The first image a post uses, as a deployed path, or "". */
-  function bcFirstImage(post) {
+  /* The first image a post uses, as its SMALL COPY's path.
+
+     A path, not a picture. It was a data URI of a 48px WebP, made with a
+     canvas and carried inside search.js; the small copy the engine writes
+     is already on the site and already small, so the index names it. That
+     also makes a rebuild able to remake every entry from a source and the
+     manifest, with nothing to fetch, from disk as well as over http. */
+  function bcFirstImage(post, images) {
     var m = new RegExp(BC_TAG_RE_G.source).exec(String(post.source || ""));
-    return m ? "blog/" + post.date + "_img" + m[2] + (m[1] === "png" ? ".png" : ".jpg") : "";
+    if (!m) return "";
+    var line = images && images[m[2]];
+    if (line) return bcImagePaths(line).sd;
+    /* an image from before the engine has no small copy: the entry carries
+       the one file it has, which is what an <img> could always take */
+    return "blog/" + post.date + "_img" + m[2] + (m[1] === "png" ? ".png" : ".jpg");
   }
+
+  /* Read a deployed file that is not a page and not a month. Same shape
   /* Read a deployed file that is not a page and not a month. Same shape
      as bcFetchMonth: null when it is genuinely not there, and the
      hand-off when the page was opened from disk. */
@@ -3348,17 +3553,6 @@
   /* The thumbnail for the post being published: from the bytes the
      composer holds when the post has a new image, and the one the
      deployed index already has when it does not. */
-  function bcPublishThumb(usedNew, post, deployed) {
-    if (usedNew.length && usedNew[0].bmp) return bcThumb(usedNew[0].bmp);
-    if (!bcFirstImage(post)) return Promise.resolve("");
-    var unpack = (AMH.search && AMH.search.unpack)
-      ? AMH.search.unpack(deployed || "") : Promise.resolve({ posts: [] });
-    return unpack.catch(function () { return { posts: [] }; }).then(function (old) {
-      var hit = (old.posts || []).filter(function (e) { return e.id === post.id; })[0];
-      return hit ? hit.thumb || "" : "";
-    });
-  }
-
   /* ---------------- the feed ----------------
 
      Atom, because it needs only what the blog already has and never
@@ -3746,16 +3940,10 @@
     var enc = new TextEncoder();
     var orphans = bcOrphans.filter(function (o, i) { return bcOrphans.indexOf(o) === i; });
     if (rec.kind === "rebuild") bcIndexShort = 0;   /* a rebuild is the repair */
-    if (orphans.length) {
-      files["ORPHANS.txt"] = enc.encode(
-        "# Files no longer referenced after this publish.\n" +
-        "# DELETE THESE FROM THE REPO BEFORE COMMITTING (the engine cannot remove server files):\n" +
-        orphans.map(function (o) { return o; }).join("\n") + "\n");
-    }
     var names = Object.keys(files).sort();
     console.info("[blog] bundle contents:\n  " + names.join("\n  ") + (extraLog ? "\n" + extraLog : ""));
     if (orphans.length) {
-      console.warn("[blog] ORPHANED FILES - delete these from the repo before committing:\n  " +
+      console.warn("[blog] these files are named by nothing after this publish:\n  " +
         orphans.join("\n  "));
     }
     if (bcPanel && bcPanel.parentNode) bcSetStatus(statusMsg);
@@ -3831,10 +4019,8 @@
       asZip();
       return Promise.resolve();
     }
-    /* ORPHANS.txt belongs to the zip. Writing it into the repo would add a
-       file to delete to the list of files to delete. */
     var send = {};
-    names.forEach(function (n) { if (n !== "ORPHANS.txt") send[n] = files[n]; });
+    names.forEach(function (n) { send[n] = files[n]; });
     var pick = TOOL.repoWriteReady()
       ? Promise.resolve(true)
       : TOOL.pickRepoWrite().then(function (handle) { return !!handle; });
@@ -3847,6 +4033,19 @@
       return TOOL.writeRepo(send).then(function (written) {
         record.wrote = written;
         console.info("[blog] written into the repo folder:\n  " + written.join("\n  "));
+        /* the bytes are on disk now, so the engine stops holding them */
+        if (AMH.images) AMH.images.saved(written);
+        /* A folder can move a file, so the files nothing names any more go
+           into deletethese/ rather than onto a list for the reader. The
+           scan runs over blog/ as well, so an image no post uses is found
+           even when this publish did not touch it. */
+        if (!TOOL.moveOrphans) return;
+        return TOOL.moveOrphans().then(function (moved) {
+          record.moved = moved || [];
+          if (record.moved.length) {
+            console.info("[blog] moved into deletethese/:\n  " + record.moved.join("\n  "));
+          }
+        }, function () { record.moved = []; });
       });
     }, function (err) {
       asZip();
@@ -3937,7 +4136,11 @@
       bcSetStatus("Not published. " + problem); return;
     }
     /* image tags vs image cards */
-    var refs = {}, badFmt = [], m2;
+    /* A tag names a number and nothing else now. What the page shows is a
+       line in the manifest, so there is no format for a tag to disagree
+       with; a tag written before the engine may still say png, and it is
+       read as img. */
+    var refs = {}, m2;
     BC_TAG_RE_G.lastIndex = 0;
     while ((m2 = BC_TAG_RE_G.exec(source))) {
       refs[m2[2]] = m2[1];
@@ -3947,13 +4150,6 @@
     var dangling = Object.keys(refs).filter(function (n) { return !known[n]; });
     if (dangling.length) {
       bcSetStatus("These tags name images that are not in the Images tab: " + dangling.join(", ")); return;
-    }
-    Object.keys(refs).forEach(function (n) {
-      var want = refs[n] === "png" ? "png" : "jpg";
-      if (known[n].fmt !== want) badFmt.push(n + " (tag says ." + want + ", image is ." + known[n].fmt + ")");
-    });
-    if (badFmt.length) {
-      bcSetStatus("A tag and its image do not agree on the format. Fix the tag prefix, or toggle the image: " + badFmt.join("; ")); return;
     }
     var usedNew = bcImages.filter(function (im) { return refs[im.num] && !im.published; });
     var usedPub = bcImages.filter(function (im) { return refs[im.num] && im.published; });
@@ -3966,10 +4162,10 @@
     }
     if (unusedPub.length && !window.confirm(unusedPub.length +
         " published image(s) have no tag in the body now. Their files become orphans:\n" +
-        unusedPub.map(function (im) { return im.previewURL; }).join("\n") + "\n\nContinue?")) {
+        unusedPub.map(function (im) { return im.src; }).join("\n") + "\n\nContinue?")) {
       return;
     }
-    unusedPub.forEach(function (im) { pushOrphan(im.previewURL); });
+    unusedPub.forEach(bcOrphanImage);
     /* A publish can rewrite more than one page now, so name them before it
        builds: an out-of-date repo turns a good splice into a silent revert.
 
@@ -4022,7 +4218,8 @@
         if (!go) { bcSetStatus("Not published. Nothing was written."); return; }
         bcPublishBuild({ date: date, title: title, entryTitle: entryTitle, source: source,
                          meta: { format: format, time: time, zone: zone, tags: tags },
-                         usedNew: usedNew, usedPub: usedPub, willWrite: willWrite,
+                         usedNew: usedNew, usedPub: usedPub, unusedPub: unusedPub,
+                         willWrite: willWrite,
                          reads: reads, route: route });
       });
   }
@@ -4080,7 +4277,7 @@
   function bcPublishBuild(p) {
     var date = p.date, title = p.title, source = p.source, meta0 = p.meta;
     var entryTitle = p.entryTitle || title;
-    var usedNew = p.usedNew, usedPub = p.usedPub;
+    var usedNew = p.usedNew, usedPub = p.usedPub, unusedPub = p.unusedPub || [];
     var yymm = date.slice(0, 4);
     bcSetStatus("Building the bundle.");
     bcProg = bcWizProgress([
@@ -4103,7 +4300,7 @@
     var enc = new TextEncoder();
     /* held across the chain: the page's source and manifest, the entry list
        this publish writes, and the stamp of each month file it renders */
-    var meta, id, entries, man, src, deployed, stamps, months;
+    var meta, id, entries, man, src, deployed, stamps, months, images;
     var touched = {};     /* month -> the stamp of the file written for it */
     var blocksFor = {};   /* month -> its blocks, for the stream */
     TOOL.pristine()
@@ -4115,6 +4312,21 @@
            a publish built on the loaded one would drop what the live one
            gained, so it stops here */
         if (man.payload.trim() !== bcManAtOpen.trim()) throw TOOL.error("BLG-E11");
+        /* Every image on the site after this publish: the lines the manifest
+           carries, less the ones this post orphaned, plus a line for each
+           image the post uses now.
+
+           FIRST, before anything is rendered. Every month file and the
+           stream are written from these lines, so a map built later would
+           leave the month files with an image tag and nothing to expand it
+           from. */
+        images = {};
+        Object.keys(man.images || {}).forEach(function (n) { images[n] = man.images[n]; });
+        unusedPub.forEach(function (im) { delete images[im.num]; });
+        usedNew.concat(usedPub).forEach(function (im) {
+          if (!im.before) images[im.num] = bcImLine(im, date);
+        });
+        bcSiteImages = images;
         /* what the deployed manifest knows, read before this post is added
            to it: that is the list of month files that can exist */
         deployed = bcUniqueMonths(man.entries);
@@ -4183,7 +4395,7 @@
            month; then the files every operation writes whole, each
            carrying the publish stamp */
         stamps = bcStamps(man, bcEditing ? man.nextPost : man.nextPost + 1,
-          man.nextImg + bcImgCounter, entries, touched);
+          man.nextImg + bcImgCounter, entries, touched, images);
         var out = TOOL.spliceRegion(src, "blog-manifest", stamps.payload);
         if (out === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
         return bcStreamInto(out, months, blocksFor, meta.brand, deployed);
@@ -4193,33 +4405,41 @@
         bcProg.mark(2);
         bcCommonFiles(files, src, entries, meta, stamps.publish);
         bcProg.mark(3);
-        /* new images: encoded for blog/, untouched originals for imgsources/ */
+        /* A held photo is three files, and all three go into blog/ beside
+           the page that shows them. The date may have changed since the
+           photo was named, so the held record is renamed first: its paths
+           are what the bundle writes and what the manifest states. */
         return Promise.all(usedNew.map(function (im) {
-          var ext = im.fmt === "png" ? ".png" : ".jpg";
-          var origExt = (/\.[a-z0-9]+$/i.exec(im.origName) || [".bin"])[0];
-          return im.blob.arrayBuffer().then(function (buf) {
-            files["blog/" + date + "_img" + im.num + ext] = new Uint8Array(buf);
-            return im.origBlob.arrayBuffer();
-          }).then(function (obuf) {
-            files["imgsources/" + date + "_img" + im.num + "_original" + origExt] = new Uint8Array(obuf);
+          AMH.images.rename(im.photo.base, bcImgBase(date, im.num));
+          return AMH.images.files([im.photo.base]).then(function (held) {
+            Object.keys(held).forEach(function (path) { files[path] = held[path]; });
           });
         }));
       })
       .then(function () {
         /* date change: published files carry the date in their names, and
            tags resolve via the post date - fetch the deployed bytes and
-           re-emit them under the new prefix; old names become orphans */
+           re-emit them under the new prefix; old names become orphans.
+           All three files, because all three are on the site now. */
         if (!dateChanged || !usedPub.length) return;
-        return Promise.all(usedPub.map(function (im) {
-          return fetch(im.previewURL, { cache: "no-store" }).then(function (res) {
-            if (!res.ok) throw new Error("The published image " + im.previewURL +
-              " could not be fetched (HTTP " + res.status + "). The new date needs it renamed.");
-            return res.arrayBuffer();
-          }).then(function (buf) {
-            files["blog/" + date + "_img" + im.num + "." + im.fmt] = new Uint8Array(buf);
-            pushOrphan(im.previewURL);
+        var jobs = [];
+        usedPub.forEach(function (im) {
+          if (im.before) return;   /* one file, and no manifest line to move */
+          var to = bcImagePaths(bcImLine(im, date));
+          [["src", to.src], ["sd", to.sd], ["original", to.original]].forEach(function (pair) {
+            var from = im[pair[0]];
+            if (!from) return;
+            jobs.push(fetch(from, { cache: "no-store" }).then(function (res) {
+              if (!res.ok) throw new Error("The published image " + from +
+                " could not be fetched (HTTP " + res.status + "). The new date needs it renamed.");
+              return res.arrayBuffer();
+            }).then(function (buf) {
+              files[pair[1]] = new Uint8Array(buf);
+              pushOrphan(from);
+            }));
           });
-        }));
+        });
+        return Promise.all(jobs);
       })
       .then(function () { bcProg.mark(4); return bcOtherPages(files, entries); })
       .then(function () {
@@ -4229,10 +4449,9 @@
         return bcFetchText("search.js").then(function (deployed) {
           var post = { id: id, date: date, title: title, time: meta0.time, zone: meta0.zone,
                        tags: meta0.tags, format: meta0.format, source: source, staticBody: "" };
-          return bcPublishThumb(usedNew, post, deployed).then(function (thumb) {
-            return bcSearchWrite(files, deployed, { entry: bcSearchEntry(post, thumb) },
-                                 stamps.publish, entries.length);
-          }).then(function (table) {
+          return Promise.resolve(bcSearchWrite(files, deployed,
+            { entry: bcSearchEntry(post, bcFirstImage(post, images)) },
+            stamps.publish, entries.length)).then(function (table) {
             files[FEED_FILE] = new TextEncoder().encode(
               bcFeed(meta.base, table, bcTitles(entries), meta.brand, stamps.publish));
           });
@@ -4242,18 +4461,10 @@
         bcProg.mark(5);
         bcPublished = true;
         TOOL.markExported();   /* copy/gallery edits rode along in the bundle */
-        if (dateChanged && usedPub.length) {
-          console.warn("[blog] the imgsources/ ORIGINALS for renamed images keep their old date " +
-            "prefix (they are local-only; the engine cannot rename them). If you keep originals, " +
-            "rename these by hand:\n  " + usedPub.map(function (im) {
-              return "imgsources/" + bcEditing.date0 + "_img" + im.num + "_original.* -> imgsources/" +
-                date + "_img" + im.num + "_original.*";
-            }).join("\n  "));
-        }
         bcFinishBundle(files, "blog-publish-" + date + ".zip",
           (bcEditing ? "Republished p" : "Published p") + id +
           ". Extract the zip at the repo root. Review the diff." +
-          (bcOrphans.length ? " Delete the files in ORPHANS.txt." : "") +
+          (bcOrphans.length ? " The files nothing names any more are listed on the last step." : "") +
           " Commit and push. Then reload this page before you compose again.",
           "[blog] post URL once live: " +
           meta.base + AMH.blog.postUrl(date, id, "root", true) +
@@ -4279,12 +4490,20 @@
     var id = bcEditing.id;
     var date0 = bcEditing.date0;
     var yymm = date0.slice(0, 4);
-    /* every file the CURRENT source references becomes an orphan */
+    /* Every file the CURRENT source references becomes an orphan, and the
+       manifest loses the line of each image only this post used. */
     var imgOrphans = [];
+    var goneNums = [];
+    var manNow = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
     var re = /\[(img|png)(\d{4})(?:,[^\]|]*)?(?:\|[^\]]*)?\]/g, m;
     while ((m = re.exec(bcEditing.source0))) {
-      var f = "blog/" + date0 + "_img" + m[2] + "." + (m[1] === "png" ? "png" : "jpg");
-      if (imgOrphans.indexOf(f) === -1) imgOrphans.push(f);
+      if (goneNums.indexOf(m[2]) === -1) goneNums.push(m[2]);
+      var line = (manNow.images || {})[m[2]];
+      var was = line ? bcImagePaths(line)
+        : { src: "blog/" + date0 + "_img" + m[2] + "." + (m[1] === "png" ? "png" : "jpg") };
+      [was.src, was.sd, was.original].forEach(function (f) {
+        if (f && imgOrphans.indexOf(f) === -1) imgOrphans.push(f);
+      });
     }
     if (!window.confirm("Delete post p" + id + " (\"" + (bcEditing.title0 || bcDerivedTitle(bcEditing.source0, bcMode)) + "\")?\n\n" +
         "Its manifest entry is removed. Its month file is written again without it." +
@@ -4297,11 +4516,11 @@
     bcWizJob("DELETE", "This post, and the files it leaves behind");
     bcWizRoutePick("Where should the deletion bundle land?",
       "The post stays live until this reaches the repo and you commit it.")
-      .then(function (route) { if (route) bcDeleteBuild(route, imgOrphans); });
+      .then(function (route) { if (route) bcDeleteBuild(route, imgOrphans, goneNums); });
   }
   /* imgOrphans is decided before the ask, from the source the composer
      holds, so the question and the build name the same files. */
-  function bcDeleteBuild(route, imgOrphans) {
+  function bcDeleteBuild(route, imgOrphans, goneNums) {
     var id = bcEditing.id;
     var date0 = bcEditing.date0;
     var yymm = date0.slice(0, 4);
@@ -4354,7 +4573,13 @@
           }
           return repair;
         }).then(function () {
-          stamps = bcStamps(man, man.nextPost, man.nextImg, entries, touched);
+          /* the lines of the images this post alone used go with it */
+          var images = {};
+          Object.keys(man.images || {}).forEach(function (n) {
+            if ((goneNums || []).indexOf(n) === -1) images[n] = man.images[n];
+          });
+          bcSiteImages = images;
+          stamps = bcStamps(man, man.nextPost, man.nextImg, entries, touched, images);
           var out = TOOL.spliceRegion(src, "blog-manifest", stamps.payload);
           if (out === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
           return bcStreamInto(out, months, blocksFor, meta.brand, deployed);
@@ -4375,8 +4600,9 @@
         bcPublished = true;
         TOOL.markExported();
         bcFinishBundle(files, "blog-delete-p" + id + ".zip",
-          "Deletion bundle built for p" + id + ". Extract it at the repo root. Delete the files in " +
-          "ORPHANS.txt. Commit and push. Then reload this page.", "",
+          "Deletion bundle built for p" + id + ". Extract it at the repo root. The files " +
+          "nothing names any more are listed on the last step. Commit and push. Then " +
+          "reload this page.", "",
           { kind: "delete", id: id, stamp: stamps.publish, route: route });
       })
       .catch(function (err) {
@@ -4422,6 +4648,9 @@
         meta = bcSiteMeta(src);
         rebuiltSrc = src;
         rebuiltMan = man;
+        /* a rebuild changes no image: the lines the manifest carries are
+           what every month file it writes renders from */
+        bcSiteImages = man.images || {};
         var months = allMonths = bcUniqueMonths(man.entries);
         /* every one of these is in the manifest, so every one should exist;
            a folder that lacks one is a fact about the folder, not a reason
@@ -4468,7 +4697,8 @@
            out of step. The stamp changes at every rebuild, so the page is
            always in the bundle. */
         var derived = bcDerivedManifest(rebuiltMan, found, carried);
-        var stamps = bcStamps(rebuiltMan, derived.nextPost, derived.nextImg, derived.entries, touched);
+        var stamps = bcStamps(rebuiltMan, derived.nextPost, derived.nextImg, derived.entries,
+                              touched, bcSiteImages);
         var src = TOOL.spliceRegion(rebuiltSrc, "blog-manifest", stamps.payload);
         if (src === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
         var months2 = bcUniqueMonths(derived.entries);
@@ -4513,18 +4743,10 @@
       var unpack = (AMH.search && AMH.search.unpack)
         ? AMH.search.unpack(deployed || "") : Promise.resolve({ posts: [] });
       return unpack.catch(function () { return { posts: [] }; }).then(function (old) {
-        var had = {};
-        (old.posts || []).forEach(function (e) { had[e.id] = e.thumb || ""; });
-        var missing = 0;
+        /* Every entry is remade from the source and the manifest. A thumb is
+           a path now, so a rebuild needs no fetch and works from disk. */
         return Promise.all(found.map(function (post) {
-          var thumb = had[post.id] || "";
-          var first = bcFirstImage(post);
-          if (thumb || !first) return Promise.resolve(bcSearchEntry(post, thumb));
-          if (location.protocol === "file:") { missing++; return Promise.resolve(bcSearchEntry(post, "")); }
-          return bcThumbFromURL(first).then(function (made) {
-            if (!made) missing++;
-            return bcSearchEntry(post, made);
-          });
+          return Promise.resolve(bcSearchEntry(post, bcFirstImage(post, bcSiteImages)));
         })).then(function (table) {
           /* a post carried verbatim has no source to index; its entry is
              kept as it was rather than dropped */
@@ -4532,10 +4754,6 @@
             var kept = (old.posts || []).filter(function (e) { return e.id === c.id; })[0];
             if (kept) table.push(kept);
           });
-          if (missing) {
-            console.warn("[blog] " + missing + " post(s) have an image and no thumbnail in " +
-              "search.js. A publish from the live site makes them.");
-          }
           return bcSearchWrite(files, deployed, { table: table }, stamp);
         });
       });

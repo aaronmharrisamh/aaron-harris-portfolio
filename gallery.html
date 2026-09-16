@@ -59,9 +59,13 @@
        work.js is here for the lightbox, which Phase 4 Part 4 hands the tiles.
        gallery.js is the tile packer AND the editor's tile consumer, on this
        page and nowhere else. It follows tool.js because it claims its region
-       with the editor kit at load, the way publish.js registers itself. -->
+       with the editor kit at load, the way publish.js registers itself.
+       imagesengine.js is the image engine. Every image the site takes in
+       goes through it, so every page loads it, after work.js and before
+       the trunks that call it. -->
   <script defer src="site.js"></script>
   <script defer src="work.js"></script>
+  <script defer src="imagesengine.js"></script>
   <script defer src="tool.js"></script>
   <script defer src="gallery.js"></script>
 
@@ -201,6 +205,14 @@
          the author wants, lower first. data-span is the width the tile
          is DRAWN at.
 
+         With the editor on, a tile wears four controls: its chip, which
+         opens the section's photos; the three width buttons; the
+         priority field; and a trash. A caption wears a pencil, and the
+         band wears a + Photo pill. None of them is ever exported. A
+         photograph is added through + Photo, through the button on the
+         empty tile a section with none shows, or by dropping files
+         anywhere on the section.
+
          The packer in gallery.js reads the first two and writes the
          third, as an inline style rather than into the markup: a span
          is a decision about one viewport width, not a fact about the
@@ -222,8 +234,17 @@
             <span class="gal-train__meta"><span class="gal-train__year">2026</span><span class="gal-train__count">1 image</span></span>
           </header>
           <figure class="gal-tile" data-w="2" data-priority="0" data-span="2">
-            <img src="img/work/satellitetest.png" alt="satellitetest" loading="lazy" decoding="async" />
-            <figcaption class="gal-tile__cap">Image 1</figcaption>
+            <img src="img/work/satellitetest-h9mf0w.jpg"
+                 srcset="img/work/satellitetest-h9mf0w_sd.webp 480w, img/work/satellitetest-h9mf0w.jpg 853w"
+                 sizes="(max-width: 560px) 92vw, (max-width: 880px) 30vw, 352px"
+                 width="853"
+                 height="645"
+                 alt="satellitetest" loading="lazy" decoding="async"
+                 data-sd="img/work/satellitetest-h9mf0w_sd.webp"
+                 data-original="img/work/satellitetest-h9mf0w_original.png"
+                 data-original-size="853x645"
+                 data-original-bytes="367973" />
+            <figcaption class="gal-tile__cap">Caption!</figcaption>
           </figure>
         </div>
         <!--[/edit:gal-tbg]-->

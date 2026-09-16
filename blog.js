@@ -68,16 +68,35 @@
   var MONTHS_EN = ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"];
 
+  /* One image on the site, as the manifest states it:
+
+       image:0001=260903 png 4032x3024 3145728 uhd
+
+     the date its files are named for, the ORIGINAL's format, size and
+     bytes, and then the flags that hold: uhd when the page shows the
+     original in the display copy's place, gif when it moves.
+
+     The date and the number give every path, so nothing else is written
+     down. publish.js writes the same line, and the two must agree. */
+  function blogImageLine(line) {
+    var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line);
+    if (!m) return null;
+    var flags = m[7].split(/\s+/).filter(Boolean);
+    return { num: m[1], date: m[2], type: m[3], ow: +m[4], oh: +m[5], bytes: +m[6],
+             uhd: flags.indexOf("uhd") !== -1, animated: flags.indexOf("gif") !== -1 };
+  }
+
   /* The lines: next-post and next-img are the counters; stamp names the
      publish that wrote the manifest; month:YYMM=stamp names the publish
-     that last wrote that month file; months: is the month list a month
-     page states outright, having no entries of its own; every other line
-     is entries. A line that matches nothing is reported and skipped.
-     publish.js reads the same shape from the pristine source, and the two
-     must agree line for line. */
+     that last wrote that month file; image:NNNN= is one image on the site;
+     months: is the month list a month page states outright, having no
+     entries of its own; every other line is entries. A line that matches
+     nothing is reported and skipped. publish.js reads the same shape from
+     the pristine source, and the two must agree line for line. */
   function blogParseManifest() {
     var el = doc.getElementById("blogManifest");
-    var out = { nextPost: 1, nextImg: 1, entries: [], months: [], stamp: "", monthStamps: {} };
+    var out = { nextPost: 1, nextImg: 1, entries: [], months: [], stamp: "",
+                monthStamps: {}, images: {} };
     if (!el) return out;
     var lines = el.textContent.split("\n").map(function (l) { return l.trim(); })
       .filter(function (l) { return l !== ""; });
@@ -87,6 +106,11 @@
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
+      else if (l.indexOf("image:") === 0) {
+        var img = blogImageLine(l);
+        if (img) out.images[img.num] = img;
+        else console.warn("[blog] manifest image line not understood, skipped: " + l);
+      }
       else {
         l.split("|").forEach(function (e) {
           var m = /^(\d{6})(\d{4})(.*)$/.exec(e);
@@ -159,21 +183,67 @@
      A post body is plain HTML plus image tags of the form
      [img0001,caption|alt]. Expand those into figures.
      ========================================================== */
+  /* How wide a blog image is drawn, which the browser has to be told before
+     it picks a copy.
+
+     The stream and a month page draw the SAME column: 600px at most, less
+     the column's own padding and the card's, which is about 500px on a
+     desktop and about 80vw on a phone. That is deliberate - see the note
+     over .bs-stream in site.css section 8 - so one measurement serves both.
+
+     widest is the widest the string above can ask for, 80vw at 700px. A
+     figure fills its column whatever it is given, so it takes a srcset for
+     any photo; the preview's carousel draws a photo at its own size and
+     would stretch one narrower than the slot, so it states the width. */
+  var BLOG_SIZES = "(max-width: 700px) 80vw, 520px";
+  var BLOG_FIG_SLOT = { sizes: BLOG_SIZES, widest: 0 };
+  var BLOG_GALLERY_SLOT = { sizes: BLOG_SIZES, widest: 560 };
+
+  /* One image tag, as an entry the engine writes markup from. The manifest
+     names the original's format and size; every path and the copies' sizes
+     follow from those. A number the manifest does not know is an image from
+     before the engine: it gets the one path it always had. */
+  function blogImageEntry(num, postDate, fmt, images) {
+    var img = images && images[num];
+    if (!img) {
+      return { src: "blog/" + postDate + "_img" + num + (fmt === "png" ? ".png" : ".jpg") };
+    }
+    var base = "blog/" + img.date + "_img" + img.num;
+    var hd = AMH.images.copySize(img.ow, img.oh, "hd");
+    var sd = AMH.images.copySize(img.ow, img.oh, "sd");
+    return { src: base + ".jpg", sd: base + "_sd.webp", sdw: sd.w,
+             w: hd.w, h: hd.h, ow: img.ow, oh: img.oh,
+             original: base + "_original." + img.type, bytes: img.bytes, uhd: img.uhd };
+  }
+
   /* prefix is what a static image path is relative to. A month file sits
      in blog/, so its figures point at "../blog/...", which is the default
      and leaves every old caller unchanged. The stream on blog.html is at
-     the root and passes "". */
+     the root and passes "".
+
+     images is the manifest's map of what is on the site. Without one every
+     tag renders as it did before the engine, which is what keeps a page
+     built by an older publish readable. */
   var BLOG_TAG_RE = /\[(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
-  function blogRenderBody(source, postDate, mode, prefix) {
+  function blogRenderBody(source, postDate, mode, prefix, images) {
     var esc = function (s) {
       return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     };
+    var at = prefix === undefined ? "../" : prefix;
+    var slot = mode === "stream" ? BLOG_GALLERY_SLOT : BLOG_FIG_SLOT;
+    /* the stream's own paths carry no prefix; a figure's carry the caller's */
+    var opts = { prefix: mode === "stream" ? "" : at };
+    function markup(im) {
+      return AMH.images.attrs(im.entry, slot, opts).map(function (a) {
+        return " " + a[0] + '="' + esc(a[1]) + '"';
+      }).join("");
+    }
     var RUN_RE = /(?:\[(?:img|png)\d{4}(?:,[^\]|]*)?(?:\|[^\]]*)?\]\s*)+/g;
     return source.replace(RUN_RE, function (run) {
       var imgs = [];
       run.replace(BLOG_TAG_RE, function (_, fmt, num, cap, alt) {
         imgs.push({
-          src: "blog/" + postDate + "_img" + num + (fmt === "png" ? ".png" : ".jpg"),
+          entry: blogImageEntry(num, postDate, fmt, images),
           caption: (cap || "").trim(),
           alt: (alt || "").trim() || (cap || "").trim() || ("Blog image " + num)
         });
@@ -182,13 +252,12 @@
       if (!imgs.length) return run;
       if (mode === "stream") {
         return '<div class="gallery">' + imgs.map(function (im) {
-          return '<img src="' + esc(im.src) + '" loading="lazy" alt="' + esc(im.alt) + '"' +
+          return "<img" + markup(im) + ' loading="lazy" alt="' + esc(im.alt) + '"' +
             (im.caption ? ' data-caption="' + esc(im.caption) + '"' : "") + " />";
         }).join("") + "</div>";
       }
-      var at = prefix === undefined ? "../" : prefix;
       return imgs.map(function (im) {
-        return '<figure class="bp-fig"><img src="' + at + esc(im.src) + '" loading="lazy" alt="' +
+        return '<figure class="bp-fig"><img' + markup(im) + ' loading="lazy" alt="' +
           esc(im.alt) + '" /><figcaption>' +
           esc(im.caption).replace(/&quot;/g, '"') + "</figcaption></figure>";
       }).join("\n");

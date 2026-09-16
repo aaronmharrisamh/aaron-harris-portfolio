@@ -7,6 +7,7 @@ import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync } from "
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { deflateSync } from "node:zlib";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SERVER_PORT = 8123;
@@ -22,16 +23,17 @@ function check(name, ok, detail) {
 }
 
 // self-contained: serve the repo ourselves for the duration of the run
-// The suite serves a COPY of the repo, not the repo, so the blog page can be
-// emptied without touching the site. Everything else is linked through.
+// The suite serves a COPY of the repo, not the repo, so the content of the
+// three pages can be fixed without touching the site. See fixedPage().
 const SERVE = mkdtempSync(join(tmpdir(), "ced-serve-"));
-for (const f of ["index.html", "gallery.html", "site.css", "site.js", "work.js",
+for (const f of ["site.css", "site.js", "work.js", "imagesengine.js",
                  "blog.js", "markdown.js", "gallery.js", "tool.js", "publish.js",
                  "aaron-portfolio-portrait-transparent.png"]) {
   try { copyFileSync(join(REPO, f), join(SERVE, f)); } catch {}
 }
-writeFileSync(join(SERVE, "blog.html"),
-  emptyBlogPage(readFileSync(join(REPO, "blog.html"), "utf-8")));
+for (const page of ["index.html", "gallery.html", "blog.html"]) {
+  writeFileSync(join(SERVE, page), fixedPage(page, readFileSync(join(REPO, page), "utf-8")));
+}
 for (const d of ["img", "tools"]) {
   try { cpSync(join(REPO, d), join(SERVE, d), { recursive: true }); } catch {}
 }
@@ -215,9 +217,11 @@ const EXPECTED_REGIONS = {
 const EXPECTED_SCRIPTS = {
   // markdown.js on the home page: a deep dive is written in Markdown and
   // carries its source, and tool.js is what asks the renderer for the rest.
-  "index.html": ["site.js", "work.js", "markdown.js", "tool.js"],
-  "blog.html": ["site.js", "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"],
-  "gallery.html": ["site.js", "work.js", "tool.js", "gallery.js"],
+  // imagesengine.js on every page, after work.js: every image the site
+  // takes in goes through it, and tool.js and the trunks after it call it.
+  "index.html": ["site.js", "work.js", "imagesengine.js", "markdown.js", "tool.js"],
+  "blog.html": ["site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js", "tool.js", "publish.js"],
+  "gallery.html": ["site.js", "work.js", "imagesengine.js", "tool.js", "gallery.js"],
 };
 
 // blog.html with no posts: the manifest reset to its counters and the index
@@ -236,6 +240,65 @@ function emptyBlogPage(src) {
     '$1\n        <div class="bs-stream" id="blogStream" data-ced="generated">\n' +
     '          <p class="bs-note">No posts yet - check back soon.</p>\n' +
     '        </div>\n        $2');
+}
+
+// The marker pairs of one kind in a fixture file, as { slug: inner text }.
+// Read on each call: the SERVE copy is written before any constant below it
+// is defined.
+function fixturePairs(file, kind) {
+  const text = readFileSync(join(REPO, "tools/e2e/fixtures", file), "utf-8")
+    .replace(/\r\n/g, "\n");
+  const out = {};
+  const re = new RegExp("<!--\\[" + kind + ":([\\w-]+)\\]-->([\\s\\S]*?)<!--\\[/" +
+    kind + ":\\1\\]-->", "g");
+  let m;
+  while ((m = re.exec(text)) !== null) out[m[1]] = m[2];
+  return out;
+}
+
+// Put new inner text between one marker pair. null when the pair is missing.
+function spliceInner(src, kind, slug, inner) {
+  const open = `<!--[${kind}:${slug}]-->`, close = `<!--[/${kind}:${slug}]-->`;
+  const a = src.indexOf(open);
+  const b = a < 0 ? -1 : src.indexOf(close, a + open.length);
+  if (a < 0 || b < 0) return null;
+  return src.slice(0, a + open.length) + inner + src.slice(b);
+}
+
+// index.html with the carousels V088 committed: every project carousel and
+// every deep-dive carousel on its seed images.
+//
+// The suite must not depend on the photos the site holds. Its photo checks
+// were written against seed carousels, and the first real photo made them
+// false. This keeps the page's structure and its words, and serves the
+// carousel regions from tools/e2e/fixtures/home-galleries.html.
+function seededHomePage(src) {
+  const pairs = fixturePairs("home-galleries.html", "edit");
+  let out = src;
+  for (const slug of Object.keys(pairs)) {
+    const next = spliceInner(out, "edit", slug, pairs[slug]);
+    if (next !== null) out = next;
+  }
+  return out;
+}
+
+// gallery.html with the one section V088 committed: br, of eight seed tiles.
+// The same reason as above, for the sections the site holds. The list comes
+// from tools/e2e/fixtures/gallery-br.html.
+function oneSectionGallery(src) {
+  const list = fixturePairs("gallery-br.html", "list").gallery;
+  const out = list === undefined ? null : spliceInner(src, "list", "gallery", list);
+  return out === null ? src : out;
+}
+
+// The one door to a page's served bytes. The SERVE copy and servedSource()
+// both go through it, so what the browser loads and what an export is
+// compared against are always the same text.
+function fixedPage(page, src) {
+  if (page === "blog.html") return emptyBlogPage(src);
+  if (page === "index.html") return seededHomePage(src);
+  if (page === "gallery.html") return oneSectionGallery(src);
+  return src;
 }
 
 // Read the open-marker slugs of a page source, in document order.
@@ -274,13 +337,12 @@ function firstDiff(a, b) {
 // the content of the named regions. Export must leave every byte outside a
 // marked region alone, so this is the assertion the whole publish model rests
 // on. The page is a parameter because Phases 3 and 4 export three pages.
-// The source the suite SERVES. That is the repo's page for everything except
-// the blog, whose content is reset so no check depends on what the live site
-// happens to hold. Comparing an export against the repo's copy would fail for
-// a reason that has nothing to do with the export.
+// The source the suite SERVES: the repo's page, with the content fixedPage()
+// fixes, so no check depends on what the live site happens to hold.
+// Comparing an export against the repo's copy would fail for a reason that
+// has nothing to do with the export.
 function servedSource(page) {
-  const src = readFileSync(join(REPO, page), "utf-8");
-  return page === "blog.html" ? emptyBlogPage(src) : src;
+  return fixedPage(page, readFileSync(join(REPO, page), "utf-8"));
 }
 
 // remove the CONTENT of the named lists, so everything outside them can be
@@ -437,8 +499,36 @@ async function main() {
   // These run first. They describe the site as it is now, so that a later part
   // that changes the shape of the site has to say so here before it can pass.
 
+  // C0. The suite serves its own content. The home page's carousels and the
+  // gallery page's list come from fixtures, so no check depends on the
+  // photos and the sections the site holds. A fixture that stops matching
+  // the shape of its page fails here, on its own line.
+  {
+    const home = readFileSync(join(REPO, "index.html"), "utf-8");
+    const served = servedSource("index.html");
+    const slugs = Object.keys(fixturePairs("home-galleries.html", "edit"));
+    const lost = slugs.filter((s) => spliceInner(home, "edit", s, "") === null);
+    const notSeed = [];
+    for (const s of slugs) {
+      const open = `<!--[edit:${s}]-->`;
+      const a = served.indexOf(open);
+      const inner = a < 0 ? "" : served.slice(a + open.length, served.indexOf(`<!--[/edit:${s}]-->`, a));
+      for (const m of inner.matchAll(/src="([^"]*)"/g)) {
+        if (!m[1].startsWith("img/seed/")) notSeed.push(s + " " + m[1]);
+      }
+    }
+    check("fixture: the served home page holds the nine seed carousels, and only seeds",
+      slugs.length === 9 && lost.length === 0 && notSeed.length === 0,
+      "fixture=" + slugs.length + " lost=" + lost.join(",") + " not seed=" + notSeed.join(","));
+    const items = listItems(servedSource("gallery.html"), "gallery") || {};
+    const ids = Object.keys(items);
+    const figures = items.br ? (items.br.match(/<figure class="gal-tile"/g) || []).length : 0;
+    check("fixture: the served gallery page holds one section, br, of eight tiles",
+      ids.join() === "br" && figures === 8, "items=" + ids.join() + " figures=" + figures);
+  }
+
   for (const page of MANAGED_PAGES) {
-    const src = readFileSync(join(REPO, page), "utf-8");
+    const src = servedSource(page);
 
     // C1. the marked regions are exactly the ones we expect, in order
     const found = regionSlugs(src);
@@ -464,6 +554,19 @@ async function main() {
     check("contract: " + page + " boots with no console error",
       loaded && booted.body && exceptions.length === 0,
       "loaded=" + loaded + " " + exceptions.join(" | ").slice(0, 200));
+
+    // C3b. every page publishes the image engine, because every image the
+    // site takes in goes through it
+    const eng = await evaluate(`(function () {
+      var I = window.AMH && window.AMH.images;
+      if (!I) return { there: false };
+      var fns = ["intake", "hold", "letGo", "recall", "prune", "files", "saved", "attrs", "read", "orphans"];
+      return { there: true,
+               missing: fns.filter(function (k) { return typeof I[k] !== "function"; }),
+               renditions: (I.RENDITIONS || []).map(function (r) { return r.key; }).join() };
+    })()`);
+    check("contract: " + page + " publishes the image engine, with its three renditions",
+      eng.there && eng.missing.length === 0 && eng.renditions === "sd,hd,original", JSON.stringify(eng));
 
     // C4. exactly one managed page carries the manifest
     const hasManifest = /<script id="blogManifest"/.test(src);
@@ -505,7 +608,7 @@ async function main() {
   // makes an interior hole impossible rather than merely avoided, and it is
   // the assumption Phase 4 Part 2's packer is built on.
   {
-    const src = readFileSync(join(REPO, "gallery.html"), "utf-8");
+    const src = servedSource("gallery.html");
     const trains = src.split('<div class="gal-train"').slice(1);
     const faults = [];
     for (const train of trains) {
@@ -533,7 +636,7 @@ async function main() {
   // author's; data-span is the packer's answer at six columns, baked in so a
   // reader with no script gets the same layout as a reader with one.
   {
-    const src = readFileSync(join(REPO, "gallery.html"), "utf-8");
+    const src = servedSource("gallery.html");
     const tiles = [...src.matchAll(
       /data-w="(\d)" data-priority="(\d+)" data-span="(\d)"/g)];
     const count = (src.match(/class="gal-tile"/g) || []).length;
@@ -993,106 +1096,446 @@ async function main() {
 
   await send("Emulation.clearDeviceMetricsOverride");
 
+  // The photos are drawn on a canvas, because a drop of made-up bytes is no
+  // longer enough: the editor decodes every file it is given.
+  const PHOTO_HELPER = `
+    window.__photo = function (name, w, h, color, type) {
+      var cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      var cx = cv.getContext('2d');
+      cx.fillStyle = color || '#2b6cb0'; cx.fillRect(0, 0, w, h);
+      cx.fillStyle = '#f2c14e'; cx.fillRect(w * .1, h * .2, w * .3, h * .5);
+      return new Promise(function (res) {
+        cv.toBlob(function (b) { res(new File([b], name, { type: type || 'image/png' })); },
+          type || 'image/png');
+      });
+    };
+    window.__choose = function (input, file) {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    window.__dropOn = function (el, file) {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    };`;
+
   // ============ GALLERY EDITING ============
-  // The tile grid is the third consumer of the image-region core. A drop here
-  // is the same code as a drop on a carousel, so these mirror those checks
-  // and then cover what is new: the two per-tile numbers, and the rule that a
-  // packing decision never reaches the file.
+  // The tile grid is the third consumer of the image-region core, and from
+  // Part 3 it carries the four photo tools a carousel carries: ADD PHOTO, the
+  // PHOTOS box, a trash that asks, and a pencil on a caption. Every one of
+  // them is tool.js's, reached through AMH.tool, so these checks cover where
+  // they sit and what a tile has that a carousel has not: its two numbers,
+  // and the rule that a packing decision never reaches the file.
+  //
+  // A drop ADDS. It used to replace the tile it landed on, which is a way to
+  // lose a photograph by aiming badly.
   await send("Emulation.setDeviceMetricsOverride",
     { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/gallery.html` });
   await waitLoaded();
   await sleep(1600);
   await evaluate(ZIP_CAPTURE);
+  await evaluate(PHOTO_HELPER);
+  // One press of a way in must open one file picker. A real picker cannot
+  // open here, so the count is what the check reads.
+  await evaluate(`
+    window.__picks = 0;
+    var realInputClick = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function () {
+      if (this.type === 'file') { window.__picks++; return; }
+      return realInputClick.apply(this, arguments);
+    };
+    window.__dropFiles = function (el, files) {
+      var dt = new DataTransfer();
+      files.forEach(function (f) { dt.items.add(f); });
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    };
+    window.__waitRows = function (n) {
+      return new Promise(function (res, rej) {
+        var t0 = Date.now();
+        (function tick() {
+          var rows = document.querySelectorAll('.ced-addphoto .ced-describe .ced-photo');
+          if (rows.length === n) return res(n);
+          if (Date.now() - t0 > 9000) return rej(new Error('rows ' + rows.length + ' of ' + n));
+          setTimeout(tick, 100);
+        })();
+      });
+    };
+    window.__wizNext = function () {
+      document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent').click();
+      return new Promise(function (r) { setTimeout(r, 300); });
+    };
+    window.__wizAsk = function () {
+      var p = document.querySelector('.ced-addphoto .ced-addphoto__pane:not([hidden]) .ced-empty');
+      return p ? p.textContent : '';
+    };
+    window.__wizLabel = function () {
+      return document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent').textContent;
+    };
+    window.__esc = function () {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return new Promise(function (r) { setTimeout(r, 250); });
+    };
+    window.__train = function (id) { return document.querySelector('[data-section="' + id + '"]'); };
+    window.__region = function (id) {
+      var el = window.__train(id);
+      return window.AMH.gallery.regions().filter(function (r) { return r.el === el; })[0];
+    };
+    window.__tiles = function (id) {
+      return [...window.__train(id).querySelectorAll('.gal-tile')];
+    };
+    /* the tile that draws one entry of the model. NOT the tile at that place
+       on screen: the packer reorders the grid, so the two differ. */
+    window.__figFor = function (id, i) {
+      var en = window.__region(id).model[i];
+      return window.__tiles(id).filter(function (f) { return f.__galEntry === en; })[0];
+    };
+    /* the viewer is shown by taking the hidden attribute off, which is what
+       work.js's own isOpen() reads */
+    window.__viewerOpen = function () {
+      var root = document.querySelector('.lightbox');
+      return !!(root && !root.hidden);
+    };
+    true`);
 
   const galReg = await evaluate(`(() => {
     window.edit();
-    const g = window.AMH.tool.imageRegion;
-    const list = window.edit.list();
+    const band = document.querySelector('.gal-train__head');
     return {
-      kind: (window.__gal = [...document.querySelectorAll('.gal-train')]).length,
-      seeds: [...document.querySelectorAll('.gal-tile')].length,
+      trains: document.querySelectorAll('.gal-train').length,
+      seeds: document.querySelectorAll('.gal-tile').length,
       chips: document.querySelectorAll('.gal-tile__chip').length,
       seedChips: [...document.querySelectorAll('.gal-tile__chip')]
         .filter(c => c.textContent === 'SEED').length,
-      listed: /galler|tiles/i.test(String(list)) || String(list),
+      floating: document.querySelectorAll('.ced-chip--plus').length,
+      wraps: band.querySelectorAll('.ced-pills').length,
+      pills: [...band.querySelectorAll('.ced-pill')].map(p => p.textContent.trim()),
+      arrows: [...band.querySelectorAll('.ced-pill--icon')].map(p => p.getAttribute('aria-label')),
+      photoPill: !!band.querySelector('.ced-pills .ced-pill:last-child svg'),
+      bars: document.querySelectorAll('.gal-tile__ctl').length,
     };
   })()`);
   check("gallery edit: the train registers as one image region of seed tiles",
-    galReg.kind === 1 && galReg.seeds === 8 && galReg.chips === 8 &&
-    galReg.seedChips === 8, JSON.stringify(galReg));
+    galReg.trains === 1 && galReg.seeds === 8 && galReg.chips === 8 &&
+    galReg.seedChips === 8 && galReg.bars === 0, JSON.stringify(galReg));
+  check("gallery edit: a section that draws itself builds no floating chips",
+    galReg.floating === 0, "ced-chip--plus count " + galReg.floating);
+  check("gallery edit: the band wears a fourth pill, + Photo, after the two arrows",
+    galReg.wraps === 1 && galReg.pills.join("|") === "Section|||Photo" &&
+    galReg.arrows.join("|") === "Move up|Move down" && galReg.photoPill === true,
+    JSON.stringify({ wraps: galReg.wraps, pills: galReg.pills, arrows: galReg.arrows }));
 
-  // GE1. a drop. Same path as a carousel: the first real image replaces the
-  // whole seed set, records img/work/<name>, and HEAD-checks it.
-  const galDrop = await evaluate(`(async () => {
-    const train = document.querySelector('.gal-train');
-    const tile = train.querySelector('.gal-tile');
-    const cv = document.createElement('canvas');
-    cv.width = 1600; cv.height = 900;
-    const cx = cv.getContext('2d');
-    cx.fillStyle = '#2b6cb0'; cx.fillRect(0, 0, 1600, 900);
-    const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
-    const file = new File([blob], 'tile-one.png', { type: 'image/png' });
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    tile.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-    await new Promise(r => setTimeout(r, 600));
-    const modal = document.querySelector('.ced-modal');
-    /* the tiles keep the image modal; the carousels' wizard is not theirs */
-    const imageModal = !!document.querySelector('.ced-modal--image');
-    const wizard = !!document.querySelector('.ced-addphoto');
-    if (modal) document.querySelector('.ced-modal__x').click();
-    await new Promise(r => setTimeout(r, 300));
-    const tiles = [...train.querySelectorAll('.gal-tile')];
-    // The model is what the export reads. The DOM shows a blob preview, so
-    // reading the DOM would not tell us what a publish would write.
-    const model = window.AMH.gallery.regions()[0].model;
+  // GT1. a section with no photographs shows one slot, and the slot is a way
+  // in. One press, one picker: the button and the tile must not each open one.
+  await evaluate(`(() => {
+    window.AMH.tool.listForm('gallery', null);
+    const box = document.querySelector('.ced-modal');
+    const ins = box.querySelectorAll('.ced-field input');
+    ins[0].value = "Travel"; ins[1].value = "Paris spring"; ins[2].value = "2026";
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Apply').click();
+  })()`);
+  await sleep(700);
+  const galSlot = await evaluate(`(() => {
+    const fig = window.__tiles('ps')[0];
     return {
+      tiles: window.__tiles('ps').length,
+      art: fig.querySelector('img').src === window.AMH.tool.photoTile,
+      button: (fig.querySelector('.gal-tile__choose') || {}).textContent,
+      chip: fig.querySelector('.gal-tile__chip').textContent,
+      bar: !!fig.querySelector('.gal-tile__ctl'),
+      count: window.__train('ps').querySelector('.gal-train__count').textContent,
+    };
+  })()`);
+  check("gallery edit: a section with no photographs shows one slot with a button on it",
+    galSlot.tiles === 1 && galSlot.art === true && galSlot.button === "Choose a photo" &&
+    galSlot.chip === "ADD" && galSlot.bar === false && galSlot.count === "no images",
+    JSON.stringify(galSlot));
+
+  const galOpen = await evaluate(`(async () => {
+    const out = {};
+    window.__picks = 0;
+    window.__tiles('ps')[0].querySelector('.gal-tile__choose').click();
+    await new Promise(r => setTimeout(r, 400));
+    out.buttonPicks = window.__picks;
+    out.buttonBox = !!document.querySelector('.ced-addphoto');
+    out.named = (document.querySelector('.ced-addphoto .ced-slug') || {}).textContent;
+    out.viewer = window.__viewerOpen();
+    await window.__esc();
+    out.closed = !document.querySelector('.ced-addphoto');
+    out.stillThere = window.__tiles('ps').length;
+
+    window.__picks = 0;
+    window.__tiles('ps')[0].click();
+    await new Promise(r => setTimeout(r, 400));
+    out.tilePicks = window.__picks;
+    out.tileBox = !!document.querySelector('.ced-addphoto');
+    out.tileViewer = window.__viewerOpen();
+    await window.__esc();
+
+    window.__picks = 0;
+    window.__tiles('ps')[0].dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    out.keyPicks = window.__picks;
+    out.keyBox = !!document.querySelector('.ced-addphoto');
+    await window.__esc();
+    return out;
+  })()`, { awaitPromise: true });
+  check("gallery edit: the slot's button opens the wizard, named for the section",
+    galOpen.buttonPicks === 1 && galOpen.buttonBox === true &&
+    galOpen.named === "Paris spring" && galOpen.viewer === false, JSON.stringify(galOpen));
+  check("gallery edit: the slot itself opens it too, and the keyboard does",
+    galOpen.tilePicks === 1 && galOpen.tileBox === true && galOpen.tileViewer === false &&
+    galOpen.keyPicks === 1 && galOpen.keyBox === true, JSON.stringify(galOpen));
+  check("gallery edit: Escape closes the wizard and leaves the slot where it was",
+    galOpen.closed === true && galOpen.stillThere === 1, JSON.stringify(galOpen));
+
+  // GT2. two files dropped on the slot. The batch is the carousels' wizard,
+  // so this covers the road in and not the wizard itself.
+  const galTwo = await evaluate(`(async () => {
+    const files = await Promise.all([
+      window.__photo('Rue Cler.png', 2400, 1200),
+      window.__photo('IMG_5512.jpg', 1600, 1200, '#6b3a8f', 'image/jpeg')]);
+    window.__dropFiles(window.__tiles('ps')[0], files);
+    await window.__waitRows(2);
+    await window.__wizNext();
+    const ask = window.__wizAsk(), label = window.__wizLabel();
+    await window.__wizNext();
+    await new Promise(r => setTimeout(r, 700));
+    const model = window.__region('ps').model;
+    return {
+      ask, label,
+      tiles: window.__tiles('ps').length,
+      slots: window.__tiles('ps').filter(f => f.querySelector('.gal-tile__choose')).length,
+      count: window.__train('ps').querySelector('.gal-train__count').textContent,
+      srcs: model.map(e => e.src),
+      held: window.AMH.images.list().length,
+      bins: window.__train('ps').querySelectorAll('.gal-tile__bin').length,
+      prefer: model.map(e => e.prefer).join(","),
+    };
+  })()`, { awaitPromise: true });
+  check("gallery edit: the wizard says section, and offers to add the batch",
+    /first photos in this section/.test(galTwo.ask) && galTwo.label === "Add photos",
+    JSON.stringify({ ask: galTwo.ask, label: galTwo.label }));
+  check("gallery edit: two files dropped on the slot become two tiles, and the slot goes",
+    galTwo.tiles === 2 && galTwo.slots === 0 && galTwo.count === "2 images" &&
+    galTwo.bins === 2 && galTwo.prefer === "2,2", JSON.stringify(galTwo));
+  check("gallery edit: each photo is named under img/work/ and held by the engine",
+    galTwo.srcs.length === 2 && galTwo.held === 2 &&
+    galTwo.srcs.every(s => /^img\/work\/[a-z0-9-]+-[a-z0-9]{6}\.jpg$/.test(s)),
+    JSON.stringify(galTwo.srcs));
+
+  // GT3. a drop on a seed tile. The first real photograph replaces the whole
+  // seed set, which is the core's rule and the carousels' too.
+  const galSeed = await evaluate(`(async () => {
+    const file = await window.__photo('tile-one.png', 1600, 900);
+    window.__dropFiles(window.__tiles('br')[0], [file]);
+    await window.__waitRows(1);
+    const wizard = !!document.querySelector('.ced-addphoto');
+    /* the older path is gone: nothing can open an image in the region box */
+    const imageModal = typeof window.AMH.tool.openImage !== "undefined";
+    await window.__wizNext();
+    const ask = window.__wizAsk(), label = window.__wizLabel();
+    await window.__wizNext();
+    await new Promise(r => setTimeout(r, 700));
+    const tiles = window.__tiles('br');
+    const model = window.__region('br').model;
+    return {
+      wizard, imageModal, ask, label,
       count: tiles.length,
       shown: tiles[0].querySelector('img').src.slice(0, 5),
       recorded: model.map(e => e.src).join(","),
-      missing: model[0].missing,
       chip: tiles[0].querySelector('.gal-tile__chip').textContent,
       hasCtl: !!tiles[0].querySelector('.gal-tile__ctl'),
-      prefer: model[0].prefer,
-      imageModal, wizard,
+      hasBin: !!tiles[0].querySelector('.gal-tile__bin'),
+      prefer: model[0].prefer, priority: model[0].priority,
+      words: window.__train('br').querySelector('.gal-train__count').textContent,
     };
   })()`, { awaitPromise: true });
-  check("gallery edit: a tile drop still opens the image modal, and not the carousels' wizard",
-    galDrop.imageModal === true && galDrop.wizard === false,
-    JSON.stringify({ imageModal: galDrop.imageModal, wizard: galDrop.wizard }));
-  check("gallery edit: a drop records img/work/ and previews the dropped file",
-    galDrop.count === 1 && galDrop.recorded === "img/work/tile-one.png" &&
-    galDrop.shown === "blob:" && galDrop.chip !== "SEED" &&
-    galDrop.hasCtl === true && galDrop.prefer === 2,
-    JSON.stringify(galDrop));
-  check("gallery edit: the dropped file is HEAD-checked, as a carousel drop is",
-    galDrop.missing === true,
-    "missing=" + galDrop.missing + " - the probe file is not in img/work/, " +
-    "so true here is the check doing its job");
+  check("gallery edit: a tile drop opens the wizard, and the older path is gone",
+    galSeed.wizard === true && galSeed.imageModal === false,
+    JSON.stringify({ wizard: galSeed.wizard, imageModal: galSeed.imageModal }));
+  check("gallery edit: the first real photo replaces the seed set, with the kind's defaults",
+    galSeed.count === 1 && galSeed.shown === "blob:" && galSeed.chip !== "SEED" &&
+    galSeed.hasCtl === true && galSeed.hasBin === true && galSeed.prefer === 2 &&
+    galSeed.priority === 0 && galSeed.words === "1 image", JSON.stringify(galSeed));
+  check("gallery edit: and the wizard warned that the placeholders go away",
+    /placeholder photos go away/.test(galSeed.ask) && galSeed.label === "Add photo",
+    JSON.stringify({ ask: galSeed.ask, label: galSeed.label }));
 
-  // GE2. the two controls that are new here
+  // GT4. a drop on a REAL tile, and a drop on the band. Both add.
+  const galAdds = await evaluate(`(async () => {
+    const was = window.__region('br').model[0];
+    const first = { src: was.src, caption: was.caption, prefer: was.prefer };
+    const one = await window.__photo('Second Frame.png', 1600, 900, '#1d6b52');
+    window.__dropFiles(window.__tiles('br')[0], [one]);
+    await window.__waitRows(1);
+    await window.__wizNext();
+    await window.__wizNext();
+    await new Promise(r => setTimeout(r, 700));
+    const afterTile = window.__region('br').model.length;
+    const two = await window.__photo('Third Frame.png', 1600, 900, '#8a4b0e');
+    window.__dropFiles(window.__train('br').querySelector('.gal-train__head'), [two]);
+    await window.__waitRows(1);
+    await window.__wizNext();
+    await window.__wizNext();
+    await new Promise(r => setTimeout(r, 700));
+    const model = window.__region('br').model;
+    return {
+      first, afterTile, afterBand: model.length,
+      kept: model[0].src === first.src && model[0].prefer === first.prefer,
+      words: window.__train('br').querySelector('.gal-train__count').textContent,
+      tiles: window.__tiles('br').length,
+    };
+  })()`, { awaitPromise: true });
+  check("gallery edit: a drop on a real tile adds a photo and changes none",
+    galAdds.afterTile === 2 && galAdds.kept === true, JSON.stringify(galAdds));
+  check("gallery edit: a drop on the band adds one too, and the count follows",
+    galAdds.afterBand === 3 && galAdds.tiles === 3 && galAdds.words === "3 images",
+    JSON.stringify(galAdds));
+
+  // GT5. the two numbers a tile carries, on the tile itself.
   const galCtl = await evaluate(`(() => {
-    const fig = document.querySelector('.gal-tile');
-    const x4 = [...fig.querySelectorAll('.gal-w')].find(b => b.textContent === 'x4');
-    x4.click();
-    const pri = document.querySelector('.gal-tile .gal-tile__pri');
+    const fig = window.__figFor('br', 0);
+    [...fig.querySelectorAll('.gal-w')].find(b => b.textContent === 'x4').click();
+    const pri = window.__figFor('br', 0).querySelector('.gal-tile__pri');
     pri.value = '7';
     pri.dispatchEvent(new Event('change', { bubbles: true }));
-    const now = document.querySelector('.gal-tile');
+    const now = window.__region('br').model[0];
+    const drawn = [...window.__train('br').querySelectorAll('.gal-tile')]
+      .filter(f => f.getAttribute('data-w') === '4')[0];
     return {
-      w: now.getAttribute('data-w'),
-      priority: now.getAttribute('data-priority'),
-      on: now.querySelector('.gal-w.on').textContent,
-      span: now.style.gridColumn,
+      prefer: now.prefer, priority: now.priority,
+      w: drawn.getAttribute('data-w'), p: drawn.getAttribute('data-priority'),
+      on: drawn.querySelector('.gal-w.on').textContent,
+      span: drawn.style.gridColumn,
     };
   })()`);
   check("gallery edit: the prefer and priority controls change the tile",
-    galCtl.w === "4" && galCtl.priority === "7" && galCtl.on === "x4",
-    JSON.stringify(galCtl));
+    galCtl.prefer === 4 && galCtl.priority === 7 && galCtl.w === "4" &&
+    galCtl.p === "7" && galCtl.on === "x4", JSON.stringify(galCtl));
 
-  // GE3. export. Clean <figure> lines with both attributes, and everything
-  // outside the region byte-identical.
+  // GT6. the chip opens PHOTOS on that photo's row, and a row carries the
+  // two numbers as well as the caption, the alt text and the switch.
+  const galBox = await evaluate(`(async () => {
+    window.__figFor('br', 0).querySelector('.gal-tile__chip').click();
+    await new Promise(r => setTimeout(r, 500));
+    const box = document.querySelector('.ced-photos');
+    const rows = [...box.querySelectorAll('.ced-photo')];
+    const focus = document.activeElement;
+    const onRow = focus && focus.closest ? focus.closest('.ced-photo') : null;
+    return {
+      open: !!box,
+      name: box.querySelector('.ced-slug').textContent,
+      rows: rows.length,
+      widths: rows[0].querySelectorAll('.ced-photo__extras .gal-w').length,
+      pri: !!rows[0].querySelector('.ced-photo__extras .gal-tile__pri'),
+      labels: [...rows[0].querySelectorAll('.ced-photo__extras .ced-field__label')]
+        .map(l => l.textContent).join(","),
+      on: rows[0].querySelector('.ced-photo__extras .gal-w.on').textContent,
+      priValue: rows[0].querySelector('.ced-photo__extras .gal-tile__pri').value,
+      uhd: !!rows[0].querySelector('.ced-uhd'),
+      focusRow: onRow ? rows.indexOf(onRow) : -1,
+    };
+  })()`, { awaitPromise: true });
+  check("gallery edit: the tile chip opens PHOTOS on that photo's row, named for the section",
+    galBox.open === true && galBox.name === "Blockade Runner" && galBox.rows === 3 &&
+    galBox.focusRow === 0, JSON.stringify(galBox));
+  check("gallery edit: a row carries the tile's width and priority beside the switch",
+    galBox.widths === 3 && galBox.pri === true && galBox.labels === "Width,Priority" &&
+    galBox.on === "x4" && galBox.priValue === "7" && galBox.uhd === true,
+    JSON.stringify(galBox));
+
+  const galAsk = await evaluate(`(async () => {
+    const box = document.querySelector('.ced-photos');
+    const row = box.querySelectorAll('.ced-photo')[1];
+    [...row.querySelectorAll('.gal-w')].find(b => b.textContent === 'x3').click();
+    const pri = row.querySelector('.gal-tile__pri');
+    pri.value = '2';
+    pri.dispatchEvent(new Event('change', { bubbles: true }));
+    const cap = row.querySelectorAll('.ced-field input')[0];
+    cap.value = 'Hull plating, close';
+    cap.dispatchEvent(new Event('input', { bubbles: true }));
+    [...box.querySelectorAll('.ced-btn')].find(b => b.textContent === 'Cancel').click();
+    await new Promise(r => setTimeout(r, 400));
+    const asked = document.querySelector('.ced-ask');
+    const words = asked ? asked.textContent.replace(/\\s+/g, ' ') : '';
+    [...document.querySelectorAll('.ced-ask .ced-btn')]
+      .find(b => /Keep editing/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 400));
+    const still = !!document.querySelector('.ced-photos');
+    [...document.querySelectorAll('.ced-photos .ced-btn')]
+      .find(b => b.textContent === 'Apply').click();
+    await new Promise(r => setTimeout(r, 800));
+    const model = window.__region('br').model;
+    const drawn = [...window.__train('br').querySelectorAll('.gal-tile')]
+      .filter(f => f.getAttribute('data-w') === '3')[0];
+    return {
+      words, still,
+      prefer: model[1].prefer, priority: model[1].priority, caption: model[1].caption,
+      w: drawn && drawn.getAttribute('data-w'),
+      p: drawn && drawn.getAttribute('data-priority'),
+      span: drawn && drawn.getAttribute('data-span'),
+      capText: drawn && drawn.querySelector('.gal-tile__cap-text').textContent,
+      pen: !!(drawn && drawn.querySelector('.ced-cappen')),
+    };
+  })()`, { awaitPromise: true });
+  check("gallery edit: Cancel with a change asks, and Keep editing keeps the box",
+    /leaves the section as it is/.test(galAsk.words) && galAsk.still === true,
+    JSON.stringify({ words: galAsk.words.slice(0, 120), still: galAsk.still }));
+  check("gallery edit: Apply writes the row's width, priority and caption onto the tile",
+    galAsk.prefer === 3 && galAsk.priority === 2 && galAsk.caption === "Hull plating, close" &&
+    galAsk.w === "3" && galAsk.p === "2" && galAsk.span === "3" &&
+    galAsk.capText === "Hull plating, close" && galAsk.pen === true, JSON.stringify(galAsk));
+
+  // GT7. the pencil, on a caption that exists and on no other tile.
+  const galPen = await evaluate(`(async () => {
+    const tiles = window.__tiles('br');
+    const withCap = tiles.filter(f => f.querySelector('.ced-cappen'));
+    const fig = withCap[0];
+    fig.querySelector('.ced-cappen').click();
+    await new Promise(r => setTimeout(r, 300));
+    const field = fig.querySelector('.ced-capedit');
+    const opened = {
+      field: !!field, value: field && field.value,
+      hidden: !!fig.querySelector('.gal-tile__cap-text[hidden]'),
+      viewer: window.__viewerOpen(),
+      selected: field && field.selectionEnd - field.selectionStart === field.value.length,
+    };
+    field.value = 'Escaped';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+    const back = fig.querySelector('.gal-tile__cap-text').textContent;
+    fig.querySelector('.ced-cappen').click();
+    await new Promise(r => setTimeout(r, 300));
+    const again = fig.querySelector('.ced-capedit');
+    again.value = 'Plating, nearer';
+    again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 500));
+    const en = window.__region('br').model.filter(e => e.caption === 'Plating, nearer')[0];
+    return {
+      pens: tiles.filter(f => f.querySelector('.ced-cappen')).length, opened, back,
+      onScreen: fig.querySelector('.gal-tile__cap-text').textContent,
+      model: !!en,
+      label: fig.getAttribute('aria-label'),
+      field: !!fig.querySelector('.ced-capedit'),
+      pending: window.edit.pending(),
+    };
+  })()`, { awaitPromise: true });
+  check("gallery edit: a pencil shows on a tile with a caption and on no other",
+    galPen.pens === 1 && galPen.opened.field === true && galPen.opened.hidden === true &&
+    galPen.opened.viewer === false && galPen.opened.selected === true,
+    JSON.stringify(galPen.opened) + " pens=" + galPen.pens);
+  check("gallery edit: Escape puts the caption back, and Enter writes it where it stands",
+    galPen.back === "Hull plating, close" && galPen.onScreen === "Plating, nearer" &&
+    galPen.model === true && galPen.field === false &&
+    galPen.label === "Plating, nearer (enlarge)", JSON.stringify(galPen));
+
+  // GT8. the export. Every tile the file gets carries the markup contract,
+  // and its sizes says how wide the packer may draw it.
   const galZip = await evaluate(`(() => {
     window.__zipB64 = null;
     return String(window.edit.export());
@@ -1102,74 +1545,182 @@ async function main() {
     await sleep(400);
     galOut = await evaluate(`window.__zipB64`);
   }
-  const galHtml = galOut ? Buffer.from(galOut, "base64").toString("utf8") : "";
-  check("gallery edit: the export downloads gallery.html", galHtml.includes("<!DOCTYPE html>"),
-    galHtml ? galHtml.length + " chars" : "nothing captured: " + galZip);
+  // A page with photos the engine still holds downloads as a zip: the page,
+  // and the three files each photo is saved as.
+  const galBuf = galOut ? Buffer.from(galOut, "base64") : null;
+  const galFiles = galBuf && galBuf.slice(0, 2).toString("latin1") === "PK"
+    ? unzipStore(galBuf) : null;
+  const galHtml = galFiles ? String(galFiles["gallery.html"] || "")
+    : (galBuf ? galBuf.toString("utf8") : "");
+  const galNames = galFiles ? Object.keys(galFiles) : [];
+  check("gallery edit: the export downloads a zip of the page and its photos",
+    galHtml.includes("<!DOCTYPE html>") && galNames.length === 1 + 3 * 5 &&
+    galNames.filter(n => /^img\/work\/.*_sd\.webp$/.test(n)).length === 5,
+    galNames.length ? galNames.length + " entries: " + galNames.slice(0, 4).join(", ")
+                    : "nothing captured: " + galZip);
 
   if (galHtml) {
     const span = galHtml.slice(galHtml.indexOf("<!--[edit:gal-br]-->"),
       galHtml.indexOf("<!--[/edit:gal-br]-->"));
-    check("gallery edit: the export writes one figure with both attributes",
-      /<figure class="gal-tile" data-w="4" data-priority="7" data-span="4">/.test(span) &&
-      /<img src="img\/work\/tile-one\.png"/.test(span) &&
-      (span.match(/<figure/g) || []).length === 1,
-      span.replace(/\s+/g, " ").slice(0, 170));
+    const figs = span.match(/<figure[\s\S]*?<\/figure>/g) || [];
+    const sizes = (figs[0].match(/sizes="([^"]*)"/) || [])[1];
+    const three = figs.filter(f => /data-w="3"/.test(f))[0] || "";
+    // the photographs are 1600 x 900, and a copy is scaled down and never up
+    check("gallery edit: the export writes a figure with both numbers, and the contract",
+      figs.length === 3 &&
+      /<figure class="gal-tile" data-w="4" data-priority="7" data-span="4">/.test(figs[0]) &&
+      /<img src="img\/work\/[a-z0-9-]+\.jpg"/.test(figs[0]) &&
+      /srcset="img\/work\/[^"]+_sd\.webp 480w, img\/work\/[^"]+\.jpg 1600w"/.test(figs[0]) &&
+      /width="1600"/.test(figs[0]) && /height="900"/.test(figs[0]) &&
+      /data-sd="img\/work\/[^"]+_sd\.webp"/.test(figs[0]) &&
+      /data-original="img\/work\/[^"]+_original\.png"/.test(figs[0]),
+      figs[0] ? figs[0].replace(/\s+/g, " ").slice(0, 230) : "no figure");
+    // the contract read back off the markup the export wrote, which is where
+    // an entry and its <img> have to agree
+    const back = await evaluate(`(() => {
+      const box = document.createElement('div');
+      box.innerHTML = ${JSON.stringify(figs[0] || "")};
+      return window.AMH.images.read(box.querySelector('img'));
+    })()`);
+    check("gallery edit: the engine reads an exported tile back into an entry",
+      back && back.w === 1600 && back.h === 900 && back.sdw === 480 &&
+      /_sd\.webp$/.test(back.sd || "") && /_original\.png$/.test(back.original || "") &&
+      back.type === "png" && back.uhd === false, JSON.stringify(back));
+    check("gallery edit: sizes states the widest the tile can be drawn, per width",
+      sizes === "(max-width: 560px) 92vw, (max-width: 880px) 90vw, 718px" &&
+      /sizes="\(max-width: 560px\) 92vw, \(max-width: 880px\) 60vw, 535px"/.test(three),
+      JSON.stringify({ x4: sizes, x3: (three.match(/sizes="([^"]*)"/) || [])[1] }));
     check("gallery edit: no seed and no empty slot reaches the file",
-      !/img\/seed/.test(span) && !/data:image/.test(span),
+      !/img\/seed/.test(span) && !/data:image/.test(span) &&
+      /<figcaption class="gal-tile__cap">Plating, nearer<\/figcaption>/.test(span),
       /img\/seed/.test(span) ? "a seed was exported" : "clean");
-    const gx = exportIsByteExact("gallery.html", galHtml, ["gal-br"]);
-    check("gallery edit: byte-identical outside the gallery region", gx.ok, gx.detail);
+    const gx = exportIsByteExact("gallery.html", galHtml, [], ["gallery"]);
+    check("gallery edit: byte-identical outside the gallery list", gx.ok, gx.detail);
   }
 
-  // GE4. the rule from Part 2 section 5, worth its own check: a packing
-  // decision is about one viewport and never reaches the markup.
+  // GT9. what the packer draws is a decision about one viewport, and the file
+  // keeps what the author asked for.
   const galPacked = await evaluate(`(() => {
-    const fig = document.querySelector('.gal-tile');
+    const fig = window.__tiles('br')[0];
     return { drawn: fig.style.gridColumn, authored: fig.getAttribute('data-span'),
              packed: fig.getAttribute('data-packed') || '' };
   })()`);
   check("gallery edit: what the packer draws is not what the file records",
-    galPacked.authored === "4", JSON.stringify(galPacked));
+    galPacked.authored !== "" && !!galPacked.drawn, JSON.stringify(galPacked));
 
-  // GE5. deleting the last real image restores the seeds. Same rule as a
-  // carousel, and the same code, because the core owns it.
-  const galRestore = await evaluate(`(() => {
-    const region = window.AMH.gallery.regions()[0];
-    const before = region.model.length;
-    const realConfirm = window.confirm;
-    window.confirm = () => true;
-    window.AMH.tool.openImage(region, 0);
-    const del = [...document.querySelectorAll('.ced-modal__btns button')]
-      .find(b => /delete/i.test(b.textContent));
-    if (del) del.click();
-    window.confirm = realConfirm;
-    const tiles = [...document.querySelectorAll('.gal-tile')];
-    return {
-      before, after: region.model.length, tiles: tiles.length,
-      seeds: tiles.filter(t => {
-        const c = t.querySelector('.gal-tile__chip');
+  // GT10. the viewer opened from a tile carries See original. A photo the
+  // engine still holds shows from blob: URLs, which name no format, so the
+  // chip says its size; BT covers the wording for a photo on disk.
+  const galView = await evaluate(`(async () => {
+    window.__tiles('br')[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 500));
+    const chip = document.querySelector('.lightbox__original');
+    const out = { open: window.__viewerOpen(),
+                  chip: chip ? chip.textContent : "", hidden: chip ? chip.hidden : null,
+                  blank: chip ? chip.target : "", rel: chip ? chip.rel : "" };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    out.closed = !window.__viewerOpen();
+    return out;
+  })()`, { awaitPromise: true });
+  check("gallery edit: the viewer opened from a tile offers the original in a new tab",
+    galView.open === true && /^See original · /.test(galView.chip) &&
+    galView.blank === "_blank" && galView.rel === "noopener" && galView.closed === true,
+    JSON.stringify(galView));
+
+  // GT11. the trash on a tile, and the rule that the seeds come back.
+  const galBin = await evaluate(`(async () => {
+    window.__figFor('br', 2).querySelector('.gal-tile__bin').click();
+    await new Promise(r => setTimeout(r, 400));
+    const asked = document.querySelector('.ced-ask');
+    const words = asked ? asked.textContent.replace(/\\s+/g, ' ') : '';
+    const thumb = !!(asked && asked.querySelector('img'));
+    [...document.querySelectorAll('.ced-ask .ced-btn')]
+      .find(b => /Cancel/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 400));
+    const kept = window.__region('br').model.length;
+    let guard = 0;
+    while (window.__region('br').model.length && guard++ < 6) {
+      window.__tiles('br').filter(f => f.querySelector('.gal-tile__bin'))[0]
+        .querySelector('.gal-tile__bin').click();
+      await new Promise(r => setTimeout(r, 400));
+      [...document.querySelectorAll('.ced-ask .ced-btn')]
+        .find(b => /Delete photo/.test(b.textContent)).click();
+      await new Promise(r => setTimeout(r, 600));
+    }
+    const tiles = window.__tiles('br');
+    tiles[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 500));
+    const seedChip = document.querySelector('.lightbox__original');
+    const onSeed = { open: window.__viewerOpen(), chip: !!(seedChip && !seedChip.hidden) };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    return { words, thumb, kept, onSeed, tiles: tiles.length,
+      seeds: tiles.filter(f => {
+        const c = f.querySelector('.gal-tile__chip');
         return c && c.textContent === 'SEED';
       }).length,
-    };
-  })()`);
+      bins: window.__train('br').querySelectorAll('.gal-tile__bin').length,
+      count: window.__train('br').querySelector('.gal-train__count').textContent };
+  })()`, { awaitPromise: true });
+  check("gallery edit: the tile's trash asks with the photo and its file, and Cancel keeps it",
+    /Delete this photo/.test(galBin.words) && /img\/work\//.test(galBin.words) &&
+    galBin.thumb === true && galBin.kept === 3,
+    JSON.stringify({ words: galBin.words.slice(0, 140), kept: galBin.kept }));
   check("gallery edit: deleting the last real image restores the seeds",
-    galRestore.before === 1 && galRestore.after === 0 &&
-    galRestore.tiles === 8 && galRestore.seeds === 8,
-    JSON.stringify(galRestore));
+    galBin.tiles === 8 && galBin.seeds === 8 && galBin.bins === 0 &&
+    galBin.count === "8 images", JSON.stringify(galBin));
+  check("gallery edit: a seed tile opens the viewer with no original to see",
+    galBin.onSeed.open === true && galBin.onSeed.chip === false,
+    JSON.stringify(galBin.onSeed));
 
-  // GE6. the two new fields have to survive the pending store, which is the
+  // GT12. the before view shows what is published, and nothing is edited
+  // there: a control that named a photo by its place in the model would act
+  // on the wrong photo.
+  const galBefore = await evaluate(`(async () => {
+    function read(id) {
+      const t = window.__train(id);
+      return { tiles: t.querySelectorAll('.gal-tile').length,
+        chips: t.querySelectorAll('.gal-tile__chip').length,
+        label: [...t.querySelectorAll('.gal-tile__chip')].every(c => c.disabled),
+        bars: t.querySelectorAll('.gal-tile__ctl').length,
+        bins: t.querySelectorAll('.gal-tile__bin').length,
+        pens: t.querySelectorAll('.ced-cappen').length,
+        choose: t.querySelectorAll('.gal-tile__choose').length };
+    }
+    window.edit.before();
+    await new Promise(r => setTimeout(r, 700));
+    const before = { br: read('br'), ps: read('ps') };
+    window.edit.after();
+    await new Promise(r => setTimeout(r, 700));
+    const after = { br: read('br'), ps: read('ps') };
+    return { before, after };
+  })()`, { awaitPromise: true });
+  check("gallery edit: the before view draws what is published and carries no tool",
+    galBefore.before.br.tiles === 8 && galBefore.before.br.chips === 8 &&
+    galBefore.before.br.label === true && galBefore.before.br.bars === 0 &&
+    galBefore.before.br.bins === 0 && galBefore.before.br.pens === 0 &&
+    galBefore.before.ps.tiles === 0, JSON.stringify(galBefore.before));
+  check("gallery edit: and the after view brings the photos and their tools back",
+    galBefore.after.ps.tiles === 2 && galBefore.after.ps.bars === 2 &&
+    galBefore.after.ps.bins === 2 && galBefore.after.br.tiles === 8,
+    JSON.stringify(galBefore.after));
+
+  // GT13. the two new fields have to survive the pending store, which is the
   // path an edit takes when the user walks to another page and back. They go
   // through the export form, so a field the core dropped would come back as
   // undefined and the tile would silently lose its width.
-  await evaluate(`(() => {
-    const region = window.AMH.gallery.regions()[0];
-    const en = window.AMH.tool.imageRegion.fromFile(
-      new File([new Uint8Array([1])], 'carried.png', { type: 'image/png' }),
-      null, region.kind);
+  const carriedSrc = await evaluate(`(async () => {
+    const region = window.__region('br');
+    const file = await window.__photo('Carried.png', 1600, 900, '#4a2f6b');
+    const photo = await window.AMH.images.intake(file, {});
+    window.AMH.images.hold(photo);
+    const en = window.AMH.tool.imageRegion.fromPhoto(photo, null, region.kind);
     en.prefer = 3; en.priority = 5; en.caption = 'Carried';
     window.AMH.tool.imageRegion.append(region, en);
     window.AMH.tool.changed(region);
-  })()`);
+    return en.src;
+  })()`, { awaitPromise: true });
   await sleep(300);
   await send("Page.navigate", { url: PAGE });
   await waitLoaded();
@@ -1180,19 +1731,92 @@ async function main() {
   await sleep(1600);
   const carriedBack = await evaluate(`(() => {
     window.edit();
-    const m = window.AMH.gallery.regions()[0].model;
+    const trains = [...document.querySelectorAll('.gal-train')];
+    const br = window.AMH.gallery.regions()
+      .filter(r => r.el.getAttribute('data-section') === 'br')[0];
+    const m = br.model;
     const t = m[m.length - 1];
+    const ps = window.AMH.gallery.regions()
+      .filter(r => r.el.getAttribute('data-section') === 'ps')[0];
     return { count: m.length, src: t.src, prefer: t.prefer,
-             priority: t.priority, caption: t.caption };
+             priority: t.priority, caption: t.caption,
+             sections: trains.length,
+             kept: ps ? ps.model.map(e => e.preview.slice(0, 5)).join(",") : "",
+             chip: window.edit.pending() };
   })()`);
   check("gallery edit: an edit survives the walk to another page",
-    /1 unsaved change on 1 page/.test(carriedAway), carriedAway);
+    /unsaved change/.test(carriedAway), carriedAway);
   check("gallery edit: and brings its width and priority back with it",
-    carriedBack.src === "img/work/carried.png" && carriedBack.prefer === 3 &&
+    carriedBack.src === carriedSrc && carriedBack.prefer === 3 &&
     carriedBack.priority === 5 && carriedBack.caption === "Carried",
-    JSON.stringify(carriedBack));
+    JSON.stringify(carriedBack) + " wanted " + carriedSrc);
+  check("gallery edit: the photos added to the new section come back as previews",
+    carriedBack.sections === 2 && carriedBack.kept === "blob:,blob:",
+    JSON.stringify({ sections: carriedBack.sections, kept: carriedBack.kept }));
 
-  await evaluate(`window.edit.pending.clear(); window.edit()`);
+  // GT14. the editor off takes every piece of scaffolding with it.
+  const galOff = await evaluate(`(async () => {
+    window.edit();
+    await new Promise(r => setTimeout(r, 700));
+    return { pens: document.querySelectorAll('.ced-cappen').length,
+      bars: document.querySelectorAll('.gal-tile__ctl').length,
+      edit: document.querySelectorAll('.gal-tile--edit').length,
+      choose: document.querySelectorAll('.gal-tile__choose').length,
+      chips: document.querySelectorAll('.gal-tile__chip').length };
+  })()`, { awaitPromise: true });
+  check("gallery edit: the editor off leaves no pencil, bar or button on a tile",
+    galOff.pens === 0 && galOff.bars === 0 && galOff.edit === 0 &&
+    galOff.choose === 0 && galOff.chips === 0, JSON.stringify(galOff));
+
+  // GT15. ONE WAY IN. The drop-and-copy path and the region editor's image
+  // mode are gone, so the names that reached them are gone with them.
+  const galGone = await evaluate(`(() => {
+    const t = window.AMH.tool;
+    return { dropFiles: typeof t.dropFiles, addSlot: typeof t.addSlot,
+             openImage: typeof t.openImage, emptyTile: typeof t.emptyTile,
+             fromFile: typeof t.imageRegion.fromFile,
+             fromPhoto: typeof t.imageRegion.fromPhoto,
+             addPhoto: typeof t.addPhoto, moveOrphans: typeof t.moveOrphans,
+             rename: typeof window.AMH.images.rename };
+  })()`);
+  check("gallery edit: the older image path is gone from the kit, and the engine's is there",
+    galGone.dropFiles === "undefined" && galGone.addSlot === "undefined" &&
+    galGone.openImage === "undefined" && galGone.emptyTile === "undefined" &&
+    galGone.fromFile === "undefined" && galGone.fromPhoto === "function" &&
+    galGone.addPhoto === "function" && galGone.moveOrphans === "function" &&
+    galGone.rename === "function", JSON.stringify(galGone));
+
+  // GT16. the region editor edits a text region and nothing else. Its alt
+  // row, its source line and its Delete belonged to the image mode.
+  const galBox2 = await evaluate(`(async () => {
+    window.edit();
+    await new Promise(r => setTimeout(r, 600));
+    const chip = [...document.querySelectorAll('.ced-chip')]
+      .find(c => c.title === 'gallery-h2');
+    chip.click();
+    await new Promise(r => setTimeout(r, 400));
+    const m = document.querySelector('.ced-modal');
+    const out = {
+      open: !!m, tools: m ? m.querySelectorAll('.ced-tool').length : 0,
+      alt: !!(m && m.querySelector('.ced-modal__alt')),
+      src: !!(m && m.querySelector('.ced-modal__src')),
+      del: m ? [...m.querySelectorAll('.ced-modal__btns .ced-btn')]
+        .filter(b => b.textContent === 'Delete').length : -1,
+      image: !!(m && m.classList.contains('ced-modal--image'))
+    };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+    out.closed = !document.querySelector('.ced-modal');
+    window.edit();
+    await new Promise(r => setTimeout(r, 400));
+    return out;
+  })()`, { awaitPromise: true });
+  check("region editor: a text region's box carries no alt row, no source line and no Delete",
+    galBox2.open === true && galBox2.tools === 10 && galBox2.alt === false &&
+    galBox2.src === false && galBox2.del === 0 && galBox2.image === false &&
+    galBox2.closed === true, JSON.stringify(galBox2));
+
+  await evaluate(`window.edit.pending.clear()`);
   await sleep(400);
   await send("Emulation.clearDeviceMetricsOverride");
 
@@ -1323,23 +1947,29 @@ async function main() {
   check("gallery list: the packer takes a section it never saw at load",
     glNew.packed === true, JSON.stringify(glNew));
 
-  // GL6. a drop, then the export. THE DEFECT THIS PART EXISTS TO CLOSE:
-  // the region holds the band as well as the tiles, and a serializer that
-  // wrote only figures dropped the section's own title.
+  // GL6. a photograph added, then the export. THE DEFECT THIS PART EXISTS TO
+  // CLOSE: the region holds the band as well as the tiles, and a serializer
+  // that wrote only figures dropped the section's own title.
+  await evaluate(PHOTO_HELPER);
   const glDrop = await evaluate(`(async () => {
     const region = window.AMH.tool.regionFor("gal-br");
-    const cv = document.createElement('canvas');
-    cv.width = 1600; cv.height = 900;
-    cv.getContext('2d').fillRect(0, 0, 1600, 900);
-    const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
-    window.AMH.tool.dropFiles(region, [new File([blob], 'band.png', { type: 'image/png' })], 0);
-    await new Promise(r => setTimeout(r, 600));
-    const modal = document.querySelector('.ced-modal__x');
-    if (modal) modal.click();
+    const file = await window.__photo('band.png', 1600, 900, '#1a1c24');
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.querySelector('[data-section="br"] .gal-tile').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    for (let i = 0; i < 60 && !document.querySelector('.ced-addphoto .ced-photo'); i++) {
+      await new Promise(r => setTimeout(r, 150));
+    }
+    const next = document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent');
+    next.click();
+    await new Promise(r => setTimeout(r, 300));
+    next.click();
+    await new Promise(r => setTimeout(r, 700));
     return { model: region.model.length, count:
       document.querySelector('.gal-train__count').textContent };
   })()`, { awaitPromise: true });
-  check("gallery list: a drop replaces the seed set and the count follows it",
+  check("gallery list: a photo added replaces the seed set and the count follows it",
     glDrop.model === 1 && glDrop.count === "1 image", JSON.stringify(glDrop));
 
   const glOut = await evaluate(
@@ -1351,6 +1981,11 @@ async function main() {
     /<span class="gal-train__count">1 image<\/span>/.test(glBr) &&
     (glBr.match(/<figure/g) || []).length === 1,
     glBr.replace(/\s+/g, " ").slice(0, 200));
+  check("gallery list: the one figure carries the engine's markup contract",
+    /<img src="img\/work\/band-[a-z0-9]{6}\.jpg"/.test(glBr) &&
+    /srcset="img\/work\/band-[a-z0-9]{6}_sd\.webp 480w/.test(glBr) &&
+    /data-original="img\/work\/band-[a-z0-9]{6}_original\.png"/.test(glBr),
+    glBr.replace(/\s+/g, " ").slice(0, 320));
   check("gallery list: the exported band carries no number, because none is a value",
     /<i class="gal-train__i"><\/i>Project/.test(glBr) && !/>\s*0\d\s*\//.test(glBr),
     glBr.replace(/\s+/g, " ").slice(0, 140));
@@ -2067,34 +2702,13 @@ async function main() {
   // A carousel is edited through two boxes and three chips. (+) opens ADD
   // PHOTO, a wizard that changes nothing until its last step. IMG## opens
   // PHOTOS, where every change waits for Apply. The trash chip deletes the
-  // photo on screen once the reader says so. A photo is held by the editor as
-  // a web-ready JPG, and a save or an export writes it into img/work/.
+  // photo on screen once the reader says so. A photo goes through the image
+  // engine, which holds its three files until a save or an export writes
+  // them into img/work/.
   //
-  // The photos are drawn on a canvas, because a drop of made-up bytes is no
-  // longer enough: the editor decodes every file it is given.
-  const PHOTO_HELPER = `
-    window.__photo = function (name, w, h, color, type) {
-      var cv = document.createElement('canvas');
-      cv.width = w; cv.height = h;
-      var cx = cv.getContext('2d');
-      cx.fillStyle = color || '#2b6cb0'; cx.fillRect(0, 0, w, h);
-      cx.fillStyle = '#f2c14e'; cx.fillRect(w * .1, h * .2, w * .3, h * .5);
-      return new Promise(function (res) {
-        cv.toBlob(function (b) { res(new File([b], name, { type: type || 'image/png' })); },
-          type || 'image/png');
-      });
-    };
-    window.__choose = function (input, file) {
-      var dt = new DataTransfer();
-      dt.items.add(file);
-      input.files = dt.files;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    window.__dropOn = function (el, file) {
-      var dt = new DataTransfer();
-      dt.items.add(file);
-      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-    };`;
+  // A photo's name carries a hash of its bytes, so a check names a photo by
+  // the path the page gave it and tests the shape of that path.
+  //
   // A download captured with its name, because one page downloads as itself
   // and a page with a photo downloads as a zip.
   const DL_CAPTURE = `
@@ -2109,6 +2723,14 @@ async function main() {
       })).then(b64 => { window.__dl = { name: name, b64: b64 }; });
     };`;
   await evaluate(PHOTO_HELPER);
+  // img/work/<slug>-<six characters>.jpg, the display copy's path
+  const hashedPath = (slug) => new RegExp("^img/work/" + slug + "-[0-9a-z]{6}\\.jpg$");
+  // a photo's three files, from its display copy's path, sorted the way a
+  // save and a zip list them
+  const trio = (hd, originalExt) => {
+    const base = hd.replace(/\.jpg$/, "");
+    return [hd, base + "_original." + originalExt, base + "_sd.webp"];
+  };
   const FR3 = `document.querySelectorAll('.work .gallery')[0]`;
   const WIZ = `document.querySelector('.ced-addphoto')`;
   const NEXT = `document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent')`;
@@ -2134,7 +2756,7 @@ async function main() {
       steps: [...box.querySelectorAll('.ced-steps li')].map(li => li.textContent),
       now: box.querySelector('.ced-steps li.is-now').textContent,
       zone: !!box.querySelector('.ced-handoff__zone'),
-      choose: (box.querySelector('.ced-choose') || {}).textContent || '',
+      choose: (box.querySelector('.ced-handoff__zone .ced-choose') || {}).textContent || '',
       accept: box.querySelector('input[type=file]').accept,
       shown: btns.filter(b => !b.hidden).map(b => b.textContent),
       nextDead: btns.find(b => b.textContent === 'Next').disabled,
@@ -2144,10 +2766,10 @@ async function main() {
       btnRule: parseFloat(getComputedStyle(box.querySelector('.ced-modal__btns')).borderTopWidth),
       filled: btns.filter(b => getComputedStyle(b).backgroundColor === accent).map(b => b.textContent) };
   })()`);
-  check("photos: (+) opens ADD PHOTO on step 1, named for its carousel, with a drop zone and a Choose a file chip",
+  check("photos: (+) opens ADD PHOTO on step 1, named for its carousel, with a Choose a photo button inside its drop zone",
     ph1.there && ph1.tag === "ADD PHOTO" && ph1.name === "Forerunner 3" &&
     ph1.steps.join() === "1 Choose,2 Describe,3 Place" && ph1.now === "1 Choose" &&
-    ph1.zone && ph1.choose === "Choose a file" && /image\/jpeg/.test(ph1.accept) &&
+    ph1.zone && ph1.choose === "Choose a photo" && /image\/jpeg/.test(ph1.accept) &&
     ph1.x && ph1.scrim,
     JSON.stringify(ph1));
   check("photos: step 1 offers Cancel and a Next that waits for a photo, in the shared frame",
@@ -2176,7 +2798,7 @@ async function main() {
     new File(['not a photo'], 'notes.txt', { type: 'text/plain' }))`);
   const ph2 = await waitFor(`(function () {
     var b = ${WIZ}, s = b ? b.querySelector('.ced-modal__status').textContent : '';
-    return /JPG, PNG and WebP/.test(s) ? { status: s, now: b.querySelector('.ced-steps li.is-now').textContent,
+    return /JPG, PNG, WebP and GIF/.test(s) ? { status: s, now: b.querySelector('.ced-steps li.is-now').textContent,
       nextDead: ${NEXT}.disabled } : null;
   })()`);
   check("photos: a file that is not a photo stays on step 1, and the box says why",
@@ -2191,14 +2813,14 @@ async function main() {
     var b = ${WIZ};
     var ins = b.querySelectorAll('.ced-describe .ced-field input');
     return { now: b.querySelector('.ced-steps li.is-now').textContent,
-      pic: b.querySelector('.ced-describe__pic img').src.slice(0, 5),
-      size: b.querySelector('.ced-describe__size').textContent,
+      pic: b.querySelector('.ced-describe .ced-photo__pic').src.slice(0, 5),
+      size: b.querySelector('.ced-describe .ced-photo__facts').textContent,
       caption: ins[0].value, alt: ins[1].value,
       back: [...b.querySelectorAll('.ced-modal__btns .ced-btn')].some(x => x.textContent === 'Back' && !x.hidden),
       status: b.querySelector('.ced-modal__status').textContent };
   })()`);
-  check("photos: a chosen file moves to step 2 as a web-ready copy, 1600px on its long edge, alt from its name",
-    ph3.now === "2 Describe" && ph3.pic === "blob:" && /^1600 x 800 /.test(ph3.size) &&
+  check("photos: a chosen file moves to step 2 as its display copy, 1920px on its long edge, alt from its name",
+    ph3.now === "2 Describe" && ph3.pic === "blob:" && /^1920 x 960 /.test(ph3.size) &&
     ph3.caption === "" && ph3.alt === "Hangar Bay 01" && ph3.back && ph3.status === "",
     JSON.stringify(ph3));
 
@@ -2222,9 +2844,10 @@ async function main() {
   })()`);
   check("photos: step 3 says the first photo replaces the placeholders, names its file, and still changes nothing",
     ph4.now === "3 Place" && /first photo/.test(ph4.ask) && /placeholder/.test(ph4.ask) &&
-    ph4.pics === 1 && ph4.moves === true && ph4.file === "img/work/hangar-bay-01.jpg" &&
+    ph4.pics === 1 && ph4.moves === true && hashedPath("hangar-bay-01").test(ph4.file) &&
     ph4.next === "Add photo" && ph4.stage === ph0.stage,
     JSON.stringify(ph4));
+  const HANGAR = ph4.file;
   await evaluate(`${NEXT}.click()`);
   await sleep(500);
   const ph5 = await evaluate(`(function () {
@@ -2239,29 +2862,36 @@ async function main() {
         .gallery || {})['fr3-gallery'] };
   })()`);
   check("photos: Add photo puts it in the carousel in place of the seeds, captioned",
-    ph5.box === false && ph5.model.join() === "img/work/hangar-bay-01.jpg" && ph5.stage === 1 &&
+    ph5.box === false && ph5.model.join() === HANGAR && ph5.stage === 1 &&
     ph5.cap === "Live capture of the real UI" && ph5.alt === "Forerunner 3 real interface" &&
     ph5.shown === "blob:" && /^IMG\d\d$/.test(ph5.chip),
     JSON.stringify(ph5));
-  check("photos: the editor holds it as a JPG at 1600 x 800, and the edit waits to be saved",
-    ph5.held.length === 1 && ph5.held[0].src === "img/work/hangar-bay-01.jpg" &&
-    ph5.held[0].type === "image/jpeg" && ph5.held[0].w === 1600 && ph5.held[0].h === 800 &&
+  check("photos: the engine holds its three files, 1920 x 960, 480 x 240 and the 2400 x 1200 PNG, and the edit waits",
+    ph5.held.length === 1 && ph5.held[0].src === HANGAR &&
+    ph5.held[0].w === 1920 && ph5.held[0].h === 960 && ph5.held[0].sdw === 480 && ph5.held[0].sdh === 240 &&
+    ph5.held[0].ow === 2400 && ph5.held[0].oh === 1200 && ph5.held[0].type === "png" &&
+    JSON.stringify(Object.values(ph5.held[0].files).sort()) === JSON.stringify(trio(HANGAR, "png")) &&
     ph5.held[0].saved === false && ph5.waiting === true,
     JSON.stringify({ held: ph5.held, waiting: ph5.waiting }));
   check("photos: the trash chip shows once a real photo is on screen", ph5.trash === "", "display=" + ph5.trash);
   const ph5b = await evaluate(`AMH.tool.photoFiles(['index.html']).then(function (m) {
-    return Object.keys(m).map(function (k) { var b = m[k]; return [k, b[0], b[1], b[2], b.length]; });
+    return Object.keys(m).sort().map(function (k) {
+      var b = m[k];
+      return [k, String.fromCharCode.apply(null, Array.from(b.slice(0, 12))), b[0], b[1], b.length];
+    });
   })`, { awaitPromise: true });
-  check("photos: the bytes a save would write are a JPEG, at the path the page points to",
-    ph5b.length === 1 && ph5b[0][0] === "img/work/hangar-bay-01.jpg" &&
-    ph5b[0][1] === 0xFF && ph5b[0][2] === 0xD8 && ph5b[0][3] === 0xFF && ph5b[0][4] > 1000,
-    JSON.stringify(ph5b));
+  check("photos: a save would write three files, a JPEG, the PNG original and a WebP, at the page's paths",
+    ph5b.length === 3 && JSON.stringify(ph5b.map((f) => f[0])) === JSON.stringify(trio(HANGAR, "png")) &&
+    ph5b[0][2] === 0xFF && ph5b[0][3] === 0xD8 && ph5b[0][4] > 1000 &&
+    ph5b[1][1].slice(1, 4) === "PNG" &&
+    ph5b[2][1].slice(0, 4) === "RIFF" && ph5b[2][1].slice(8, 12) === "WEBP",
+    JSON.stringify(ph5b.map((f) => [f[0], f[4]])));
 
   // PH6. a drop opens the wizard on its file; a taken name gets a number
   await evaluate(`window.__photo('hangar-bay-01.png', 800, 1000, '#7a3b8f').then(function (f) {
     window.__dropOn(${FR3}.querySelector('.gallery__holder'), f); })`, { awaitPromise: true });
   await waitFor(onStep("2 Describe"));
-  const ph6 = await evaluate(`(${WIZ} ? ${WIZ}.querySelector('.ced-describe__size').textContent : 'no wizard')`);
+  const ph6 = await evaluate(`(${WIZ} ? ${WIZ}.querySelector('.ced-describe .ced-photo__facts').textContent : 'no wizard')`);
   check("photos: a file dropped on a carousel opens the wizard on that file, and a smaller photo keeps its size",
     /^800 x 1000 /.test(ph6), ph6);
   await evaluate(`${NEXT}.click()`);
@@ -2272,9 +2902,11 @@ async function main() {
       last: b.querySelectorAll('.ced-place__pic')[1].classList.contains('is-new'),
       file: b.querySelector('.ced-hint code').textContent };
   })()`);
-  check("photos: a photo goes last unless it is placed, and a name in use gets a number instead of an overwrite",
-    ph6a.at === "Photo 2 of 2" && ph6a.last && ph6a.file === "img/work/hangar-bay-01-2.jpg",
-    JSON.stringify(ph6a));
+  check("photos: a photo goes last unless it is placed, and a different file with the same name gets its own hash",
+    ph6a.at === "Photo 2 of 2" && ph6a.last && hashedPath("hangar-bay-01").test(ph6a.file) &&
+    ph6a.file !== HANGAR,
+    JSON.stringify({ place: ph6a, first: HANGAR }));
+  const HANGAR2 = ph6a.file;
   await evaluate(`[...${WIZ}.querySelectorAll('.ced-place__move')].find(x => x.textContent === 'Earlier').click()`);
   await sleep(150);
   const ph6b = await evaluate(`(function () {
@@ -2291,7 +2923,7 @@ async function main() {
   await sleep(500);
   check("photos: the placed photo lands first in the carousel",
     (await evaluate(`AMH.tool.regionFor('fr3-gallery').model.map(e => e.src).join()`)) ===
-      "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg");
+      HANGAR2 + "," + HANGAR);
 
   // PH7. PHOTOS: one row a photo; changes wait for Apply; Cancel asks first
   await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
@@ -2313,7 +2945,7 @@ async function main() {
   })()`);
   check("photos: IMG## opens PHOTOS, one row for each photo, in the carousel's order",
     ph7.there && ph7.tag === "PHOTOS" && ph7.name === "Forerunner 3" &&
-    ph7.files.join() === "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg" &&
+    ph7.files.join() === HANGAR2 + "," + HANGAR &&
     ph7.caps[1] === "Live capture of the real UI" && ph7.headRule >= 1 && ph7.btnRule >= 1,
     JSON.stringify(ph7));
   check("photos: each row moves, replaces and deletes, and the box adds, cancels and applies",
@@ -2332,8 +2964,8 @@ async function main() {
     rows: [...document.querySelectorAll('.ced-photos .ced-photo__file')].map(f => f.textContent),
     carousel: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src) })`);
   check("photos: a move waits in the box, and the carousel keeps its order until Apply",
-    ph7m.rows.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg" &&
-    ph7m.carousel.join() === "img/work/hangar-bay-01-2.jpg,img/work/hangar-bay-01.jpg",
+    ph7m.rows.join() === HANGAR + "," + HANGAR2 &&
+    ph7m.carousel.join() === HANGAR2 + "," + HANGAR,
     JSON.stringify(ph7m));
   await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
     .find(x => x.textContent === 'Cancel').click()`);
@@ -2363,8 +2995,8 @@ async function main() {
   })()`);
   check("photos: Keep editing keeps the box, and Apply writes the order and the caption together",
     ph7a.box === false && ph7a.ask === false && ph7a.scrim === false &&
-    ph7a.model.join() === "img/work/hangar-bay-01.jpg|Live capture of the real UI," +
-      "img/work/hangar-bay-01-2.jpg|Moved behind the first" &&
+    ph7a.model.join() === HANGAR + "|Live capture of the real UI," +
+      HANGAR2 + "|Moved behind the first" &&
     ph7a.stage.join() === "Live capture of the real UI,Moved behind the first",
     JSON.stringify(ph7a));
 
@@ -2382,7 +3014,7 @@ async function main() {
       cap: r.querySelector('input').value, pic: r.querySelector('.ced-photo__pic').src.slice(0, 5) } : null;
   })()`);
   check("photos: Replace takes a new file for a row, keeps its caption, and marks the row",
-    !!ph8 && ph8.tag === "REPLACED" && ph8.file === "img/work/night-pass.jpg" &&
+    !!ph8 && ph8.tag === "REPLACED" && hashedPath("night-pass").test(ph8.file) &&
     ph8.cap === "Moved behind the first" && ph8.pic === "blob:",
     JSON.stringify(ph8));
   await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
@@ -2394,7 +3026,7 @@ async function main() {
     model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src) })`);
   check("photos: Discard changes closes the box, and the carousel keeps the photos it had",
     ph8d.box === false && ph8d.ask === false &&
-    ph8d.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg",
+    ph8d.model.join() === HANGAR + "," + HANGAR2,
     JSON.stringify(ph8d));
 
   // PH8b. Add a photo from inside PHOTOS goes into the box's list, and only
@@ -2422,17 +3054,19 @@ async function main() {
   })()`);
   check("photos: Add a photo inside PHOTOS places among the box's rows, and adds a row marked NEW, not a photo",
     ph8p.pics === 3 && ph8p.at === "Photo 3 of 3" && ph8a.wizard === false && ph8a.photos === true &&
-    ph8a.files.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg,img/work/draft-frame.jpg" &&
+    ph8a.files.length === 3 && ph8a.files[0] === HANGAR && ph8a.files[1] === HANGAR2 &&
+    hashedPath("draft-frame").test(ph8a.files[2]) &&
     ph8a.tag === "NEW" && ph8a.carousel === 2,
     JSON.stringify({ place: ph8p, box: ph8a }));
+  const DRAFT = ph8a.files[2];
   await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
     .find(x => x.textContent === 'Apply').click()`);
   await sleep(500);
   const ph8ap = await evaluate(`({ model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src),
     held: AMH.tool.photos().map(p => p.src) })`);
   check("photos: Apply puts the new row's photo in the carousel, and the editor holds it",
-    ph8ap.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg,img/work/draft-frame.jpg" &&
-    ph8ap.held.indexOf("img/work/draft-frame.jpg") !== -1,
+    ph8ap.model.join() === [HANGAR, HANGAR2, DRAFT].join() &&
+    ph8ap.held.indexOf(DRAFT) !== -1,
     JSON.stringify(ph8ap));
   await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
   await sleep(300);
@@ -2455,8 +3089,8 @@ async function main() {
     JSON.stringify({ lines: ph8t, rows: ph8r }));
   check("photos: Apply then takes the photo off the page, and the editor lets it go",
     ph8ad.box === false &&
-    ph8ad.model.join() === "img/work/hangar-bay-01.jpg,img/work/hangar-bay-01-2.jpg" &&
-    ph8ad.held.indexOf("img/work/draft-frame.jpg") === -1,
+    ph8ad.model.join() === HANGAR + "," + HANGAR2 &&
+    ph8ad.held.indexOf(DRAFT) === -1,
     JSON.stringify(ph8ad));
 
   // PH8c. the project form's Images view shows the photos and opens the same boxes
@@ -2509,7 +3143,7 @@ async function main() {
   })()`);
   check("photos: the trash chip asks first, with a picture of the photo on screen and its file",
     ph9.there && ph9.tag === "DELETE" && ph9.title === "Delete this photo?" && ph9.role === "alertdialog" &&
-    ph9.thumb === "blob:" && ph9.code === "img/work/hangar-bay-01.jpg" &&
+    ph9.thumb === "blob:" && ph9.code === HANGAR &&
     ph9.lines.join("|") === "Caption: Live capture of the real UI",
     JSON.stringify(ph9));
   check("photos: the ask wears the shared frame, fills its move orange, and puts the focus on Cancel",
@@ -2528,8 +3162,8 @@ async function main() {
     stage: ${FR3}.querySelectorAll('.gallery__stage img').length,
     held: AMH.tool.photos().map(p => p.src) })`);
   check("photos: Delete photo takes the photo on screen, and the editor lets go of its bytes",
-    ph9d.model.join() === "img/work/hangar-bay-01-2.jpg" && ph9d.stage === 1 &&
-    ph9d.held.join() === "img/work/hangar-bay-01-2.jpg",
+    ph9d.model.join() === HANGAR2 && ph9d.stage === 1 &&
+    ph9d.held.join() === HANGAR2,
     JSON.stringify(ph9d));
 
   // PH10. Export: the page and the photo it shows, in one zip laid out as the repo is
@@ -2537,22 +3171,31 @@ async function main() {
   const dl2 = await waitFor(`window.__dl`, 12000);
   const zip2 = dl2 && dl2.name === "publish.zip" ? unzipStore(Buffer.from(dl2.b64, "base64")) : {};
   const exported2 = zip2["index.html"] ? zip2["index.html"].toString("utf8") : "";
-  const jpg2 = zip2["img/work/hangar-bay-01-2.jpg"];
-  check("photos: Export downloads one zip holding the page and the photo it shows",
+  const jpg2 = zip2[HANGAR2];
+  check("photos: Export downloads one zip holding the page and the three files of the photo it shows",
     !!dl2 && dl2.name === "publish.zip" &&
-    Object.keys(zip2).sort().join() === "img/work/hangar-bay-01-2.jpg,index.html" &&
+    Object.keys(zip2).sort().join() === trio(HANGAR2, "png").concat("index.html").join() &&
     !!jpg2 && jpg2[0] === 0xFF && jpg2[1] === 0xD8,
     JSON.stringify({ name: dl2 && dl2.name, files: Object.keys(zip2) }));
   if (exported2) {
     const galA = exported2.indexOf("<!--[edit:fr3-gallery]-->");
     const galB = exported2.indexOf("<!--[/edit:fr3-gallery]-->");
     const galSpan = exported2.slice(galA, galB);
+    const [, orig2, sd2] = trio(HANGAR2, "png");
     check("photos: the exported gallery points at the photo, with its caption and alt, and no seed",
-      galSpan.includes('src="img/work/hangar-bay-01-2.jpg"') &&
+      galSpan.includes('src="' + HANGAR2 + '"') &&
       galSpan.includes('data-caption="Moved behind the first"') &&
       galSpan.includes('alt="hangar bay 01"') &&
       !galSpan.includes("img/seed/") && !galSpan.includes("blob:"),
       galSpan.replace(/\s+/g, " ").slice(0, 160));
+    // The 800 x 1000 photo keeps its size, so its small copy is 384 x 480.
+    check("photos: the exported photo carries the markup contract: srcset, sizes, width, height, data-sd and its original",
+      galSpan.includes('srcset="' + sd2 + ' 384w, ' + HANGAR2 + ' 800w"') &&
+      galSpan.includes('sizes="(max-width: 880px) 84vw, (max-width: 1180px) 48vw, 562px"') &&
+      galSpan.includes('width="800"') && galSpan.includes('height="1000"') &&
+      galSpan.includes('data-sd="' + sd2 + '"') && galSpan.includes('data-original="' + orig2 + '"') &&
+      galSpan.includes('data-original-bytes="' + zip2[orig2].length + '"'),
+      galSpan.replace(/\s+/g, " ").slice(0, 420));
     const exact2 = exportIsByteExact("index.html", exported2, ["hero-h1", "fr3-gallery"]);
     check("gallery export: byte-identical outside edited regions", exact2.ok, exact2.detail);
   }
@@ -2663,9 +3306,22 @@ async function main() {
   })`);
   check("photos: the drawer's (+) opens the wizard for the deep dive's own carousel",
     ddWiz === "Forerunner 3 deep dive", ddWiz);
-  check("photos: a name a discarded photo held is free again", ddFile === "img/work/night-pass.jpg", ddFile);
-  check("dd add updates the template with the img/work path",
-    dd1.tplSrc === "img/work/night-pass.jpg" && dd1.tplImgs === 1 && dd1.box === false, JSON.stringify(dd1));
+  // The replacement PH8 discarded had the same file name and other bytes.
+  check("photos: a photo is named from its file and its bytes, so another file of the same name is another photo",
+    hashedPath("night-pass").test(ddFile) && ddFile !== ph8.file, ddFile + " vs " + ph8.file);
+  check("dd add updates the template with the photo's paths",
+    dd1.tplSrc === ddFile && dd1.tplImgs === 1 && dd1.box === false, JSON.stringify(dd1));
+  const ddTpl = await evaluate(`(function () {
+    var im = document.querySelectorAll('template.deepdive')[0].content.querySelector('.gallery img');
+    return { srcset: im.getAttribute('srcset'), sizes: im.getAttribute('sizes'),
+      sd: im.getAttribute('data-sd'), original: im.getAttribute('data-original'),
+      w: im.getAttribute('width'), h: im.getAttribute('height') };
+  })()`);
+  check("photos: the deep dive's template writes the markup contract, with the drawer's own sizes",
+    ddTpl.srcset === trio(ddFile, "png")[2] + " 480w, " + ddFile + " 1600w" &&
+    ddTpl.sizes === "(max-width: 560px) 84vw, 460px" && ddTpl.sd === trio(ddFile, "png")[2] &&
+    ddTpl.original === trio(ddFile, "png")[1] && ddTpl.w === "1600" && ddTpl.h === "900",
+    JSON.stringify(ddTpl));
   check("dd add previews live in the drawer", dd1.drawerSrc.startsWith("blob:"), dd1.drawerSrc.slice(0, 24));
   // THE TEXT HALF IS NOT EDITED IN THE RAW BOX ANY MORE. Part 4 made the
   // drawer follow the Markdown the template carries, so the panel row opens
@@ -2697,7 +3353,8 @@ async function main() {
   const exported3 = zip3["index.html"] ? zip3["index.html"].toString("utf8") : null;
   check("nested export produced the page and both held photos",
     !!exported3 &&
-    Object.keys(zip3).sort().join() === "img/work/hangar-bay-01-2.jpg,img/work/night-pass.jpg,index.html",
+    Object.keys(zip3).sort().join() ===
+      trio(HANGAR2, "png").concat(trio(ddFile, "png"), "index.html").sort().join(),
     JSON.stringify(Object.keys(zip3)));
   if (exported3) {
     const ddA = exported3.indexOf("<!--[edit:fr3-deepdive]-->");
@@ -2705,7 +3362,7 @@ async function main() {
     const ddSpan = exported3.slice(ddA, ddB);
     check("deepdive span carries the text edit AND the dd image",
       ddSpan.includes("TESTEDDD built") &&
-      ddSpan.includes('src="img/work/night-pass.jpg"') &&
+      ddSpan.includes('src="' + ddFile + '"') &&
       ddSpan.includes('data-caption="Real orbital scene"'),
       ddSpan.replace(/\s+/g, " ").slice(0, 120));
     const exact3 = exportIsByteExact("index.html", exported3,
@@ -2790,7 +3447,7 @@ async function main() {
     g8.stage === 3 && g8.firstSrc.includes("img/seed/") && g8.trash === "none",
     JSON.stringify(g8));
   check("photos: the editor still holds the deep dive's photo, and no longer the one that left",
-    g8.held.join() === "img/work/night-pass.jpg", JSON.stringify(g8.held));
+    g8.held.join() === ddFile, JSON.stringify(g8.held));
 
   // 9. revertAll (confirm auto-accepted)
   await evaluate(`window.edit.revertAll()`);
@@ -3320,16 +3977,20 @@ async function main() {
   // is stubbed and everything above it is the real path: the root check, the
   // permission, the writer, and the record the panel reads.
 
-  // A folder that can be written into, and a note of what landed in it.
+  // A folder that can be written into, listed and emptied, and a note of what
+  // landed in it.
   const FAKE_REPO = `(function () {
     window.__wrote = {};
     /* a photo is not text, so its length and first bytes are kept as numbers */
     window.__wroteBytes = {};
+    /* the bytes as written, so a file read back is the file that was written */
+    var raw = {};
     function fileH(name, seed) {
       return { kind: "file", name: name,
         getFile: function () {
-          return Promise.resolve(new File([window.__wrote[name] !== undefined
-            ? window.__wrote[name] : (seed || "")], name, { type: "text/html" }));
+          var body = raw[name] !== undefined ? raw[name]
+            : (window.__wrote[name] !== undefined ? window.__wrote[name] : (seed || ""));
+          return Promise.resolve(new File([body], name, { type: "text/html" }));
         },
         createWritable: function () {
           return Promise.resolve({
@@ -3337,6 +3998,7 @@ async function main() {
               window.__wrote[name] = typeof bytes === "string" ? bytes
                 : new TextDecoder().decode(bytes);
               if (typeof bytes !== "string") {
+                raw[name] = bytes;
                 window.__wroteBytes[name] = [bytes.length, bytes[0], bytes[1], bytes[2]];
               }
               return Promise.resolve();
@@ -3347,6 +4009,9 @@ async function main() {
     }
     var files = {};
     var dirs = {};
+    /* a file put into the folder by hand, and every path the folder holds */
+    window.__putFile = function (path, text) { files[path] = fileH(path, text); };
+    window.__folder = function () { return Object.keys(files).sort(); };
     function dirH(prefix) {
       return {
         kind: "directory",
@@ -3359,13 +4024,34 @@ async function main() {
         getFileHandle: function (n, opts) {
           var key = prefix + n;
           if (!files[key]) {
-            /* the two marks that say a folder is this site's root */
-            if (n === "index.html" || n === "blog.html") files[key] = fileH(key, "<html>root</html>");
-            else if (!opts || !opts.create) {
+            /* the two marks that say a folder is this site's root, and the
+               third managed page, which a save reads back */
+            if (n === "index.html" || n === "blog.html" || n === "gallery.html") {
+              files[key] = fileH(key, "<html>root</html>");
+            } else if (!opts || !opts.create) {
               return Promise.reject(new DOMException("no " + n, "NotFoundError"));
             } else files[key] = fileH(key, "");
           }
           return Promise.resolve(files[key]);
+        },
+        /* the files directly inside this folder, one at a time */
+        values: function () {
+          var inside = Object.keys(files).filter(function (k) {
+            return k.indexOf(prefix) === 0 && k.slice(prefix.length).indexOf("/") === -1;
+          }).sort().map(function (k) { return { kind: "file", name: k.slice(prefix.length) }; });
+          var i = 0;
+          return { next: function () {
+            return Promise.resolve(i < inside.length ? { done: false, value: inside[i++] }
+              : { done: true, value: undefined });
+          } };
+        },
+        removeEntry: function (n) {
+          var key = prefix + n;
+          delete files[key];
+          delete raw[key];
+          delete window.__wrote[key];
+          delete window.__wroteBytes[key];
+          return Promise.resolve();
         }
       };
     }
@@ -3646,9 +4332,12 @@ async function main() {
   const psAway = await evaluate(`AMH.tool.photoFiles(['index.html']).then(function (m) {
     return Object.keys(m).map(function (k) { return [k, m[k][0], m[k][1], m[k].length]; });
   })`, { awaitPromise: true });
-  check("photos: a held photo is still bytes from another page, ready for a save made there",
-    psHere.model.join() === "img/work/carried-frame.jpg" && psAway.length === 1 &&
-    psAway[0][0] === "img/work/carried-frame.jpg" && psAway[0][1] === 0xFF && psAway[0][2] === 0xD8,
+  const CARRIED = psHere.model[0] || "";
+  psAway.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  check("photos: a held photo is still its three files from another page, ready for a save made there",
+    hashedPath("carried-frame").test(CARRIED) && psHere.model.length === 1 &&
+    JSON.stringify(psAway.map((f) => f[0])) === JSON.stringify(trio(CARRIED, "png")) &&
+    psAway[0][1] === 0xFF && psAway[0][2] === 0xD8,
     JSON.stringify({ here: psHere, away: psAway }));
   await send("Page.navigate", { url: PAGE });
   await waitLoaded();
@@ -3660,8 +4349,8 @@ async function main() {
       ? { src: en.src, held: AMH.tool.photos().map(p => p.src) } : null;
   })()`, 8000);
   check("photos: back on its page, the carousel shows the held photo again, not a missing file",
-    !!psBack && psBack.src === "img/work/carried-frame.jpg" &&
-    psBack.held.join() === "img/work/carried-frame.jpg",
+    !!psBack && psBack.src === CARRIED &&
+    psBack.held.join() === CARRIED,
     JSON.stringify(psBack));
   await evaluate(FAKE_REPO);
   await evaluate(`window.edit()`);
@@ -3669,14 +4358,14 @@ async function main() {
   await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
   const psSaved = await waitFor(`document.querySelector('.ced-saved') ? {
     wrote: Object.keys(window.__wrote).sort(),
-    bytes: window.__wroteBytes['img/work/carried-frame.jpg'] || null,
+    bytes: window.__wroteBytes[${JSON.stringify(CARRIED)}] || null,
     files: [...document.querySelectorAll('.ced-saved__file')].map(li => li.textContent),
     lead: document.querySelector('.ced-saved__body p').textContent,
     held: AMH.tool.photos() } : null`, 10000);
-  check("photos: Save to repo writes the held photo into img/work/ beside its page, and the box lists both",
-    !!psSaved && psSaved.wrote.join() === "img/work/carried-frame.jpg,index.html" &&
-    psSaved.files.join() === "img/work/carried-frame.jpg,index.html" &&
-    /2 files were written/.test(psSaved.lead),
+  check("photos: Save to repo writes the photo's three files into img/work/ beside its page, and the box lists all four",
+    !!psSaved && psSaved.wrote.join() === trio(CARRIED, "png").concat("index.html").join() &&
+    psSaved.files.join() === trio(CARRIED, "png").concat("index.html").join() &&
+    /4 files were written/.test(psSaved.lead),
     JSON.stringify(psSaved));
   check("photos: what lands in img/work/ is the JPEG, and the editor marks the photo saved",
     !!psSaved && !!psSaved.bytes && psSaved.bytes[0] > 1000 &&
@@ -3695,6 +4384,754 @@ async function main() {
   await evaluate(`window.showDirectoryPicker = window.__realPicker;
     window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
   await sleep(400);
+
+  // ============ EN. THE IMAGE ENGINE ============
+  // imagesengine.js makes three files of every upload, holds them until a
+  // save, cuts the metadata out of the original, and names each photo by its
+  // bytes. These checks drive AMH.images with the page as the browser that
+  // decodes and encodes, and with fixtures built here, byte by byte.
+  await send("Page.navigate", { url: PAGE });
+  await waitLoaded();
+  await sleep(1200);
+  await evaluate(PHOTO_HELPER);
+
+  // EN1. a PNG wider than the display copy
+  const en1 = await evaluate(`window.__photo('Engine Test.png', 2400, 1200).then(function (f) {
+    return AMH.images.intake(f).then(function (p) {
+      function head(blob, n) {
+        return blob.arrayBuffer().then(function (b) { return Array.from(new Uint8Array(b).slice(0, n)); });
+      }
+      function size(blob) {
+        return createImageBitmap(blob).then(function (bm) { var s = [bm.width, bm.height]; bm.close(); return s; });
+      }
+      return Promise.all([head(p.blobs.sd, 12), head(p.blobs.hd, 3), head(p.blobs.original, 8),
+                          size(p.blobs.sd), size(p.blobs.hd)]).then(function (r) {
+        var out = { files: p.files, sdType: p.blobs.sd.type, hdType: p.blobs.hd.type,
+          sdHead: String.fromCharCode.apply(null, r[0]), hdHead: r[1], origHead: r[2],
+          sdSize: r[3], hdSize: r[4], bytes: p.bytes, fileBytes: f.size, overLimit: p.overLimit };
+        AMH.images.letGo(p);
+        return out;
+      });
+    });
+  })`, { awaitPromise: true });
+  check("engine: a 2400 x 1200 PNG becomes three files named from it: _sd.webp, .jpg and _original.png",
+    /^img\/work\/engine-test-[0-9a-z]{6}_sd\.webp$/.test(en1.files.sd) &&
+    en1.files.hd === en1.files.sd.replace("_sd.webp", ".jpg") &&
+    en1.files.original === en1.files.sd.replace("_sd.webp", "_original.png"),
+    JSON.stringify(en1.files));
+  check("engine: the small copy is a 480 x 240 WebP and the display copy a 1920 x 960 JPEG",
+    en1.sdType === "image/webp" && en1.sdHead.slice(0, 4) === "RIFF" && en1.sdHead.slice(8) === "WEBP" &&
+    en1.sdSize.join("x") === "480x240" && en1.hdType === "image/jpeg" &&
+    en1.hdHead.join() === "255,216,255" && en1.hdSize.join("x") === "1920x960",
+    JSON.stringify({ sd: [en1.sdType, en1.sdSize], hd: [en1.hdType, en1.hdHead, en1.hdSize] }));
+  check("engine: the original is the PNG, and a canvas PNG has no metadata to cut",
+    en1.origHead.join() === "137,80,78,71,13,10,26,10" && en1.bytes === en1.fileBytes && en1.overLimit === false,
+    "bytes=" + en1.bytes + " file=" + en1.fileBytes);
+
+  // EN2. a photo smaller than the display copy is never made larger
+  const en2 = await evaluate(`window.__photo('Small Frame.png', 1200, 800).then(function (f) {
+    return AMH.images.intake(f);
+  }).then(function (p) {
+    var out = { w: p.w, h: p.h, sdw: p.sdw, sdh: p.sdh };
+    AMH.images.letGo(p);
+    return out;
+  })`, { awaitPromise: true });
+  check("engine: a 1200 x 800 photo keeps its size in the display copy, and only the small copy shrinks",
+    en2.w === 1200 && en2.h === 800 && en2.sdw === 480 && en2.sdh === 320, JSON.stringify(en2));
+
+  // EN3. one file is one name; another file of the same name is another name
+  const en3 = await evaluate(`window.__photo('Twice.png', 640, 480, '#335577').then(function (f) {
+    return Promise.all([AMH.images.intake(f), AMH.images.intake(f)]);
+  }).then(function (two) {
+    AMH.images.hold(two[0]);
+    AMH.images.hold(two[1]);
+    return AMH.images.files([two[0].base, two[1].base]).then(function (files) {
+      return window.__photo('Twice.png', 640, 480, '#775533').then(function (g) {
+        return AMH.images.intake(g);
+      }).then(function (other) {
+        var out = { a: two[0].base, b: two[1].base, files: Object.keys(files).length,
+          held: AMH.images.list().filter(function (p) { return p.base === two[0].base; }).length,
+          other: other.base };
+        AMH.images.letGo(other);
+        AMH.images.prune({});
+        return out;
+      });
+    });
+  })`, { awaitPromise: true });
+  check("engine: the same file twice gets one name and one set of files; another file of that name, another hash",
+    /^img\/work\/twice-[0-9a-z]{6}$/.test(en3.a) && en3.a === en3.b && en3.files === 3 && en3.held === 1 &&
+    /^img\/work\/twice-[0-9a-z]{6}$/.test(en3.other) && en3.other !== en3.a,
+    JSON.stringify(en3));
+
+  // Fixture bytes. A TIFF block holds Orientation, a camera Make, and a GPS
+  // directory with one entry, which is what a phone writes.
+  const b16 = (n) => [(n >> 8) & 255, n & 255];
+  const b32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const chars = (s) => [...s].map((c) => c.charCodeAt(0));
+  const exifTiff = (orientation) => [...chars("MM"), 0, 42, ...b32(8), ...b16(3),
+    ...b16(0x0112), ...b16(3), ...b32(1), ...b16(orientation), 0, 0,
+    ...b16(0x010F), ...b16(2), ...b32(4), ...chars("ACM"), 0,
+    ...b16(0x8825), ...b16(4), ...b32(1), ...b32(50), ...b32(0),
+    ...b16(1), ...b16(1), ...b16(2), ...b32(2), ...chars("N"), 0, 0, 0, ...b32(0)];
+  const jpgSegment = (marker, payload) => [0xFF, marker, ...b16(payload.length + 2), ...payload];
+  const crcOf = (bytes) => {
+    let c = 0xFFFFFFFF;
+    for (const x of bytes) {
+      c ^= x;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  };
+  const pngChunk = (type, data) =>
+    [...b32(data.length), ...chars(type), ...data, ...b32(crcOf([...chars(type), ...data]))];
+
+  // EN4. a phone JPG: turned on its side, located, and carrying a colour profile
+  const ICC_SEGMENT = jpgSegment(0xE2, [...chars("ICC_PROFILE"), 0, 1, 1, ...chars("a profile the cut keeps")]);
+  const seedJpg = readFileSync(join(REPO, "img/seed/forerunner-01.jpg"));
+  const phoneJpg = Buffer.from([0xFF, 0xD8, ...jpgSegment(0xE1, [...chars("Exif"), 0, 0, ...exifTiff(6)]),
+    ...ICC_SEGMENT, ...seedJpg.subarray(2)]);
+  const en4 = await evaluate(`(function () {
+    var bytes = Uint8Array.from(atob(${JSON.stringify(phoneJpg.toString("base64"))}),
+      function (c) { return c.charCodeAt(0); });
+    return AMH.images.intake(new File([bytes], 'IMG_2041.jpg', { type: 'image/jpeg' })).then(function (p) {
+      return p.blobs.original.arrayBuffer().then(function (buf) {
+        var o = new Uint8Array(buf);
+        var sos = 2;
+        while (sos < o.length - 1 && !(o[sos] === 0xFF && o[sos + 1] === 0xDA)) sos++;
+        var out = { w: p.w, h: p.h, meta: p.meta, head: Array.from(o.slice(0, sos)) };
+        AMH.images.letGo(p);
+        return out;
+      });
+    });
+  })()`, { awaitPromise: true });
+  const en4Head = Buffer.from(en4.head || []);
+  check("engine: a phone JPG's original loses its GPS and its camera, and says it had a location",
+    en4Head.length > 0 && en4Head.indexOf(Buffer.from([0x88, 0x25])) === -1 &&
+    en4Head.indexOf(Buffer.from(chars("ACM"))) === -1 &&
+    en4.meta.location === true && en4.meta.camera === true && en4.meta.kept === false,
+    JSON.stringify({ meta: en4.meta, headBytes: en4Head.length }));
+  check("engine: it keeps orientation 6 and its colour profile, and its copies are drawn upright",
+    en4Head[2] === 0xFF && en4Head[3] === 0xE1 && en4Head[30] === 0 && en4Head[31] === 6 &&
+    en4Head.indexOf(Buffer.from(ICC_SEGMENT)) > 0 && en4.w === 900 && en4.h === 1600,
+    JSON.stringify({ w: en4.w, h: en4.h, orientation: [en4Head[30], en4Head[31]] }));
+
+  // EN5. a PNG with a text chunk and a colour profile, through the cut alone:
+  // a made-up profile is not one a PNG decoder has to accept
+  const PNG_ICC = pngChunk("iCCP", [...chars("sRGB"), 0, 0, ...deflateSync(Buffer.from("a profile the cut keeps"))]);
+  const PNG_TEXT = pngChunk("tEXt", [...chars("Comment"), 0, ...chars("taken in the park")]);
+  const fixturePng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10,
+    ...pngChunk("IHDR", [...b32(2), ...b32(1), 8, 6, 0, 0, 0]), ...PNG_ICC, ...PNG_TEXT,
+    ...pngChunk("IDAT", [...deflateSync(Buffer.from([0, 255, 0, 0, 255, 0, 0, 255, 255]))]),
+    ...pngChunk("IEND", [])]);
+  const en5 = await evaluate(`(function () {
+    var bytes = Uint8Array.from(atob(${JSON.stringify(fixturePng.toString("base64"))}),
+      function (c) { return c.charCodeAt(0); });
+    var cut = AMH.images.cut(bytes, "png", false);
+    return { bytes: Array.from(cut.bytes), meta: cut.meta };
+  })()`);
+  const en5Bytes = Buffer.from(en5.bytes);
+  check("engine: a PNG's original loses its text chunk and keeps its colour profile",
+    en5Bytes.indexOf(Buffer.from(chars("tEXt"))) === -1 &&
+    en5Bytes.indexOf(Buffer.from(chars("taken in the park"))) === -1 &&
+    en5Bytes.indexOf(Buffer.from(PNG_ICC)) > 0 && en5Bytes.length === fixturePng.length - PNG_TEXT.length,
+    "length " + fixturePng.length + " -> " + en5Bytes.length);
+
+  // EN6. a file over the Git limit is taken, and the wizard says so in yellow.
+  // The limit is lowered for the check, because a test photo is not 100 MB.
+  await evaluate(`AMH.images.GIT_FILE_LIMIT_MB = 0.01; window.edit();`);
+  await sleep(500);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('Too Big.png', 2400, 1200).then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  const en6 = await evaluate(`(function () {
+    var s = document.querySelector('.ced-addphoto .ced-modal__status');
+    var probe = document.createElement('span');
+    document.body.appendChild(probe);
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--c-yellow').trim();
+    var yellow = getComputedStyle(probe).color;
+    probe.remove();
+    return { text: s.textContent, warn: s.classList.contains('is-warn'),
+      color: getComputedStyle(s).color, yellow: yellow,
+      next: !document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent').disabled };
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-addphoto .ced-modal__btns .ced-btn')]
+    .find(b => b.textContent === 'Cancel').click();
+    AMH.images.GIT_FILE_LIMIT_MB = 100; window.edit();`);
+  await sleep(300);
+  check("engine: a file over the Git limit is taken, and the wizard warns in yellow that it goes up by hand",
+    en6.warn && en6.color === en6.yellow && en6.next &&
+    /over the 0\.01 MB GitHub takes in one file/.test(en6.text) && /uploaded by hand/.test(en6.text),
+    JSON.stringify(en6));
+
+  // ============ OR. THE IMAGE FILES NOTHING NAMES ============
+  // A photo the page already names has its three files on disk. When an edit
+  // takes it away, a folder save moves those files into deletethese/ and
+  // leaves a file named any other way where it is. A download cannot move a
+  // file, so it names them in the console. The served home page carries one
+  // such photo for these checks, and gets its seeds back after them.
+  const SERVED = "img/work/served-photo-abc123";
+  const SERVED_FILES = [SERVED + ".jpg", SERVED + "_original.png", SERVED + "_sd.webp"];
+  // The three files hold the seed's bytes: a browser reads an image by its
+  // bytes and not by its name, and these checks are about names.
+  for (const f of SERVED_FILES) writeFileSync(join(SERVE, f), seedJpg);
+  const pad19 = "\n" + " ".repeat(19);
+  const servedRegion = (caption) =>
+    '\n            <div class="gallery">\n' +
+    '              <img src="' + SERVED + '.jpg" loading="lazy"' +
+    pad19 + 'srcset="' + SERVED + '_sd.webp 480w, ' + SERVED + '.jpg 1600w"' +
+    pad19 + 'sizes="(max-width: 880px) 84vw, (max-width: 1180px) 48vw, 562px"' +
+    pad19 + 'width="1600"' + pad19 + 'height="900"' +
+    pad19 + 'alt="A photo the page names"' +
+    pad19 + 'data-caption="' + caption + '"' +
+    pad19 + 'data-sd="' + SERVED + '_sd.webp"' +
+    pad19 + 'data-original="' + SERVED + '_original.png"' +
+    pad19 + 'data-original-bytes="' + seedJpg.length + '" />' +
+    '\n            </div>\n            ';
+  writeFileSync(join(SERVE, "index.html"), spliceInner(servedSource("index.html"), "edit", "fr2-gallery",
+    servedRegion("A photo the page already names")));
+  const FR2 = `document.querySelectorAll('.work .gallery')[1]`;
+  // Each load here carries a query of its own. The server sends no cache
+  // rules, so the browser may answer the plain address from its cache, and
+  // these checks need the page this section wrote.
+  await send("Page.navigate", { url: PAGE + "?or=1" });
+  await waitLoaded();
+  await sleep(1400);
+
+  // OR1. the markup contract, read back off the page
+  const or1 = await evaluate(`AMH.images.read(${FR2}.querySelector('.gallery__stage img'))`);
+  check("engine: read() gives an <img> back as its file fields",
+    or1.src === SERVED + ".jpg" && or1.sd === SERVED + "_sd.webp" && or1.sdw === 480 &&
+    or1.w === 1600 && or1.h === 900 && or1.original === SERVED + "_original.png" &&
+    or1.bytes === seedJpg.length && or1.type === "png", JSON.stringify(or1));
+
+  // OR2. on a phone the carousel paints the small copy; the viewer opens the whole
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await send("Page.navigate", { url: PAGE + "?or=2" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`${FR2}.scrollIntoView({ block: "center" })`);
+  const or2a = await waitFor(`(function () {
+    var im = ${FR2}.querySelector('.gallery__stage img');
+    return im && im.complete && im.currentSrc ? im.currentSrc : null;
+  })()`, 8000);
+  await evaluate(`${FR2}.querySelector('.gallery__holder').click()`);
+  await sleep(500);
+  const or2b = await evaluate(`({ open: AMH.work.lightbox.isOpen(),
+    src: (document.querySelector('.lightbox__img--active') || { getAttribute: function () { return ''; } })
+      .getAttribute('src') || '' })`);
+  await evaluate(`AMH.work.lightbox.close()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  check("viewer: on a phone the carousel paints the small copy, and the viewer opens the src and not the small copy",
+    String(or2a).endsWith(SERVED + "_sd.webp") && or2b.open && or2b.src.endsWith(SERVED + ".jpg"),
+    JSON.stringify({ painted: or2a, viewer: or2b }));
+
+  // OR3. an edit to the photo writes every attribute it had back out
+  await send("Page.navigate", { url: PAGE + "?or=3" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(`(function () {
+    var i = document.querySelector('.ced-photos .ced-photo input');
+    i.value = 'Renamed in the box';
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')]
+    .find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const or3 = await waitFor(`window.__dl`, 12000);
+  const or3Text = or3 && or3.name === "index.html" ? Buffer.from(or3.b64, "base64").toString("utf8") : "";
+  const or3Region = (/<!--\[edit:fr2-gallery\]-->([\s\S]*?)<!--\[\/edit:fr2-gallery\]-->/.exec(or3Text) || [])[1];
+  check("engine: a photo the page names goes through an edit and back out with every attribute it had",
+    or3Region === servedRegion("Renamed in the box"),
+    JSON.stringify({ name: or3 && or3.name, region: (or3Region || "").slice(0, 240) }));
+  if (or3Text) {
+    const or3Exact = exportIsByteExact("index.html", or3Text, ["fr2-gallery"]);
+    check("engine: that export is byte-identical outside the region", or3Exact.ok, or3Exact.detail);
+  }
+
+  // OR4. a download names the files the page stops naming, and moves nothing
+  await evaluate(`window.__info = [];
+    (function () {
+      var said = console.info;
+      console.info = function () {
+        window.__info.push([].slice.call(arguments).join(" "));
+        return said.apply(console, arguments);
+      };
+    })();
+    window.__realPicker = window.showDirectoryPicker;
+    window.showDirectoryPicker = undefined;`);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').trashChip.click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(b => b.textContent === 'Delete photo').click()`);
+  await sleep(400);
+  await evaluate(DL_CAPTURE + " window.edit.save();");
+  const or4 = await waitFor(`window.__dl ? { name: window.__dl.name, info: window.__info.join(" | ") } : null`, 12000);
+  check("orphans: a save that falls back to a download names the three files, and moves nothing",
+    !!or4 && or4.name === "index.html" && SERVED_FILES.every((f) => or4.info.includes(f)) &&
+    or4.info.includes("deletethese/"),
+    JSON.stringify(or4).slice(0, 400));
+  await evaluate(`window.showDirectoryPicker = window.__realPicker;
+    window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(400);
+
+  // OR5. a folder save moves them into deletethese/, and a hand-named file stays
+  await send("Page.navigate", { url: PAGE + "?or=5" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(FAKE_REPO);
+  await evaluate(`${JSON.stringify(SERVED_FILES)}.concat(["img/work/hand-named.jpg"])
+    .forEach(function (p) { window.__putFile(p, "the bytes of " + p); })`);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').trashChip.click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(b => b.textContent === 'Delete photo').click()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  const or5 = await waitFor(`document.querySelector('.ced-saved') ? {
+    folder: window.__folder(),
+    files: [...document.querySelectorAll('.ced-saved__files:not(.ced-saved__files--moved) .ced-saved__file')]
+      .map(li => li.textContent),
+    moved: [...document.querySelectorAll('.ced-saved__files--moved .ced-saved__file')].map(li => li.textContent),
+    said: (document.querySelector('.ced-saved__moved') || {}).textContent || '' } : null`, 12000);
+  check("orphans: a folder save moves the three files nothing names into deletethese/, and the box lists them",
+    !!or5 && or5.files.join() === "index.html" && or5.moved.join() === SERVED_FILES.join() &&
+    /3 files nothing uses any more were moved into deletethese\//.test(or5.said),
+    JSON.stringify(or5));
+  check("orphans: they are gone from img/work/ and wait in deletethese/, and a file named by hand stays",
+    !!or5 && SERVED_FILES.every((f) => or5.folder.indexOf(f) === -1 &&
+      or5.folder.indexOf("deletethese/" + f) !== -1) &&
+    or5.folder.indexOf("img/work/hand-named.jpg") !== -1,
+    JSON.stringify(or5 && or5.folder));
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent')?.click()`);
+  await sleep(250);
+  await evaluate(`window.showDirectoryPicker = window.__realPicker;
+    window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(400);
+  writeFileSync(join(SERVE, "index.html"), servedSource("index.html"));
+
+  // ============ BT. A BATCH, THE TWO SWITCHES, GIF AND THE ORIGINAL ============
+  // ADD PHOTO takes several photos at once, with a row for each, and the
+  // Photos box draws the same row. Every photo can show its original in the
+  // display copy's place (Display Maximum UHD), a GIF moves, and a visitor
+  // can open any original from the viewer.
+  //
+  // A GIF is built here, because a canvas cannot make one: four colours,
+  // each frame written as uncompressed LZW, a clear code before every second
+  // pixel so that every code stays three bits wide.
+  const makeGif = (w, h, frames, comment) => {
+    const u16 = (n) => [n & 255, (n >> 8) & 255];
+    const out = [...Buffer.from("GIF89a"), ...u16(w), ...u16(h), 0xF1, 0, 0,
+      0x1a, 0x1c, 0x24, 0x4a, 0xa5, 0xe8, 0xf2, 0xc1, 0x4e, 0xe8, 0xee, 0xf4,
+      0x21, 0xFF, 11, ...Buffer.from("NETSCAPE2.0"), 3, 1, 0, 0, 0];
+    if (comment) out.push(0x21, 0xFE, comment.length, ...Buffer.from(comment), 0);
+    for (const pixel of frames) {
+      out.push(0x21, 0xF9, 4, 0x04, 40, 0, 0, 0, 0x2C, 0, 0, 0, 0, ...u16(w), ...u16(h), 0, 2);
+      const codes = [];
+      for (let i = 0; i < w * h; i++) {
+        if (i % 2 === 0) codes.push(4);
+        codes.push(pixel(i % w, Math.floor(i / w)));
+      }
+      codes.push(5);
+      const bytes = [];
+      let acc = 0, bits = 0;
+      for (const code of codes) {
+        acc |= code << bits;
+        bits += 3;
+        while (bits >= 8) { bytes.push(acc & 255); acc >>= 8; bits -= 8; }
+      }
+      if (bits) bytes.push(acc & 255);
+      for (let i = 0; i < bytes.length; i += 255) {
+        const chunk = bytes.slice(i, i + 255);
+        out.push(chunk.length, ...chunk);
+      }
+      out.push(0);
+    }
+    out.push(0x3B);
+    return Buffer.from(out);
+  };
+  const TWO_FRAMES = [(x) => (x < 32 ? 1 : 2), (x) => (x < 32 ? 2 : 1)];
+  const gifMoving = makeGif(64, 64, TWO_FRAMES, "made by the suite");
+  const gifMovingCut = makeGif(64, 64, TWO_FRAMES);
+  const gifStill = makeGif(16, 16, [() => 3]);
+  const bytesIn = (buf) => `Uint8Array.from(atob(${JSON.stringify(Buffer.from(buf).toString("base64"))}), function (c) { return c.charCodeAt(0); })`;
+  const yellowOf = `(function () { var p = document.createElement('span'); document.body.appendChild(p);
+    p.style.color = getComputedStyle(document.documentElement).getPropertyValue('--c-yellow').trim();
+    var c = getComputedStyle(p).color; p.remove(); return c; })()`;
+  const ROWS = `[...document.querySelectorAll('.ced-addphoto .ced-describe .ced-photo')]`;
+  // Open ADD PHOTO on a carousel, choose files at once, and wait for their rows.
+  async function batchInto(slug, filesJs, rowCount) {
+    await evaluate(`AMH.tool.regionFor('${slug}').plusChip.click()`);
+    await sleep(300);
+    await evaluate(`Promise.all([${filesJs}]).then(function (fs) {
+      var input = document.querySelector('.ced-addphoto input[type=file]');
+      var dt = new DataTransfer();
+      fs.forEach(function (f) { dt.items.add(f); });
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })`, { awaitPromise: true });
+    return waitFor(`${ROWS}.length === ${rowCount} && !document.querySelector('.ced-addphoto .ced-modal__btns .ced-btn--accent').disabled`, 12000);
+  }
+  // Place and add what the wizard holds, at the place it offers.
+  async function batchAdd() {
+    await evaluate(`${NEXT}.click()`);
+    await sleep(300);
+    await evaluate(`${NEXT}.click()`);
+    await sleep(700);
+  }
+  // One region's exported markup, from a page's text.
+  const regionOf = (text, slug) =>
+    (new RegExp("<!--\\[edit:" + slug + "\\]-->([\\s\\S]*?)<!--\\[\\/edit:" + slug + "\\]-->").exec(text) || [])[1] || "";
+  const attrOf = (markup, name) => (new RegExp("\\s" + name + '="([^"]*)"').exec(markup) || [])[1];
+
+  await send("Page.navigate", { url: PAGE + "?bt=1" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`window.edit()`);
+  await sleep(500);
+
+  // BT1. one photo first, so the batch has a carousel to be placed in
+  await batchInto("fr3-gallery", `__photo('Base Frame.png', 1600, 900, '#445566')`, 1);
+  await batchAdd();
+  const bt0 = await evaluate(`AMH.tool.regionFor('fr3-gallery').model.map(e => e.src)`);
+
+  // BT2. the Choose step: several files, a button inside the zone, and the checkbox under it
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').plusChip.click()`);
+  await sleep(300);
+  const bt2 = await evaluate(`(function () {
+    var b = document.querySelector('.ced-addphoto');
+    var zone = b.querySelector('.ced-handoff__zone');
+    var input = b.querySelector('input[type=file]');
+    var keep = b.querySelector('.ced-keepmeta');
+    var picks = 0;
+    input.click = function () { picks++; };
+    zone.querySelector('.ced-choose').click();
+    var fromButton = picks;
+    zone.click();
+    delete input.click;
+    return { multiple: input.multiple, accept: input.accept, words: zone.querySelector('strong').textContent,
+      button: zone.querySelector('.ced-choose').textContent,
+      keepUnder: !!keep && zone.nextElementSibling === keep,
+      keepWords: keep ? keep.textContent : '', keepOn: keep ? keep.querySelector('input').checked : null,
+      fromButton: fromButton, total: picks };
+  })()`);
+  check("batch: the file input takes several files, and GIF is among the formats",
+    bt0.length === 1 && bt2.multiple === true && /image\/gif/.test(bt2.accept) && bt2.words === "Drop photos here",
+    JSON.stringify(bt2));
+  check("batch: Choose a photo sits inside the zone and opens the picker once; the zone's own click opens it too",
+    bt2.button === "Choose a photo" && bt2.fromButton === 1 && bt2.total === 2, JSON.stringify(bt2));
+  check("batch: the metadata checkbox sits under the zone, and is off",
+    bt2.keepUnder && bt2.keepWords === "Keep location and camera data in the originals" && bt2.keepOn === false,
+    JSON.stringify(bt2));
+  await evaluate(`${WIZ}.querySelector('.ced-modal__x').click()`);
+  await sleep(250);
+
+  // BT3. three files at once: three rows, in order, each with its facts and its switch
+  await batchInto("fr3-gallery", `__photo('Hangar Bay.png', 2400, 1200), __photo('IMG_2041.jpg', 1600, 1200, '#6b3a8f', 'image/jpeg'),
+    __photo('Night Pass.webp', 1200, 1600, '#0e5a8a', 'image/webp')`, 3);
+  const ROW_STATE = `${ROWS}.map(function (r) {
+    var f = r.querySelectorAll('.ced-field input');
+    return { caption: f[0].value, alt: f[1].value, mark: !r.querySelector('.ced-altmark').hidden,
+      facts: r.querySelector('.ced-photo__facts').textContent, pic: r.querySelector('.ced-photo__pic').src.slice(0, 5),
+      uhd: r.querySelector('.ced-uhd input').checked, what: (r.querySelector('.ced-uhd__what') || {}).textContent || '' };
+  })`;
+  const bt3 = await evaluate(ROW_STATE);
+  check("batch: three files chosen at once give three rows in their order, each with a thumbnail, its words and a switch that is off",
+    bt3.length === 3 && bt3.map((r) => r.alt).join("|") === "Hangar Bay|IMG 2041|Night Pass" &&
+    bt3.every((r) => r.pic === "blob:" && r.uhd === false && r.caption === "") &&
+    /^1920 x 960 · PNG original · \d+ KB · no location or camera data$/.test(bt3[0].facts) &&
+    /^1600 x 1200 · JPG original/.test(bt3[1].facts) && /^1200 x 1600 · WEBP original/.test(bt3[2].facts) &&
+    bt3[0].what === "PNG · 2400 x 1200",
+    JSON.stringify(bt3));
+  check("batch: an alt that is still a camera's file name is marked, and a real name is not",
+    bt3[0].mark === false && bt3[1].mark === true && bt3[2].mark === false, JSON.stringify(bt3.map((r) => r.mark)));
+  await evaluate(`(function () {
+    var alt = ${ROWS}[1].querySelectorAll('.ced-field input')[1];
+    alt.value = 'Engine bay, wide';
+    alt.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const bt3m = await evaluate(`!${ROWS}[1].querySelector('.ced-altmark').hidden`);
+  check("batch: changing the marked alt takes the mark away", bt3m === false, "marked=" + bt3m);
+
+  // BT4. the arrows reorder the batch, and Enter moves to the next photo's caption
+  await evaluate(`${ROWS}[2].querySelector('[aria-label="Move earlier"]').click()`);
+  await sleep(150);
+  await evaluate(`${ROWS}[0].querySelector('.ced-field input').focus()`);
+  await pressKey("Enter", "Enter", 13, "\r");
+  await sleep(150);
+  const bt4 = await evaluate(`({ alts: ${ROWS}.map(r => r.querySelectorAll('.ced-field input')[1].value),
+    focused: document.activeElement === ${ROWS}[1].querySelector('.ced-field input') })`);
+  check("batch: the arrows reorder the rows, and Enter in a field moves to the next photo's caption",
+    bt4.alts.join("|") === "Hangar Bay|Night Pass|Engine bay, wide" && bt4.focused === true, JSON.stringify(bt4));
+
+  // BT5. Place: the batch is one run marked NEW; Earlier moves the run; Add photos puts all three in
+  await evaluate(`${NEXT}.click()`);
+  await sleep(300);
+  const PLACE = `({ at: ${WIZ}.querySelector('.ced-place__at').textContent,
+    news: [...${WIZ}.querySelectorAll('.ced-place__pic')].map(p => p.classList.contains('is-new') ? 'N' : '-').join(''),
+    next: ${NEXT}.textContent })`;
+  const bt5a = await evaluate(PLACE);
+  await evaluate(`[...${WIZ}.querySelectorAll('.ced-place__move')].find(x => x.textContent === 'Earlier').click()`);
+  await sleep(150);
+  const bt5b = await evaluate(PLACE);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(800);
+  const bt5c = await evaluate(`({ box: !!${WIZ}, model: AMH.tool.regionFor('fr3-gallery').model.map(e => e.src + '|' + e.alt) })`);
+  const bt5bases = bt5c.model.slice(0, 3).map((m) => m.split("|")[0]);
+  check("batch: Place shows the batch as one run marked NEW, last until it is moved",
+    bt5a.at === "Photos 2 to 4 of 4" && bt5a.news === "-NNN" && bt5a.next === "Add photos", JSON.stringify(bt5a));
+  check("batch: Earlier moves the whole run in front",
+    bt5b.at === "Photos 1 to 3 of 4" && bt5b.news === "NNN-", JSON.stringify(bt5b));
+  check("batch: Add photos puts all three in, in the rows' order, as three different photos",
+    bt5c.box === false && bt5c.model.length === 4 &&
+    bt5c.model.slice(0, 3).map((m) => m.split("|")[1]).join("|") === "Hangar Bay|Night Pass|Engine bay, wide" &&
+    new Set(bt5bases).size === 3 && bt5bases.every((s) => /^img\/work\/[a-z0-9-]+-[0-9a-z]{6}\.jpg$/.test(s)) &&
+    bt5c.model[3] === bt0[0] + "|Base Frame",
+    JSON.stringify(bt5c));
+
+  // BT6. the metadata checkbox: on keeps the GPS in the original, off cuts it
+  const GPS_ORIGINAL = `(function () {
+    var en = AMH.tool.regionFor('fr2-gallery').model[0];
+    var photo = AMH.images.photo(AMH.images.baseOf(en.src));
+    return photo.blobs.original.arrayBuffer().then(function (buf) {
+      var o = new Uint8Array(buf), sos = 2;
+      while (sos < o.length - 1 && !(o[sos] === 0xFF && o[sos + 1] === 0xDA)) sos++;
+      var gps = false;
+      for (var i = 0; i < sos - 1; i++) if (o[i] === 0x88 && o[i + 1] === 0x25) gps = true;
+      return { gps: gps, src: en.src };
+    });
+  })()`;
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`(function () { var k = document.querySelector('.ced-addphoto .ced-keepmeta input');
+    k.checked = true; k.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await evaluate(`window.__choose(document.querySelector('.ced-addphoto input[type=file]'),
+    new File([${bytesIn(phoneJpg)}], 'IMG_7001.jpg', { type: 'image/jpeg' }))`);
+  await waitFor(`${ROWS}.length === 1`, 10000);
+  const bt6aFacts = await evaluate(`${ROWS}[0].querySelector('.ced-photo__facts').textContent`);
+  await batchAdd();
+  const bt6a = await evaluate(GPS_ORIGINAL, { awaitPromise: true });
+  await evaluate(`AMH.tool.regionFor('fr2-gallery').plusChip.click()`);
+  await sleep(300);
+  const bt6keepRemembered = await evaluate(`document.querySelector('.ced-addphoto .ced-keepmeta input').checked`);
+  await evaluate(`(function () { var k = document.querySelector('.ced-addphoto .ced-keepmeta input');
+    k.checked = false; k.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await evaluate(`window.__choose(document.querySelector('.ced-addphoto input[type=file]'),
+    new File([${bytesIn(phoneJpg)}], 'IMG_7001.jpg', { type: 'image/jpeg' }))`);
+  await waitFor(`${ROWS}.length === 1`, 10000);
+  const bt6bFacts = await evaluate(`${ROWS}[0].querySelector('.ced-photo__facts').textContent`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(300);
+  await evaluate(`[...${WIZ}.querySelectorAll('.ced-place__move')].find(x => x.textContent === 'Earlier').click()`);
+  await sleep(150);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(700);
+  const bt6b = await evaluate(GPS_ORIGINAL, { awaitPromise: true });
+  check("metadata: with the checkbox on, the original keeps its GPS and the row says kept",
+    /location and camera data kept/.test(bt6aFacts) && bt6a.gps === true, JSON.stringify({ facts: bt6aFacts, original: bt6a }));
+  check("metadata: the choice is kept for the page, and with it off the original is cut and the row says removed",
+    bt6keepRemembered === true && /location and camera data removed/.test(bt6bFacts) && bt6b.gps === false &&
+    bt6b.src !== bt6a.src,
+    JSON.stringify({ remembered: bt6keepRemembered, facts: bt6bFacts, original: bt6b }));
+
+  // BT7. over the Git limit: the row says so in yellow, a save writes all three files and says so too
+  await evaluate(`AMH.images.GIT_FILE_LIMIT_MB = 0.01;`);
+  await batchInto("phl-gallery", `__photo('Big Frame.png', 2400, 1200, '#884422')`, 1);
+  const bt7row = await evaluate(`(function () { var w = ${ROWS}[0].querySelector('.ced-photo__warn');
+    return { text: w ? w.textContent : '', color: w ? getComputedStyle(w).color : '', yellow: ${yellowOf} }; })()`);
+  await batchAdd();
+  const bt7held = await evaluate(`AMH.tool.photos().find(p => /big-frame/.test(p.base))`);
+  await evaluate(FAKE_REPO);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  const bt7save = await waitFor(`document.querySelector('.ced-saved') ? {
+    wrote: Object.keys(window.__wrote),
+    over: [...document.querySelectorAll('.ced-saved__file--over')].map(li => li.textContent),
+    overColor: (function () { var li = document.querySelector('.ced-saved__file--over'); return li ? getComputedStyle(li).color : ''; })(),
+    said: (document.querySelector('.ced-saved__over') || {}).textContent || '',
+    yellow: ${yellowOf} } : null`, 12000);
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent')?.click();
+    AMH.images.GIT_FILE_LIMIT_MB = 100;`);
+  await sleep(250);
+  check("limit: an original over the Git limit is taken, and its row says so in yellow",
+    bt7row.text === "over the Git limit" && bt7row.color === bt7row.yellow && !!bt7held && bt7held.overLimit === true,
+    JSON.stringify({ row: bt7row, held: bt7held && bt7held.overLimit }));
+  check("limit: a save writes its three files, and the saved box marks the original in yellow and says to upload it by hand",
+    !!bt7save && !!bt7held && Object.values(bt7held.files).every((f) => bt7save.wrote.indexOf(f) !== -1) &&
+    bt7save.over.join() === bt7held.files.original && bt7save.overColor === bt7save.yellow &&
+    /over the 0\.01 MB GitHub takes in one file/.test(bt7save.said) && /by hand/.test(bt7save.said),
+    JSON.stringify(bt7save && { over: bt7save.over, said: bt7save.said }));
+
+  // BT8. Display Maximum UHD on a PNG: the original takes the display copy's place, and turns off again
+  await batchInto("aiw-gallery", `__photo('UHD Frame.png', 2400, 1200, '#224488')`, 1);
+  await evaluate(`${ROWS}[0].querySelector('.ced-uhd input').click()`);
+  await batchAdd();
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const bt8dl = await waitFor(`window.__dl`, 15000);
+  const bt8zip = bt8dl && bt8dl.name === "publish.zip" ? unzipStore(Buffer.from(bt8dl.b64, "base64")) : {};
+  const bt8img = (regionOf(bt8zip["index.html"] ? bt8zip["index.html"].toString("utf8") : "", "aiw-gallery")
+    .match(/<img[\s\S]*?\/>/) || [""])[0];
+  const bt8src = attrOf(bt8img, "data-hd") || "";
+  const [, bt8orig, bt8sd] = trio(bt8src, "png");
+  check("uhd: on, a PNG's markup puts the original in src and srcset, keeps the display copy in data-hd, and its sizes",
+    hashedPath("uhd-frame").test(bt8src) && attrOf(bt8img, "src") === bt8orig &&
+    attrOf(bt8img, "srcset") === bt8sd + " 480w, " + bt8orig + " 2400w" && attrOf(bt8img, "data-uhd") === "1" &&
+    attrOf(bt8img, "width") === "1920" && attrOf(bt8img, "height") === "960" &&
+    attrOf(bt8img, "data-original-size") === "2400x1200" && !!bt8zip[bt8orig],
+    bt8img.replace(/\s+/g, " ").slice(0, 400));
+  const bt8read = await evaluate(`(function () {
+    var d = new DOMParser().parseFromString(${JSON.stringify(bt8img)}, 'text/html');
+    return AMH.images.read(d.querySelector('img'));
+  })()`);
+  check("uhd: read() gives that image back with the switch on and src the display copy",
+    bt8read.uhd === true && bt8read.src === bt8src && bt8read.ow === 2400 && bt8read.oh === 1200,
+    JSON.stringify(bt8read));
+  await evaluate(`AMH.tool.regionFor('aiw-gallery').chip.click()`);
+  await sleep(400);
+  const bt8row = await evaluate(`(function () { var r = document.querySelectorAll('.ced-photos .ced-photo')[0];
+    return { uhd: r.querySelector('.ced-uhd input').checked, facts: r.querySelector('.ced-photo__facts').textContent }; })()`);
+  await evaluate(`document.querySelectorAll('.ced-photos .ced-photo')[0].querySelector('.ced-uhd input').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const bt8dl2 = await waitFor(`window.__dl`, 15000);
+  const bt8zip2 = bt8dl2 && bt8dl2.b64 ? unzipStore(Buffer.from(bt8dl2.b64, "base64")) : {};
+  const bt8img2 = (regionOf(bt8zip2["index.html"] ? bt8zip2["index.html"].toString("utf8") : "", "aiw-gallery")
+    .match(/<img[\s\S]*?\/>/) || [""])[0];
+  check("uhd: the Photos row carries the switch on and the facts, and turning it off writes the display copy's form again",
+    bt8row.uhd === true && /^1920 x 960 · PNG original/.test(bt8row.facts) &&
+    attrOf(bt8img2, "src") === bt8src && attrOf(bt8img2, "srcset") === bt8sd + " 480w, " + bt8src + " 1920w" &&
+    attrOf(bt8img2, "data-uhd") === undefined && attrOf(bt8img2, "data-hd") === undefined,
+    bt8img2.replace(/\s+/g, " ").slice(0, 300));
+
+  // BT9. a GIF moves: its row says so, its switch is on, and its page shows the original
+  await batchInto("cog-gallery", `Promise.resolve(new File([${bytesIn(gifMoving)}], 'Moving Orbit.gif', { type: 'image/gif' }))`, 1);
+  const bt9row = await evaluate(`(function () { var r = ${ROWS}[0];
+    return { facts: r.querySelector('.ced-photo__facts').textContent, uhd: r.querySelector('.ced-uhd input').checked }; })()`);
+  await batchAdd();
+  await evaluate(DL_CAPTURE + " window.edit.export();");
+  const bt9dl = await waitFor(`window.__dl`, 15000);
+  const bt9zip = bt9dl && bt9dl.b64 ? unzipStore(Buffer.from(bt9dl.b64, "base64")) : {};
+  const bt9img = (regionOf(bt9zip["index.html"] ? bt9zip["index.html"].toString("utf8") : "", "cog-gallery")
+    .match(/<img[\s\S]*?\/>/) || [""])[0];
+  const bt9hd = attrOf(bt9img, "data-hd") || "";
+  const [, bt9orig, bt9sd] = trio(bt9hd, "gif");
+  check("gif: a two-frame GIF's row says animated, and its switch is on",
+    /^64 x 64 · GIF · animated · \d+ KB/.test(bt9row.facts) && bt9row.uhd === true, JSON.stringify(bt9row));
+  check("gif: its page writes the original as src and no srcset",
+    hashedPath("moving-orbit").test(bt9hd) && attrOf(bt9img, "src") === bt9orig && attrOf(bt9img, "srcset") === undefined &&
+    attrOf(bt9img, "data-uhd") === "1",
+    bt9img.replace(/\s+/g, " ").slice(0, 300));
+  const bt9sdBytes = bt9zip[bt9sd], bt9hdBytes = bt9zip[bt9hd];
+  check("gif: the original keeps both frames with its comment cut, and the two copies are stills",
+    !!bt9zip[bt9orig] && Buffer.compare(bt9zip[bt9orig], gifMovingCut) === 0 &&
+    !!bt9sdBytes && bt9sdBytes.toString("latin1", 0, 4) === "RIFF" && bt9sdBytes.toString("latin1", 8, 12) === "WEBP" &&
+    !!bt9hdBytes && bt9hdBytes[0] === 0xFF && bt9hdBytes[1] === 0xD8,
+    JSON.stringify({ files: Object.keys(bt9zip).filter((k) => /moving-orbit/.test(k)) }));
+  await evaluate(`document.querySelectorAll('.work .gallery')[4].querySelector('.gallery__holder').click()`);
+  await sleep(500);
+  const bt9view = await evaluate(`(function () {
+    var en = AMH.tool.regionFor('cog-gallery').model[0];
+    var photo = AMH.images.photo(AMH.images.baseOf(en.src));
+    var shown = document.querySelector('.lightbox__img--active').src;
+    return { original: shown === photo.urls.original, open: AMH.work.lightbox.isOpen() };
+  })()`);
+  await evaluate(`AMH.work.lightbox.close()`);
+  const bt9still = await evaluate(`AMH.images.intake(new File([${bytesIn(gifStill)}], 'still.gif', { type: 'image/gif' }))
+    .then(function (p) { var out = { animated: p.animated, type: p.type }; AMH.images.letGo(p); return out; })`, { awaitPromise: true });
+  check("gif: the viewer opens the original, and a one-frame GIF is not called animated",
+    bt9view.open && bt9view.original && bt9still.animated === false && bt9still.type === "gif",
+    JSON.stringify({ viewer: bt9view, still: bt9still }));
+
+  // BT10. PHOTOS: Replace goes through the engine and the row's facts change; a switch change asks on Cancel
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(400);
+  const bt10a = await evaluate(`[...document.querySelectorAll('.ced-photos .ced-photo')].map(r => ({
+    uhd: !!r.querySelector('.ced-uhd input'), facts: r.querySelector('.ced-photo__facts').textContent }))`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-photo')[0].querySelectorAll('.ced-photo__acts .ced-tool')]
+    .find(x => x.textContent === 'Replace').click()`);
+  await evaluate(`window.__photo('Swap Frame.png', 1000, 500, '#556b2f').then(function (f) {
+    window.__choose(document.querySelector('.ced-photos input[type=file]'), f); })`, { awaitPromise: true });
+  const bt10b = await waitFor(`(function () { var r = document.querySelectorAll('.ced-photos .ced-photo')[0];
+    var tag = r.querySelector('.ced-photo__tag');
+    return tag ? { tag: tag.textContent, facts: r.querySelector('.ced-photo__facts').textContent } : null; })()`, 10000);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Discard changes').click()`);
+  await sleep(300);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(`document.querySelectorAll('.ced-photos .ced-photo')[1].querySelector('.ced-uhd input').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === 'Cancel').click()`);
+  await sleep(250);
+  const bt10c = await evaluate(`({ ask: !!document.querySelector('.ced-ask'), title: (document.querySelector('.ced-ask .ced-slug') || {}).textContent })`);
+  await evaluate(`[...document.querySelectorAll('.ced-ask .ced-btn')].find(x => x.textContent === 'Discard changes')?.click()`);
+  await sleep(300);
+  check("photos box: every row carries the switch and a line of facts",
+    bt10a.length === 4 && bt10a.every((r) => r.uhd && / · /.test(r.facts)), JSON.stringify(bt10a));
+  check("photos box: Replace takes the new file through the engine, and the row's facts change to it",
+    !!bt10b && bt10b.tag === "REPLACED" && /^1000 x 500 · PNG original/.test(bt10b.facts), JSON.stringify(bt10b));
+  check("photos box: Cancel after a switch change asks first",
+    bt10c.ask === true && bt10c.title === "Discard your changes?", JSON.stringify(bt10c));
+
+  // BT11. the project form's two drop zones carry the same button
+  await evaluate(`AMH.tool.listForm("projects", "fr3", 1)`);
+  await sleep(400);
+  const bt11a = await evaluate(`(function () { var pane = [...document.querySelectorAll('.ced-projform .ced-pane')].find(p => !p.hidden);
+    var b = pane.querySelector('.ced-handoff__zone .ced-choose'); return b ? b.textContent : ''; })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-tab')].find(t => t.textContent === 'Deep dive').click()`);
+  await sleep(400);
+  const bt11b = await evaluate(`(function () { var pane = [...document.querySelectorAll('.ced-projform .ced-pane')].find(p => !p.hidden);
+    var b = pane.querySelector('.ced-handoff__zone .ced-choose'); return b ? b.textContent : ''; })()`);
+  await evaluate(`document.querySelector('.ced-projform .ced-modal__x').click()`);
+  await sleep(300);
+  check("form: the Images view and the Deep dive view each carry Choose a photo inside their drop zone",
+    bt11a === "Choose a photo" && bt11b === "Choose a photo", JSON.stringify({ images: bt11a, deepDive: bt11b }));
+
+  // BT12. a kind that holds one image says single: one file, and no multiple
+  await evaluate(`AMH.tool.imageKinds.carousel.single = true`);
+  await batchInto("cvr-gallery", `__photo('One.png', 800, 600), __photo('Two.png', 800, 600, '#aa3355')`, 1);
+  const bt12 = await evaluate(`({ multiple: ${WIZ}.querySelector('input[type=file]').multiple,
+    words: ${WIZ}.querySelector('.ced-handoff__zone strong').textContent,
+    status: ${WIZ}.querySelector('.ced-modal__status').textContent, rows: ${ROWS}.length })`);
+  await evaluate(`${WIZ}.querySelector('.ced-modal__x').click(); delete AMH.tool.imageKinds.carousel.single;`);
+  await sleep(250);
+  check("single: a kind that holds one image takes the first file and says so, with no multiple",
+    bt12.multiple === false && bt12.words === "Drop a photo here" && bt12.rows === 1 &&
+    /One photo at a time/.test(bt12.status), JSON.stringify(bt12));
+
+  // BT13. See Original, in the viewer: on a photo with an original, and not on a seed
+  await evaluate(`window.showDirectoryPicker = window.__realPicker;
+    window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
+  await sleep(400);
+  writeFileSync(join(SERVE, "index.html"), spliceInner(servedSource("index.html"), "edit", "fr2-gallery",
+    servedRegion("A photo the page already names")));
+  await send("Page.navigate", { url: PAGE + "?bt=13" });
+  await waitLoaded();
+  await sleep(1400);
+  await evaluate(`${FR2}.querySelector('.gallery__holder').click()`);
+  await sleep(500);
+  const bt13a = await evaluate(`(function () { var a = document.querySelector('.lightbox__original');
+    return { text: a.textContent, href: a.getAttribute('href'), target: a.target, rel: a.rel, hidden: a.hidden }; })()`);
+  await evaluate(`AMH.work.lightbox.close()`);
+  await evaluate(`document.querySelectorAll('.work .gallery')[0].querySelector('.gallery__holder').click()`);
+  await sleep(500);
+  const bt13b = await evaluate(`({ open: AMH.work.lightbox.isOpen(), hidden: document.querySelector('.lightbox__original').hidden })`);
+  await evaluate(`AMH.work.lightbox.close()`);
+  const seedKb = Math.max(1, Math.round(seedJpg.length / 1024)) + " KB";
+  check("viewer: See original names the original's format and size, and opens it in a new tab",
+    bt13a.text === "See original · PNG · " + seedKb && bt13a.href === SERVED + "_original.png" &&
+    bt13a.target === "_blank" && bt13a.rel === "noopener" && bt13a.hidden === false,
+    JSON.stringify(bt13a));
+  check("viewer: a seed has no original, so it has no See original",
+    bt13b.open === true && bt13b.hidden === true, JSON.stringify(bt13b));
+  writeFileSync(join(SERVE, "index.html"), servedSource("index.html"));
 
   // ============ MULTI-PAGE PUBLISH ============
   // Phase 2 Part 3 turned a page editor into a site editor. gallery.html and
@@ -5052,6 +6489,8 @@ async function main() {
   await evaluate(`document.querySelector('.bc-title').value = 'E2E first post'`);
   await evaluate(`document.querySelector('.bc-write textarea').value =
     '<p>First e2e post. Escape probe: &lt;/scr' + 'ipt&gt; as text.</p>\\n' +
+    /* png is still read as a synonym for img, so a body written before the
+       image engine still parses. Nothing writes one any more. */
     '[img0001,Cap one|Alt one][png0002,Cap two]\\n' +
     '<p>Tail paragraph with <strong>bold</strong>.</p>'`);
   await evaluate(`window.__dropImage('.bc-drop', 2400, 1200, '#336699', 'first.png')`, { awaitPromise: true });
@@ -5065,15 +6504,28 @@ async function main() {
     meta0: document.querySelectorAll('.bc-card .bc-card__meta')[0]?.textContent || '',
     meta1: document.querySelectorAll('.bc-card .bc-card__meta')[1]?.textContent || '',
   })`);
-  check("two images intake (resized to 1600 long edge)",
-    cards.n === 2 && cards.meta0.includes("0001") && cards.meta0.includes("1600x800") &&
-    cards.meta1.includes("0002") && cards.meta1.includes("900x1400"),
+  // The card says what the ORIGINAL is, because that is what the manifest
+  // records; the copies' sizes follow from it.
+  check("two photos taken, each with its facts",
+    cards.n === 2 && cards.meta0.includes("0001") && cards.meta0.includes("2400 x 1200") &&
+    cards.meta0.includes("PNG original") &&
+    cards.meta1.includes("0002") && cards.meta1.includes("900 x 1400"),
     cards.meta0 + " || " + cards.meta1);
-  // toggle second card to png (tag says [png0002...])
-  await evaluate(`[...document.querySelectorAll('.bc-card')][1].querySelectorAll('button')[1].click()`);
-  await sleep(700);
-  check("second image re-encoded as png",
-    await evaluate(`document.querySelectorAll('.bc-card .bc-card__meta')[1].textContent.includes('.png')`));
+  // Display Maximum UHD on the second card. It is a fact in the manifest,
+  // not a format baked into a file, so a published image can flip it too.
+  const uhdCard = await evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.bc-card')];
+    const sw = cards[1].querySelector('.bc-uhd input');
+    const before = sw.checked;
+    sw.click();
+    return { before: before, after: sw.checked, switches: document.querySelectorAll('.bc-uhd').length,
+             what: cards[1].querySelector('.bc-uhd__what').textContent,
+             toggles: cards[1].querySelectorAll('button').length };
+  })()`);
+  check("each card carries Display Maximum UHD, off, and no format toggle",
+    uhdCard.switches === 2 && uhdCard.before === false && uhdCard.after === true &&
+    /900 x 1400/.test(uhdCard.what) && uhdCard.toggles === 2,
+    JSON.stringify(uhdCard));
   // rejection: a text file drop shows an error card
   await evaluate(`(function () {
     var f = new File(['nope'], 'notes.txt', { type: 'text/plain' });
@@ -5338,7 +6790,8 @@ async function main() {
       '["blog/2607.html","feed.xml","robots.txt","search.js","sitemap.xml"]' &&
     /* Publish stays live now: the staging layer means the next bundle
        builds on this one rather than fighting it */
-    doneStep.added === 4 &&
+    /* three files for each of the two photos */
+    doneStep.added === 6 &&
     /blog\/2607\.html\?post=p0001#p0001$/.test(doneStep.url) &&
     !doneStep.publishDisabled,
     JSON.stringify(doneStep).slice(0, 300));
@@ -5706,11 +7159,68 @@ async function main() {
   if (zipB64) {
     zipFiles = unzipStore(Buffer.from(zipB64, "base64"));
     const names = Object.keys(zipFiles).sort();
+    // Three files for each photo, all of them under blog/: the small copy,
+    // the copy a page shows, and the original. Nothing goes to imgsources/.
     check("bundle has the full publish layout", JSON.stringify(names) === JSON.stringify([
-      "blog/260711_img0001.jpg", "blog/260711_img0002.png", "blog/2607.html",
-      "imgsources/260711_img0001_original.png", "imgsources/260711_img0002_original.png",
+      "blog/260711_img0001.jpg", "blog/260711_img0001_sd.webp",
+      "blog/260711_img0001_original.png",
+      "blog/260711_img0002.jpg", "blog/260711_img0002_sd.webp",
+      "blog/260711_img0002_original.png",
+      "blog/2607.html",
       "blog.html", "index.html", "robots.txt", "sitemap.xml", "search.js", "feed.xml",
     ].sort()), names.join(", "));
+    check("bundle: an original never goes to imgsources/",
+      !names.some((n) => /^imgsources\//.test(n)), names.join(", "));
+
+    // IM. THE MANIFEST STATES EVERY IMAGE. One line each: the date its files
+    // are named for, the ORIGINAL's format, size and bytes, and the flags.
+    // Every path and every copy's size follows from those, so nothing else
+    // has to be written down and a rebuild needs no fetch.
+    const pubPage = zipFiles["blog.html"].toString("utf8");
+    const pubMan = (/<script id="blogManifest"[^>]*>([\s\S]*?)<\/script>/.exec(pubPage) || [])[1] || "";
+    const imgLines = (pubMan.match(/image:\d{4}=[^\n]*/g) || []);
+    check("manifest: one image line per image, with the original's format, size and bytes",
+      imgLines.length === 2 &&
+      /^image:0001=260711 png 2400x1200 \d+$/.test(imgLines[0]) &&
+      /^image:0002=260711 png 900x1400 \d+ uhd$/.test(imgLines[1]),
+      imgLines.join(" | "));
+    // the lines sit after the months and before the entries, so both readers
+    // walk the payload the same way
+    check("manifest: the image lines sit after the month lines and before the entries",
+      pubMan.indexOf("\nmonth:") < pubMan.indexOf("\nimage:") &&
+      pubMan.indexOf("\nimage:") < pubMan.indexOf("2607110001"),
+      pubMan.replace(/\s+/g, " ").slice(0, 200));
+
+    // The markup a page gets: the contract, with the stream's own paths and
+    // the month file's one step up on every candidate.
+    const streamImgs = pubPage.match(/<img[^>]*_img0001[^>]*>/g) || [];
+    const monthPage = zipFiles["blog/2607.html"].toString("utf8");
+    const monthImgs = monthPage.match(/<img[^>]*_img0001[^>]*>/g) || [];
+    check("blog markup: a stream image carries the contract, with no prefix",
+      streamImgs.length === 1 &&
+      /src="blog\/260711_img0001\.jpg"/.test(streamImgs[0]) &&
+      /srcset="blog\/260711_img0001_sd\.webp 480w, blog\/260711_img0001\.jpg 1920w"/.test(streamImgs[0]) &&
+      /sizes="\(max-width: 700px\) 80vw, 520px"/.test(streamImgs[0]) &&
+      /width="1920"/.test(streamImgs[0]) && /height="960"/.test(streamImgs[0]) &&
+      /data-sd="blog\/260711_img0001_sd\.webp"/.test(streamImgs[0]) &&
+      /data-original="blog\/260711_img0001_original\.png"/.test(streamImgs[0]),
+      streamImgs[0] || "no image in the stream");
+    check("blog markup: a month file's image carries ../ on every path it names",
+      monthImgs.length === 1 &&
+      /src="\.\.\/blog\/260711_img0001\.jpg"/.test(monthImgs[0]) &&
+      /srcset="\.\.\/blog\/260711_img0001_sd\.webp 480w, \.\.\/blog\/260711_img0001\.jpg 1920w"/.test(monthImgs[0]) &&
+      /data-sd="\.\.\/blog\/260711_img0001_sd\.webp"/.test(monthImgs[0]) &&
+      /data-original="\.\.\/blog\/260711_img0001_original\.png"/.test(monthImgs[0]),
+      monthImgs[0] || "no image in the month file");
+    // the second image had its switch turned on, so the page shows the
+    // original and says so
+    const uhdImgs = pubPage.match(/<img[^>]*_img0002[^>]*>/g) || [];
+    check("blog markup: Display Maximum UHD puts the original in src and says data-uhd",
+      uhdImgs.length === 1 &&
+      /src="blog\/260711_img0002_original\.png"/.test(uhdImgs[0]) &&
+      /data-uhd="1"/.test(uhdImgs[0]) &&
+      /data-hd="blog\/260711_img0002\.jpg"/.test(uhdImgs[0]),
+      uhdImgs[0] || "no second image in the stream");
 
     // The home page is in this bundle because the highlights block changed.
     // It is written through the editor's multi-page path, so the byte-exact
@@ -5822,9 +7332,12 @@ async function main() {
       /^First e2e post/.test(e1.text) && !/\[img0001/.test(e1.text) &&
       JSON.stringify(e1.caps) === '["Cap one Alt one","Cap two"]',
       JSON.stringify(e1).slice(0, 220));
-    check("search: the thumbnail is a small WebP made from the post's first image",
-      /^data:image\/webp;base64,/.test(e1.thumb || "") && e1.thumb.length < 2048,
-      (e1.thumb || "").slice(0, 40) + " len " + (e1.thumb || "").length);
+    // A path, not a picture. The engine already wrote a small copy and the
+    // manifest already names it, so the index points at it rather than
+    // carrying a data URI of its own.
+    check("search: the thumbnail is the path of the post's first small copy",
+      e1.thumb === "blog/260711_img0001_sd.webp",
+      (e1.thumb || "") + " len " + (e1.thumb || "").length);
 
     // FD1. the feed: Atom, the post's own anchor as its id, the time at
     // its zone, and a summary cut from the index's own text
@@ -5952,7 +7465,7 @@ async function main() {
     check("chain: the first month says so, carries no prev, and loads the trunks in order",
       !/rel="prev"/.test(month) &&
       month.includes('<p class="bm-chain__end">This is the first month. There is nothing older.</p>') &&
-      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>\n\s*<script defer src="\.\.\/tool\.js"><\/script>\n\s*<script defer src="\.\.\/publish\.js"><\/script>/.test(month),
+      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/imagesengine\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>\n\s*<script defer src="\.\.\/tool\.js"><\/script>\n\s*<script defer src="\.\.\/publish\.js"><\/script>/.test(month),
       (month.match(/bm-chain__end[^\n]*/) || [""])[0]);
 
     check("bundle ships no stylesheet (site.css is a repo file)",
@@ -6031,9 +7544,11 @@ async function main() {
     // MC3b. The editor comes to a month page too, so the corner mark is on
     // every page of the site rather than on three of them. It cannot publish
     // from here, which the composer says for itself; see the runtime checks.
-    check("month page: it loads the editor as well as the reading engine",
+    check("month page: it loads the editor and the image engine as well as the reading engine",
       month.includes('src="../tool.js"') && month.includes('src="../publish.js"') &&
-      month.includes('src="../site.js"') && month.includes('src="../blog.js"'),
+      month.includes('src="../site.js"') && month.includes('src="../blog.js"') &&
+      month.indexOf('src="../work.js"') < month.indexOf('src="../imagesengine.js"') &&
+      month.indexOf('src="../imagesengine.js"') < month.indexOf('src="../blog.js"'),
       (month.match(/<script defer src="[^"]*"><\/script>/g) || []).join(" "));
 
     // MC3. the bar carries the two controls and no label. The header above
@@ -6107,9 +7622,14 @@ async function main() {
     check("month page: it states its own month list, for the picker",
       /<script id="blogManifest" type="text\/plain" data-ced="blog">\nmonths:2607\n<\/script>/.test(month),
       (month.match(/months:[^\n]*/) || [""])[0]);
-    check("published images are real files (jpg magic + png magic)",
+    // The copy a page shows is always a JPEG; the small copy is a WebP; the
+    // original keeps the format it came in as.
+    check("published photos are real files: a JPEG shown, a WebP small copy, a PNG original",
       zipFiles["blog/260711_img0001.jpg"][0] === 0xFF && zipFiles["blog/260711_img0001.jpg"][1] === 0xD8 &&
-      zipFiles["blog/260711_img0002.png"][1] === 0x50);
+      zipFiles["blog/260711_img0001_sd.webp"].slice(8, 12).toString("latin1") === "WEBP" &&
+      zipFiles["blog/260711_img0001_original.png"][1] === 0x50 &&
+      zipFiles["blog/260711_img0002.jpg"][0] === 0xFF &&
+      zipFiles["blog/260711_img0002_original.png"][1] === 0x50);
   }
 
   // BL5. serve the extracted bundle and read it like a visitor
@@ -6175,12 +7695,22 @@ async function main() {
     for (let i = 0; i < 30 && !b64; i++) { await sleep(500); b64 = await evaluate(`window.__zipB64`); }
     return b64 ? unzipStore(Buffer.from(b64, "base64")) : null;
   }
+  // The files nothing names any more. ORPHANS.txt is gone from the bundle:
+  // a zip cannot move a file, so the Done step lists the paths instead.
+  async function orphansSaid() {
+    return String(await evaluate(`(() => {
+      const item = [...document.querySelectorAll('.bc-wizard .bc-wiz__checks li')]
+        .map(e => e.textContent)
+        .filter(t => /nothing names them any more|deletethese/.test(t));
+      return item.join(" | ");
+    })()`) || "");
+  }
   if (zipB64) {
     writeBundle(zipFiles);
     // The stylesheet and the four script trunks are repo files, not bundle
     // files. Copy them in so the served bundle behaves like the deployed site.
-    for (const f of ["site.css", "site.js", "work.js", "blog.js", "markdown.js", "tool.js",
-                     "publish.js", "index.html"]) {
+    for (const f of ["site.css", "site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js",
+                     "tool.js", "publish.js", "index.html"]) {
       writeFileSync(join(bdir, f), readFileSync(join(REPO, f)));
     }
     // blog.html is NOT copied from the repo here: this directory is the
@@ -6763,8 +8293,9 @@ async function main() {
       const t2 = searchTable(zip2["search.js"].toString("utf8"));
       check("search: a second publish adds its entry and keeps the first, oldest first",
         t2.posts.length === 2 && t2.posts[0].id === "0002" && t2.posts[1].id === "0001" &&
-        t2.posts[0].title === "June post" && t2.posts[1].thumb.length > 100,
-        t2.posts.map((e) => e.id + ":" + e.date).join(" "));
+        t2.posts[0].title === "June post" &&
+        /^blog\/\d{6}_img\d{4}_sd\.webp$/.test(t2.posts[1].thumb || ""),
+        t2.posts.map((e) => e.id + ":" + e.date + ":" + e.thumb).join(" "));
       check("chain: the backdated month is the first month, and its neighbour now points at it",
         m2606c.includes('class="bm-chain__end"') && !/rel="prev"/.test(m2606c) &&
         m2607c.includes('<link rel="prev" href="2606.html" />') && m2607c.includes('<link rel="prefetch" href="2606.html" />') &&
@@ -6829,14 +8360,15 @@ async function main() {
     const monthBoot = await evaluate(`({
       site: !!(window.AMH && AMH.site && AMH.site.requestTick), blog: !!(window.AMH && AMH.blog),
       work: !!(window.AMH && AMH.work && AMH.work.lightbox),
+      images: !!(window.AMH && AMH.images && AMH.images.intake),
       index: !!document.getElementById('blogStream'), month: document.body.classList.contains('blog-month'),
       link: (document.querySelector('.bm-older') || {}).textContent || '',
       scripts: [...document.querySelectorAll('script[src]')].map(s => s.getAttribute('src')).join(' '),
     })`);
     check("chain: a month page boots with every trunk and no console error",
       exceptions.length === 0 && monthBoot.site && monthBoot.blog && monthBoot.work &&
-      !monthBoot.index && monthBoot.month &&
-      monthBoot.scripts === "../site.js ../work.js ../blog.js ../tool.js ../publish.js" &&
+      monthBoot.images && !monthBoot.index && monthBoot.month &&
+      monthBoot.scripts === "../site.js ../work.js ../imagesengine.js ../blog.js ../tool.js ../publish.js" &&
       monthBoot.link === "Older: June 2026 · 1 post",
       JSON.stringify(monthBoot).slice(0, 200) + " " + exceptions.join(" | ").slice(0, 120));
     // MP2. a month page has the bar with its own picker, folds nothing,
@@ -7179,15 +8711,15 @@ async function main() {
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
     await passRouteStep();
     const zipMayGone = await capturePublish();
+    const mayGoneSaid = await orphansSaid();
     check("chain: a delete that empties the first month repairs the month after it",
       !!zipMayGone && !zipMayGone["blog/2605.html"] &&
-      (zipMayGone["ORPHANS.txt"] || Buffer.from("")).toString("utf8").includes("blog/2605.html") &&
+      mayGoneSaid.includes("blog/2605.html") && !zipMayGone["ORPHANS.txt"] &&
       !!zipMayGone["blog/2606.html"] && zipMayGone["blog/2606.html"].toString("utf8").includes("This is the first month."),
-      zipMayGone ? Object.keys(zipMayGone).sort().join(", ") : "no zip");
+      (zipMayGone ? Object.keys(zipMayGone).sort().join(", ") : "no zip") + " said " + mayGoneSaid);
     if (zipMayGone) {
       writeBundle(zipMayGone);
       rmSync(join(bdir, "blog/2605.html"), { force: true });
-      rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
     await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!')?.click()`);
 
@@ -7744,7 +9276,7 @@ async function main() {
     check("P2: body republish regenerates only the month file, home page left out",
       !!zip3 && !!zip3["blog/2607.html"] && zip3["blog/2607.html"].toString("utf8").includes("EDITED BODY") &&
       !zip3["index.html"] &&
-      !zip3["ORPHANS.txt"] && !Object.keys(zip3).some((n) => /img\d{4}\.(jpg|png)$/.test(n)),
+      !zip3["ORPHANS.txt"] && !Object.keys(zip3).some((n) => /img\d{4}\.(jpg|png|webp)$/.test(n)),
       zip3 ? Object.keys(zip3).sort().join(", ") : "no zip");
     if (zip3) {
       // the manifest's stamp and the month's line change at every publish,
@@ -7771,28 +9303,42 @@ async function main() {
     await evaluate(`document.querySelector('.bc-title').value = 'Moved post'`);
     await pressPublish();
     const zip4 = await capturePublish();
+    const orph = await orphansSaid();
     check("P2: cross-month move produced a bundle", !!zip4,
       zip4 ? Object.keys(zip4).sort().join(", ") : "no zip");
     if (zip4) {
       const man4 = zip4["blog.html"].toString("utf8");
       const m2606 = zip4["blog/2606.html"].toString("utf8");
-      const orph = (zip4["ORPHANS.txt"] || Buffer.from("")).toString("utf8");
       check("P2: move keeps the permanent id, re-sorts the manifest",
         man4.includes("2606090001Moved post|2606100002June post") && !man4.includes("2607110001"));
       check("P2: target month holds both posts, date-desc",
         m2606.indexOf('id="p0002"') < m2606.indexOf('id="p0001"') && m2606.includes("EDITED BODY"));
-      check("P2: old month + old image names orphaned; no 2607 file shipped",
+      // all three files of each image, because all three are on the site now
+      check("P2: old month and all three files of each image are named as orphans",
         !zip4["blog/2607.html"] && orph.includes("blog/2607.html") &&
-        orph.includes("blog/260711_img0001.jpg") && orph.includes("blog/260711_img0002.png"));
-      check("P2: published images re-emitted under the new date prefix",
+        orph.includes("blog/260711_img0001.jpg") &&
+        orph.includes("blog/260711_img0001_sd.webp") &&
+        orph.includes("blog/260711_img0001_original.png") &&
+        orph.includes("blog/260711_img0002.jpg"), orph.slice(0, 320));
+      check("P2: published images re-emitted under the new date prefix, all three",
         !!zip4["blog/260609_img0001.jpg"] && zip4["blog/260609_img0001.jpg"][0] === 0xFF &&
-        !!zip4["blog/260609_img0002.png"] && zip4["blog/260609_img0002.png"][1] === 0x50);
+        !!zip4["blog/260609_img0001_sd.webp"] && !!zip4["blog/260609_img0001_original.png"] &&
+        !!zip4["blog/260609_img0002.jpg"] && !!zip4["blog/260609_img0002_original.png"],
+        Object.keys(zip4).filter((n) => /_img/.test(n)).sort().join(", "));
+      // the manifest's line moves with the files
+      check("P2: the manifest's image lines carry the new date",
+        /\nimage:0001=260609 png \d+x\d+ \d+/.test(man4) &&
+        /\nimage:0002=260609 png \d+x\d+ \d+/.test(man4),
+        (man4.match(/\nimage:[^\n]*/g) || []).join(" | "));
       writeBundle(zip4);
       // honor the orphan checklist, like the human workflow demands
-      for (const o of ["blog/2607.html", "blog/260711_img0001.jpg", "blog/260711_img0002.png"]) {
+      for (const o of ["blog/2607.html",
+                       "blog/260711_img0001.jpg", "blog/260711_img0001_sd.webp",
+                       "blog/260711_img0001_original.png",
+                       "blog/260711_img0002.jpg", "blog/260711_img0002_sd.webp",
+                       "blog/260711_img0002_original.png"]) {
         rmSync(join(bdir, o), { force: true });
       }
-      rmSync(join(bdir, "ORPHANS.txt"), { force: true });
     }
 
     // P2-4b. ONE POST ON ITS OWN. June now holds two posts, so this is the
@@ -8167,7 +9713,9 @@ async function main() {
     if (zip6) {
       const t6 = searchTable(zip6["search.js"].toString("utf8"));
       const t6prev = searchTable(readFileSync(join(bdir, "search.js"), "utf8"));
-      check("search: a rebuild writes the index again from the sources, keeping the thumbnails",
+      // A thumb is a path the manifest already names, so a rebuild remakes
+      // every entry with nothing to fetch, from disk as well as over http.
+      check("search: a rebuild writes the index again from the sources, keeping the thumbnail paths",
         t6.posts.length === t6prev.posts.length &&
         JSON.stringify(t6.posts.map((e) => e.id + e.text)) ===
           JSON.stringify(t6prev.posts.map((e) => e.id + e.text)) &&
@@ -8668,10 +10216,11 @@ async function main() {
       (folderDone.wrote || []).indexOf("search.js") !== -1,
       JSON.stringify({ took: tookFolder, route: folderDone.route, zipped: folderDone.zipped,
                        wrote: folderDone.wrote }).slice(0, 240));
-    // ORPHANS.txt is the zip's own file. Writing it into the repo would add a
-    // file to delete to the list of files to delete.
-    check("folder route: ORPHANS.txt is never written into the repo",
-      (folderDone.wrote || []).indexOf("ORPHANS.txt") === -1,
+    // A folder can move a file, so nothing is left for the reader to delete
+    // by hand and no list of files to delete is written into the repo.
+    check("folder route: no list of files to delete is written into the repo",
+      (folderDone.wrote || []).indexOf("ORPHANS.txt") === -1 &&
+      !(folderDone.wrote || []).some((n) => /ORPHANS/.test(n)),
       JSON.stringify(folderDone.wrote));
     // and the reader's list loses the step that only a zip has
     // and the last word after a folder write is the other one: the files ARE
@@ -9160,7 +10709,7 @@ async function main() {
   const retired = ["bs-card", "bs-index", "bs-months", "bm-head", "bs-month ", "bs-end",
                    "bs-bar__month"];
   const searched = ["index.html", "gallery.html", "blog.html", "site.css", "site.js",
-                    "work.js", "blog.js", "markdown.js", "tool.js", "publish.js"];
+                    "work.js", "imagesengine.js", "blog.js", "markdown.js", "tool.js", "publish.js"];
   const stillThere = [];
   for (const f of searched) {
     const text = readFileSync(join(REPO, f), "utf-8");
@@ -9502,7 +11051,9 @@ async function main() {
     function w(s) { var e = m.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : null; }
     return { tools: m.querySelectorAll('.ced-tool').length, toolsW: w('.ced-modal__tools'),
              ta: w('textarea'), alt: !!m.querySelector('.ced-modal__alt'),
-             src: !!m.querySelector('.ced-modal__src') };
+             src: !!m.querySelector('.ced-modal__src'),
+             del: [].slice.call(m.querySelectorAll('.ced-modal__btns .ced-btn'))
+               .filter(function (b) { return b.textContent === 'Delete'; }).length };
   })()`);
   await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel')?.click()`);
   await sleep(300);
@@ -9577,8 +11128,11 @@ async function main() {
 
   // The cap is on the text and not on the body, so the region editor's own
   // parts keep the full width of the frame.
-  check("frame: the region editor keeps its tools row, its textarea width, its alt row and its source line",
-    frRegionParts.tools === 10 && frRegionParts.alt === true && frRegionParts.src === true &&
+  // The box edits a text region and nothing else now: the alt row, the
+  // source line and Delete went with the image mode that used them.
+  check("frame: the region editor keeps its tools row and its textarea width, and edits text only",
+    frRegionParts.tools === 10 && frRegionParts.alt === false &&
+    frRegionParts.src === false && frRegionParts.del === 0 &&
     frRegionParts.toolsW > frRegionParts.ta && frRegionParts.ta > 0,
     JSON.stringify(frRegionParts));
 

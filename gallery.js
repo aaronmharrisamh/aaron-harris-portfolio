@@ -48,10 +48,15 @@
    keeps what the author asked for.
 
    Section 7 loads after tool.js and claims the trains as image
-   regions. It reimplements nothing: the drop, the file check, the
-   caption modal and the delete confirm are all the editor's, reached
-   through AMH.tool. What it adds is the two numbers a tile carries,
-   the controls for them, and the band a section wears.
+   regions. It reimplements nothing: the wizard, the photos box, the
+   trash's question and the caption field are all the editor's,
+   reached through AMH.tool. What it adds is where they sit, the two
+   numbers a tile carries, and the band a section wears.
+
+   A carousel shows one photograph and takes its controls from chips
+   drawn over it. A grid shows every photograph at once, so each one
+   carries its own: a chip, its two numbers, a trash, and a pencil on
+   a caption that exists.
 
    The trains are a list, which is the editor's word for a run of
    blocks it may add to, remove from and reorder. This file says what
@@ -122,6 +127,52 @@
   function preferIn(prefer, cols) {
     var map = COLLAPSE[cols];
     return Math.max(MIN_SPAN, Math.min(map ? (map[prefer] || prefer) : prefer, cols));
+  }
+
+  /* The grid as numbers, for the one thing arithmetic cannot be left to the
+     browser for: the sizes string a tile's markup carries. The browser reads
+     it before it has laid anything out, so it has to be told.
+
+     These are site.css section 4's values. They are the same duplication
+     COLLAPSE above is, for the same reason and with the same rule: change
+     one and change the other. */
+  var TABLET = 880;          /* at this width six columns become three */
+  var PHONE = 560;           /* and at this one, three become one */
+  var WRAP = 1180;           /* .wrap max-width */
+  var WRAP_PAD = 96;         /* its gutter, both sides, at that width */
+  var GAP = 14;              /* --gal-gap */
+
+  /* How wide a tile of this preference is drawn, in the three bands the
+     grid has. Each band states the WIDEST the tile can be in it: a sizes
+     string that understates hands the browser a copy too small to be sharp,
+     and one that overstates costs bytes and nothing else.
+
+       a phone     one column, the wrap less its gutter
+       a tablet    the collapsed preference, out of three columns
+       wider       the preference out of six, in a wrap that stops at 1180
+
+     The packer may still widen a tile within the zoom cap. That costs one
+     step of sharpness on one tile at one viewport and never a wrong image.
+     It is not solved here because it cannot be: the packer decides per
+     viewport, and a sizes string is written once. */
+  function sizesFor(prefer) {
+    var col = (WRAP - WRAP_PAD - GAP * (6 - 1)) / 6;
+    var wide = Math.round(col * prefer + GAP * (prefer - 1));
+    /* the wrap is about 90vw at the tablet band, where the gutter is 5vw */
+    var mid = Math.round(preferIn(prefer, 3) / 3 * 90);
+    return "(max-width: " + PHONE + "px) 92vw, " +
+           "(max-width: " + TABLET + "px) " + mid + "vw, " + wide + "px";
+  }
+
+  /* The slot a tile's markup is written for.
+
+     widest is 0, which is to say a srcset is always written. A tile covers
+     its cell: object-fit crops a copy narrower than the slot with or without
+     a srcset, so the srcset can only help, by handing a phone the small
+     copy. A carousel draws its photo at the photo's own size, which is why
+     it states a width there and this does not. */
+  function slotFor(prefer) {
+    return { sizes: sizesFor(prefer), widest: 0 };
   }
 
   /* ==========================================================
@@ -356,14 +407,27 @@
     return e;
   }
 
+  /* The photograph's own size: the width and height the markup declares,
+     and the loaded copy's only when it declares none.
+
+     The attribute first, because a tile with a srcset may have painted its
+     small copy, and naturalWidth would then report 480 for a photograph
+     that is 1920 wide. The zoom cap is a question about the photograph. */
+  function naturalOf(img) {
+    if (!img) return { w: 0, h: 0 };
+    var w = parseInt(img.getAttribute("width"), 10) || 0;
+    var h = parseInt(img.getAttribute("height"), 10) || 0;
+    if (w && h) return { w: w, h: h };
+    return { w: img.naturalWidth, h: img.naturalHeight };
+  }
+
   function modelFor(el, geom) {
-    var img = el.querySelector("img");
+    var nat = naturalOf(el.querySelector("img"));
     return {
       el: el,
       prefer: parseInt(el.getAttribute("data-w"), 10) || 2,
       priority: parseInt(el.getAttribute("data-priority"), 10) || 0,
-      maxSpan: maxSpanFor(img ? img.naturalWidth : 0,
-                          img ? img.naturalHeight : 0, geom)
+      maxSpan: maxSpanFor(nat.w, nat.h, geom)
     };
   }
 
@@ -409,22 +473,32 @@
 
   /* One train's tiles as lightbox items.
 
-     currentSrc, not the src attribute, for the reason work.js gives: while
-     the editor is showing a dropped file the live <img> paints a blob
-     preview, and the viewer must show what is on screen rather than the
-     img/work/ path the export will carry.
+     The src attribute, not currentSrc, for the reason work.js gives: an
+     image with a srcset may be painting its small copy, and the viewer
+     shows the whole picture. A dropped file's blob preview is in the
+     attribute too, so the viewer shows what the tile shows.
 
      The caption comes from the figcaption, because that is where a tile
      keeps it: it has to be readable with no script running. */
+  /* A tile's caption as words. The editor wraps them in a span so a field
+     can stand in for them, so the span is read when there is one. */
+  function capText(fig) {
+    var cap = fig.querySelector(".gal-tile__cap");
+    if (!cap) return "";
+    var text = cap.querySelector(".gal-tile__cap-text");
+    return (text || cap).textContent.trim();
+  }
+
   function tileItems(train) {
     return Array.prototype.map.call(train.querySelectorAll(".gal-tile"),
       function (fig) {
         var im = fig.querySelector("img");
-        var cap = fig.querySelector(".gal-tile__cap");
         return {
-          src: im ? (im.currentSrc || im.src) : "",
-          caption: cap ? cap.textContent.trim() : "",
-          alt: im ? (im.getAttribute("alt") || "") : ""
+          src: im ? im.src : "",
+          caption: capText(fig),
+          alt: im ? (im.getAttribute("alt") || "") : "",
+          original: im ? (im.getAttribute("data-original") || "") : "",
+          originalBytes: im ? (parseInt(im.getAttribute("data-original-bytes"), 10) || 0) : 0
         };
       });
   }
@@ -454,9 +528,41 @@
     });
   }
 
+  /* The image files of a drop, and nothing else. */
+  function imageFiles(e) {
+    return Array.prototype.filter.call((e.dataTransfer && e.dataTransfer.files) || [],
+      function (f) { return /^image\//.test(f.type); });
+  }
+
+  /* The image region one train registered as, or none while the editor has
+     not scanned. A listener wired at load has to ask each time. */
+  function regionOf(train) {
+    var all = regions();
+    for (var i = 0; i < all.length; i++) if (all[i].el === train) return all[i];
+    return null;
+  }
+
   function wireTrain(train) {
     if (train.__galLightbox) return;
     train.__galLightbox = true;
+
+    /* A drop on the band or in a gap adds to the section, the same as a drop
+       on a tile. What a photo joins is the section, not the tile it landed
+       on, so the two answer the same way. A tile stops its own drop, so this
+       never runs twice for one file. */
+    train.addEventListener("dragover", function (e) {
+      if (!TOOL || !TOOL.editorOn() || !e.dataTransfer) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    });
+    train.addEventListener("drop", function (e) {
+      if (!TOOL || !TOOL.editorOn()) return;
+      var region = regionOf(train);
+      if (!region) return;
+      e.preventDefault();
+      var files = imageFiles(e);
+      if (files.length) TOOL.addPhoto(region, { files: files });
+    });
 
     train.addEventListener("click", function (e) {
       /* the editor's own controls sit on top of a tile and stop their own
@@ -483,10 +589,8 @@
     Array.prototype.forEach.call(train.querySelectorAll(".gal-tile"), function (fig) {
       fig.setAttribute("tabindex", "0");
       fig.setAttribute("role", "button");
-      var cap = fig.querySelector(".gal-tile__cap");
-      fig.setAttribute("aria-label",
-        (cap && cap.textContent.trim() ? cap.textContent.trim() : "Gallery photo") +
-        " (enlarge)");
+      var words = capText(fig);
+      fig.setAttribute("aria-label", (words || "Gallery photo") + " (enlarge)");
     });
   }
 
@@ -557,11 +661,18 @@
      section owns the markup, which is the division the core was
      built for.
 
-     Nothing here duplicates the editor. A drop goes to
-     AMH.tool.dropFiles, a chip opens AMH.tool.openImage, and any
-     change is reported with AMH.tool.changed. If this section ever
-     starts reimplementing one of those, the hook is missing and
-     belongs in tool.js.
+     Nothing here duplicates the editor. A drop, the + Photo pill and the
+     empty tile all open AMH.tool.addPhoto; the chip opens
+     AMH.tool.editPhotos; the trash asks through AMH.tool.trashPhoto; the
+     pencil edits through AMH.tool.captionField; and any change is reported
+     with AMH.tool.changed. If this section ever starts reimplementing one
+     of those, the hook is missing and belongs in tool.js.
+
+     What is this file's own is where they sit: a band wears the pills, a
+     tile wears its two numbers and its trash, and a caption wears its
+     pencil. A carousel shows one photograph and takes its controls from
+     chips drawn over it; a grid shows every photograph at once, so each
+     one carries its own.
      ========================================================== */
 
   var TOOL = null;          /* the editor kit, once tool.js has loaded */
@@ -588,7 +699,38 @@
       "padding:3px 6px;color:#0d1014;}" +
     ".gal-tile__mark--moved{background:var(--accent);}" +
     ".gal-tile__mark--widened{background:#f0883e;}" +
-    ".gal-tile__mark--narrowed{background:var(--muted);}";
+    ".gal-tile__mark--narrowed{background:var(--muted);}" +
+    /* the trash, in the bar with the two numbers and shaped like them */
+    ".gal-tile__bin{display:grid;place-items:center;width:23px;height:23px;padding:0;" +
+      "background:rgba(8,10,14,.72);border:1px solid rgba(74,165,232,.32);border-radius:6px;" +
+      "color:var(--muted);cursor:pointer;}" +
+    ".gal-tile__bin svg{width:12px;height:12px;display:block;}" +
+    ".gal-tile__bin:hover{border-color:#e5534b;color:#e5534b;}" +
+    /* the way into an empty section, on the tile that stands for it */
+    ".gal-tile__choose{position:absolute;left:50%;bottom:14%;transform:translateX(-50%);" +
+      "z-index:3;white-space:nowrap;}" +
+    /* a chip in the before view is a label: it names the photo and opens
+       nothing, because nothing is edited there */
+    ".gal-tile__chip:disabled{cursor:default;opacity:.75;}" +
+    /* the caption, while the editor is on: words, then a pencil, and a field
+       in the words' place while one is open */
+    ".gal-tile--edit .gal-tile__cap{display:flex;align-items:center;gap:.4rem;}" +
+    ".gal-tile__cap-text{min-width:0;overflow:hidden;text-overflow:ellipsis;" +
+      "white-space:nowrap;}" +
+    ".gal-tile__cap-text[hidden]{display:none;}" +
+    ".gal-tile__cap .ced-cappen{flex:none;display:grid;place-items:center;width:20px;" +
+      "height:20px;padding:0;border-radius:5px;cursor:pointer;color:#fff;" +
+      "background:rgba(8,10,14,.68);border:1px solid rgba(255,255,255,.3);}" +
+    ".gal-tile__cap .ced-cappen svg{width:11px;height:11px;display:block;}" +
+    ".gal-tile__cap .ced-cappen:hover{background:var(--accent);border-color:var(--accent);" +
+      "color:#0d1014;}" +
+    ".gal-tile__cap .ced-cappen[hidden]{display:none;}" +
+    ".gal-tile__cap .ced-capedit{flex:1 1 auto;min-width:0;padding:.22rem .45rem;" +
+      "font:inherit;color:var(--text);background:rgba(8,10,14,.94);" +
+      "border:1px solid var(--accent);border-radius:5px;cursor:text;}" +
+    ".gal-tile__cap .ced-capedit:focus{outline:none;box-shadow:0 0 0 3px rgba(74,165,232,.28);}" +
+    /* the same two numbers, on a row of the PHOTOS box */
+    ".gal-extra{display:inline-flex;align-items:center;gap:.4rem;}";
 
 
   /* The two numbers a tile carries beyond src, alt and caption. The core
@@ -664,15 +806,27 @@
         esc(h.year || "") + '</span><span class="gal-train__count">' +
         countWords(entries.length) + "</span></span>\n" +
       indent + "  </header>";
+    /* One attribute a line under the src, the way a carousel writes one:
+       what the browser reads to pick and place a copy, then the words, then
+       the editor's notes on the files. The continuation aligns under `src`. */
+    var pad = "\n" + indent + "         ";
     var lines = entries.map(function (e) {
       var w = e.prefer || 2, p = e.priority || 0;
-      var cap = e.caption || "";
+      /* the src is the contract's too: with Display Maximum UHD on, it is
+         the original and not the entry's display copy */
+      var src = e.src, shown = "", notes = "";
+      AMH.images.attrs(e, slotFor(w)).forEach(function (a) {
+        if (a[0] === "src") { src = a[1]; return; }
+        var line = pad + a[0] + '="' + esc(a[1]) + '"';
+        if (a[0].indexOf("data-") === 0) notes += line;
+        else shown += line;
+      });
       return indent + '  <figure class="gal-tile" data-w="' + w +
         '" data-priority="' + p + '" data-span="' + w + '">\n' +
-        indent + '    <img src="' + TOOL.escAttr(e.src) + '" alt="' +
-        TOOL.escAttr(e.alt) + '" loading="lazy" decoding="async" />\n' +
+        indent + '    <img src="' + esc(src) + '"' + shown +
+        pad + 'alt="' + esc(e.alt) + '" loading="lazy" decoding="async"' + notes + " />\n" +
         indent + '    <figcaption class="gal-tile__cap">' +
-        TOOL.escAttr(cap) + "</figcaption>\n" +
+        esc(e.caption || "") + "</figcaption>\n" +
         indent + "  </figure>";
     });
     return "\n" + [band].concat(lines).join("\n") + "\n" + indent;
@@ -680,55 +834,104 @@
 
   /* ---------------- drawing one tile ---------------- */
 
-  function tileFigure(region, entry, index) {
+  function tileFigure(region, entry) {
     var fig = doc.createElement("figure");
     fig.className = "gal-tile";
     var w = entry.prefer || 2;
     fig.setAttribute("data-w", w);
     fig.setAttribute("data-priority", entry.priority || 0);
     fig.setAttribute("data-span", w);
+    /* the entry this tile draws. A control finds its tile again through it,
+       because the packer reorders the train and the order on screen is then
+       not the model's. */
+    fig.__galEntry = entry;
 
     var img = doc.createElement("img");
-    img.src = entry.empty ? TOOL.emptyTile : (entry.preview || entry.src);
+    if (entry.empty) img.src = TOOL.photoTile;
+    else {
+      /* a photo no save has written shows from its blob: URLs, which are one
+         copy each and so go with no slot */
+      var held = entry.photo ? AMH.images.preview(entry.photo) : null;
+      if (held) held.uhd = entry.uhd;
+      if (held) setAttrs(img, AMH.images.attrs(held, null));
+      else if (entry.preview && entry.preview !== entry.src) img.src = entry.preview;
+      else setAttrs(img, AMH.images.attrs(entry, slotFor(w)));
+    }
     img.alt = entry.alt || "";
     img.setAttribute("loading", "lazy");
     img.setAttribute("decoding", "async");
     fig.appendChild(img);
 
+    /* the words go in a span of their own, so a field can stand in for them
+       while one is open */
     var cap = doc.createElement("figcaption");
     cap.className = "gal-tile__cap";
-    cap.textContent = entry.caption || "";
+    var text = doc.createElement("span");
+    text.className = "gal-tile__cap-text";
+    text.textContent = entry.caption || "";
+    cap.appendChild(text);
     fig.appendChild(cap);
 
-    if (TOOL.editorOn()) decorateTile(fig, region, entry, index);
+    if (TOOL.editorOn()) decorateTile(fig, region, entry);
     return fig;
   }
 
+  function setAttrs(img, pairs) {
+    pairs.forEach(function (a) { img.setAttribute(a[0], a[1]); });
+  }
+
+  /* The tile one entry is drawn as, found by the entry itself. */
+  function tileFor(region, en) {
+    var tiles = region.el ? region.el.querySelectorAll(".gal-tile") : [];
+    for (var i = 0; i < tiles.length; i++) {
+      if (tiles[i].__galEntry === en) return tiles[i];
+    }
+    return null;
+  }
+
   /* Everything a tile grows while the editor is on, and loses when it is
-     off. All of it is scaffolding: none of it is ever exported. */
-  function decorateTile(fig, region, entry, index) {
+     off. All of it is scaffolding: none of it is ever exported.
+
+     THE BEFORE VIEW CARRIES NO TOOLS. It draws what is published, from a
+     list that is not the model, so a control that named a photo by its place
+     in the model would act on the wrong photo. The chip stays, as a label for
+     what the reader is looking at. */
+  function decorateTile(fig, region, entry) {
+    var after = TOOL.viewing() === "after";
+    var at = region.model.indexOf(entry);
     fig.classList.add("gal-tile--edit");
 
-    /* the chip, which opens the editor's own caption and alt modal */
+    /* the chip: the photos of this section, opened on this one */
     var chip = doc.createElement("button");
     chip.type = "button";
     chip.className = "ced-chip gal-tile__chip" +
       (entry.isSeed ? " ced-chip--seed" : "");
-    chip.textContent = entry.empty ? "DROP" : (entry.isSeed ? "SEED" : (entry.imgId || "IMG"));
+    chip.textContent = entry.empty ? "ADD"
+      : (entry.isSeed ? "SEED" : (entry.imgId || "IMG"));
     chip.title = entry.isSeed
-      ? "placeholder - drop a real image to replace every seed"
-      : (entry.empty ? "empty slot - drop an image here" : "caption, alt and delete");
+      ? "placeholder - the first photo you add replaces every seed"
+      : entry.empty ? "add the first photo of this section"
+      : "caption, alt text, width and priority";
+    chip.disabled = !after || entry.isSeed;
     chip.addEventListener("click", function (e) {
       e.preventDefault(); e.stopPropagation();
-      if (entry.isSeed) return;
-      TOOL.openImage(region, index);
+      if (chip.disabled) return;
+      if (entry.empty) TOOL.addPhoto(region, { choose: true });
+      else if (at !== -1) TOOL.editPhotos(region, at);
     });
     fig.appendChild(chip);
+    if (!after) return;
 
-    /* a seed is filler: it takes drops, but carries no controls */
-    if (!entry.isSeed) fig.appendChild(tileControls(region, entry, index));
+    if (entry.empty) emptyTileTools(fig, region);
+    else if (!entry.isSeed) {
+      fig.appendChild(tileControls(region, entry, at));
+      if (entry.caption) capPencil(fig, region, entry);
+    }
 
-    /* the drop target is the tile itself */
+    /* A DROP ADDS; IT DOES NOT REPLACE. It used to replace the photo it
+       landed on, which is a way to lose one by aiming badly. Replace in
+       PHOTOS is the way to swap a file for a photo that is named, and the
+       carousels made the same change in V088. */
     fig.addEventListener("dragover", function (e) {
       if (!TOOL.editorOn()) return;
       e.preventDefault(); e.stopPropagation();
@@ -740,23 +943,140 @@
       if (!TOOL.editorOn()) return;
       e.preventDefault(); e.stopPropagation();
       fig.classList.remove("ced-dropping");
-      var files = Array.prototype.filter.call(
-        (e.dataTransfer && e.dataTransfer.files) || [],
-        function (f) { return /^image\//.test(f.type); });
-      /* a seed grid has an empty model: the editor replaces the whole seed
-         set on the first real drop, which is the carousel's behaviour too */
-      if (files.length) TOOL.dropFiles(region, files, entry.isSeed ? -1 : index);
+      var files = imageFiles(e);
+      if (files.length) TOOL.addPhoto(region, { files: files });
     });
   }
 
-  /* The two controls that are new in this consumer.
+  /* The slot a section with no photographs shows. One press opens the file
+     picker with the wizard, from the button, from the tile, and from the
+     keyboard: a person who has just made a section wants a photo in it.
 
-     Both are labelled preferences rather than commands, because that is what
-     they are: the packer may widen a tile or pull it forward under the rules
-     in section 4, and the indicators below say when it did. */
-  function tileControls(region, entry, index) {
+     The button's click stops at the button, so the tile's own listener does
+     not open a second picker. Both stop the click going further, which is
+     what keeps the train from opening the viewer on the art. */
+  function emptyTileTools(fig, region) {
+    function open() { TOOL.addPhoto(region, { choose: true }); }
+    var choose = doc.createElement("button");
+    choose.type = "button";
+    choose.className = "ced-btn ced-choose gal-tile__choose";
+    choose.textContent = "Choose a photo";
+    choose.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation(); open();
+    });
+    fig.appendChild(choose);
+    fig.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation(); open();
+    });
+    fig.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      if (e.target !== fig) return;
+      e.preventDefault(); e.stopPropagation(); open();
+    });
+  }
+
+  /* The pencil on a tile's caption, which edits it where it stands.
+
+     IT SHOWS ON A CAPTION THAT EXISTS. Writing the first one is the wizard's
+     job and the PHOTOS box's, the same rule the carousels keep. */
+  function capPencil(fig, region, entry) {
+    var cap = fig.querySelector(".gal-tile__cap");
+    var text = cap ? cap.querySelector(".gal-tile__cap-text") : null;
+    if (!text) return;
+    var pen = doc.createElement("button");
+    pen.type = "button";
+    pen.className = "ced-cappen";
+    pen.innerHTML = TOOL.icon.pencil;
+    pen.title = "Edit this caption";
+    pen.setAttribute("aria-label", "Edit this caption");
+    /* stopped, so the tile does not open the viewer under the field */
+    pen.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      TOOL.captionField(region, entry, cap, text, pen);
+    });
+    cap.appendChild(pen);
+  }
+
+  /* A saved caption, written where it stands.
+
+     Not by drawing the section again. The click that ended the edit is still
+     travelling, and a redraw would take the element it was aimed at. That is
+     the rule V089 gave the carousels, and a grid needs it more, because every
+     photo is on screen at once. */
+  function writeTileCaption(region, en, value) {
+    var fig = tileFor(region, en);
+    if (!fig) return;
+    var cap = fig.querySelector(".gal-tile__cap");
+    var text = cap ? cap.querySelector(".gal-tile__cap-text") : null;
+    if (text) text.textContent = value;
+    /* an emptied caption has nothing left to edit in place */
+    var pen = cap ? cap.querySelector(".ced-cappen") : null;
+    if (pen) pen.hidden = !value;
+    markOpenable(region.el);
+  }
+
+  /* The two numbers a tile carries, drawn on a row of the PHOTOS box.
+
+     The same classes the tile bar uses, so one rule paints both. The bar is
+     the quick way for one tile; the box is the way for a whole section. */
+  function drawRowExtras(host, values, changed) {
+    var wrap = doc.createElement("span");
+    wrap.className = "gal-extra";
+    var lab = doc.createElement("span");
+    lab.className = "ced-field__label";
+    lab.textContent = "Width";
+    var widths = doc.createElement("div");
+    widths.className = "gal-tile__w";
+    [2, 3, 4].forEach(function (w) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "gal-w" + ((values.prefer || 2) === w ? " on" : "");
+      b.textContent = "x" + w;
+      b.addEventListener("click", function () {
+        values.prefer = w;
+        Array.prototype.forEach.call(widths.children, function (o) {
+          o.classList.toggle("on", o === b);
+        });
+        changed();
+      });
+      widths.appendChild(b);
+    });
+    wrap.appendChild(lab);
+    wrap.appendChild(widths);
+
+    var pWrap = doc.createElement("label");
+    pWrap.className = "gal-extra";
+    var pLab = doc.createElement("span");
+    pLab.className = "ced-field__label";
+    pLab.textContent = "Priority";
+    var pri = doc.createElement("input");
+    pri.type = "number";
+    pri.className = "gal-tile__pri";
+    pri.min = "0";
+    pri.value = String(values.priority || 0);
+    pri.title = "lower comes first, ties keep the order on screen";
+    pri.addEventListener("change", function () {
+      values.priority = parseInt(pri.value, 10) || 0;
+      changed();
+    });
+    pWrap.appendChild(pLab);
+    pWrap.appendChild(pri);
+
+    host.appendChild(wrap);
+    host.appendChild(pWrap);
+  }
+
+  /* The controls one tile carries: the two numbers, and the trash.
+
+     The numbers are labelled preferences rather than commands, because that
+     is what they are: the packer may widen a tile or pull it forward under
+     the rules in section 4, and the indicators below say when it did. */
+  function tileControls(region, entry, at) {
     var bar = doc.createElement("div");
     bar.className = "gal-tile__ctl";
+    /* the bar sits over the photograph, and a press on it is not a press on
+       the photograph */
+    bar.addEventListener("click", function (e) { e.stopPropagation(); });
 
     var widths = doc.createElement("div");
     widths.className = "gal-tile__w";
@@ -789,6 +1109,18 @@
       render(region);
     });
     bar.appendChild(pri);
+
+    var bin = doc.createElement("button");
+    bin.type = "button";
+    bin.className = "gal-tile__bin";
+    bin.innerHTML = TOOL.icon.trash;
+    bin.title = "Delete this photo";
+    bin.setAttribute("aria-label", "Delete this photo");
+    bin.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if (at !== -1) TOOL.trashPhoto(region, at);
+    });
+    bar.appendChild(bin);
     return bar;
   }
 
@@ -829,7 +1161,16 @@
     var pills = TOOL && TOOL.listPills
       ? TOOL.listPills("gallery", region.el.getAttribute("data-section") || "")
       : null;
-    if (pills) band.appendChild(pills);
+    if (pills) {
+      /* The fourth pill: the way a photograph gets into this section. It goes
+         in the same wrap as the other three, so a band wears one set of
+         controls and not two, and it is drawn on the same condition they are:
+         listPills answers with nothing while the editor is off. */
+      pills.appendChild(TOOL.pill("Photo", TOOL.icon.plus, function () {
+        TOOL.addPhoto(region, {});
+      }));
+      band.appendChild(pills);
+    }
   }
 
   function render(region, viewEntries) {
@@ -839,7 +1180,7 @@
     renderHead(region);
     Array.prototype.slice.call(train.querySelectorAll(".gal-tile"))
       .forEach(function (el) { train.removeChild(el); });
-    list.forEach(function (en, i) { train.appendChild(tileFigure(region, en, i)); });
+    list.forEach(function (en) { train.appendChild(tileFigure(region, en)); });
 
     var entry = trainEntry(train);
     entry.tiles = Array.prototype.slice.call(train.querySelectorAll(".gal-tile"));
@@ -942,6 +1283,12 @@
     readEntry: readTile,
     readHead: readHead,
     fields: TILE_FIELDS,
+    /* a box is named for the section and its sentences say "section" */
+    describe: function (g) {
+      return { name: (g.head && g.head.title) || "Section", noun: "section" };
+    },
+    rowExtras: drawRowExtras,
+    captionWrite: writeTileCaption,
     /* what a brand new tile asks for: the middle width, and no priority */
     defaults: { prefer: 2, priority: 0 },
     serialize: serializeTrain,
@@ -954,16 +1301,15 @@
     dropWhenEmpty: false,
     seedFallback: true,
     /* A section with no photographs is legitimate: a new one starts that
-       way, and it is filled by dropping on it. The seed filler belongs to
-       the one section the site was built with, and a new section has none
-       to fall back to. */
+       way, and its one slot is a way in. The seed filler belongs to the one
+       section the site was built with, and a new section has none to fall
+       back to. */
     mayBeEmpty: true,
     rowNote: ' <span class="ced-hidden">(tiles)</span>',
-    modalNote: ' <span class="ced-hidden" style="color:var(--dim);font-size:.7rem">(gallery tile)</span>',
     lastImageNote: function (r) {
       return r.seeds.length
         ? "\n\nThis is the last image: the seed placeholders will return."
-        : "\n\nThis is the last image: the train will be empty.";
+        : "\n\nThis is the last image: the section will be empty.";
     }
   };
 

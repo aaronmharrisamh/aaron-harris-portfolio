@@ -81,9 +81,14 @@
        markdown.js is here for the deep dives, which are written in Markdown
        and carry their source. It reads no page and renders nothing on its
        own, so it costs a reader one small file and nothing else. It comes
-       before tool.js, which is what asks it to render. -->
+       before tool.js, which is what asks it to render.
+
+       imagesengine.js is the image engine. Every image the site takes in
+       goes through it, so every page loads it, after work.js and before
+       the trunks that call it. -->
   <script defer src="site.js"></script>
   <script defer src="work.js"></script>
+  <script defer src="imagesengine.js"></script>
   <script defer src="markdown.js"></script>
   <script defer src="tool.js"></script>
 
@@ -313,9 +318,28 @@
                  Corner "next image" teaser? add data-next-preview to the .gallery tag. -->
             <!--[edit:fr3-gallery]-->
             <div class="gallery">
-              <img src="img/work/satellitetest.jpg" loading="lazy"
+              <img src="img/work/satellitetest-h9mf0w.jpg" loading="lazy"
+                   srcset="img/work/satellitetest-h9mf0w_sd.webp 480w, img/work/satellitetest-h9mf0w.jpg 853w"
+                   sizes="(max-width: 880px) 84vw, (max-width: 1180px) 48vw, 562px"
+                   width="853"
+                   height="645"
                    alt="satellitetest"
-                   data-caption="Test 1" />
+                   data-caption="Test 123"
+                   data-sd="img/work/satellitetest-h9mf0w_sd.webp"
+                   data-original="img/work/satellitetest-h9mf0w_original.png"
+                   data-original-size="853x645"
+                   data-original-bytes="367973" />
+              <img src="img/work/image-1pbxic_original.png" loading="lazy"
+                   width="32"
+                   height="32"
+                   alt="image"
+                   data-caption="Icon test"
+                   data-uhd="1"
+                   data-hd="img/work/image-1pbxic_original.png"
+                   data-sd="img/work/image-1pbxic_sd.webp"
+                   data-original="img/work/image-1pbxic_original.png"
+                   data-original-size="32x32"
+                   data-original-bytes="459" />
             </div>
             <!--[/edit:fr3-gallery]-->
 
@@ -972,6 +996,10 @@ Low hardware requirements were a deliberate specialty. The software cold-loads i
         <!--[/edit:latest-h2]-->
         <!--[edit:blog-highlights]-->
         <div class="latest__list reveal d1" data-ced="generated">
+          <a class="latest__item" href="blog/2609.html?post=p0011#p0011">
+            <time datetime="2026-09-16">September 16, 2026</time>
+            <span class="latest__title">OMG There's a lot more, let's...</span>
+          </a>
           <a class="latest__item" href="blog/2609.html?post=p0008#p0008">
             <time datetime="2026-09-04">September 4, 2026</time>
             <span class="latest__title">First post of the day !!asdas!adas...</span>
@@ -983,10 +1011,6 @@ Low hardware requirements were a deliberate specialty. The software cold-loads i
           <a class="latest__item" href="blog/2609.html?post=p0006#p0006">
             <time datetime="2026-09-04">September 4, 2026</time>
             <span class="latest__title">asd</span>
-          </a>
-          <a class="latest__item" href="blog/2609.html?post=p0005#p0005">
-            <time datetime="2026-09-04">September 4, 2026</time>
-            <span class="latest__title">OMG TEST</span>
           </a>
           <a class="textlink latest__all" href="blog.html">All posts</a>
         </div>

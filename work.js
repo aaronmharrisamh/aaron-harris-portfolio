@@ -27,16 +27,30 @@
 
   /* Turn authored <img> elements into lightbox items.
 
-     currentSrc, not the src attribute: while the editor is showing a dropped
-     file, the live <img> is painting a blob: preview and the attribute still
-     holds the img/work/ path the export will carry. The viewer must show what
-     is on screen. */
+     The src attribute, not currentSrc. An image with a srcset may be
+     painting its small copy in a small slot, and the viewer shows the whole
+     picture. While the editor shows a photo no save has written, the
+     attribute holds that photo's blob: URL, so the viewer shows it as well.
+
+     original and originalBytes name the file as it came, from the markup
+     the image engine writes. An image without an original has neither. */
+  /* A file's size the way a reader says it: "212 KB", "3.1 MB", "48 MB".
+     Published, so the editor's boxes say a size the same way. */
+  function sizeText(bytes) {
+    var kb = bytes / 1024;
+    if (kb < 1024) return Math.max(1, Math.round(kb)) + " KB";
+    var mb = kb / 1024;
+    return (mb < 10 ? mb.toFixed(1) : String(Math.round(mb))) + " MB";
+  }
+
   function itemsFromImgs(imgEls) {
     return Array.prototype.map.call(imgEls, function (im) {
       return {
-        src: im.currentSrc || im.src,
+        src: im.src,
         caption: im.getAttribute("data-caption") || "",
-        alt: im.getAttribute("alt") || ""
+        alt: im.getAttribute("alt") || "",
+        original: im.getAttribute("data-original") || "",
+        originalBytes: parseInt(im.getAttribute("data-original-bytes"), 10) || 0
       };
     });
   }
@@ -56,16 +70,23 @@
      Both get close, prev and next controls, Esc and backdrop close,
      a focus trap, and the rest of the page marked inert.
 
+     SEE ORIGINAL. An item with an original gets a link at the lower
+     right, opposite the caption: "See original · PNG · 3.1 MB". It
+     opens the file as it came, in a new tab, so the viewer stays where
+     it was. It comes and goes with the caption, and an item with no
+     original has none.
+
      Interface:
 
        lightbox.open(items, startIndex, opts)
        lightbox.close()
        lightbox.isOpen()
 
-     items is a list of { src, caption, alt }. That is deliberately the
-     subset the image-region core in tool.js already produces, so a
-     consumer passes its model straight through with no adapter. Use
-     itemsFromImgs() above to build the list from markup.
+     items is a list of { src, caption, alt, original, originalBytes },
+     the last two optional. That is deliberately the subset the image-region
+     core in tool.js already produces, so a consumer passes its model
+     straight through with no adapter. Use itemsFromImgs() above to build
+     the list from markup.
 
      opts, all optional:
        nav     false hides the prev and next controls, for a consumer
@@ -87,7 +108,7 @@
      does to the drawer.
      ========================================================== */
   var lightbox = (function () {
-    var root, stage, imgEl, imgInEl, captionEl, closeBtn, prevBtn, nextBtn;
+    var root, stage, imgEl, imgInEl, captionEl, originalEl, closeBtn, prevBtn, nextBtn;
     var mainEl = doc.querySelector("main");
     /* Resolved here, not read as a bare name. <header id="header"> puts a
        global on window, so the bare name happened to work on this page and
@@ -140,12 +161,18 @@
       nextBtn = svgButton("lightbox__nav lightbox__nav--next", "Next image", chevron("next"));
       captionEl = doc.createElement("div");
       captionEl.className = "lightbox__caption";
+      originalEl = doc.createElement("a");
+      originalEl.className = "lightbox__original";
+      originalEl.target = "_blank";
+      originalEl.rel = "noopener";
+      originalEl.hidden = true;
 
       root.appendChild(stage);
       root.appendChild(closeBtn);
       root.appendChild(prevBtn);
       root.appendChild(nextBtn);
       root.appendChild(captionEl);
+      root.appendChild(originalEl);
       doc.body.appendChild(root);
 
       closeBtn.addEventListener("click", close);
@@ -157,6 +184,8 @@
         if (e.target === root || e.target === stage) close();
       });
       imgEl.addEventListener("click", function (e) { e.stopPropagation(); });
+      /* the link opens its tab, and the backdrop under it does not close */
+      originalEl.addEventListener("click", function (e) { e.stopPropagation(); });
       /* Desktop: any mouse movement re-summons the subtitle; the idle timer in
          revealCaption() then fades it back out once the pointer goes still. */
       root.addEventListener("mousemove", revealCaption);
@@ -174,7 +203,9 @@
       else if (e.key === "Tab") { trap(e); }
     }
     function controls() {
-      return [closeBtn, prevBtn, nextBtn].filter(function (b) { return b.style.display !== "none"; });
+      return [closeBtn, prevBtn, nextBtn, originalEl].filter(function (b) {
+        return b.style.display !== "none" && !b.hidden;
+      });
     }
     function trap(e) {
       var f = controls();
@@ -200,7 +231,8 @@
       if (!built) build();
       images = (items || []).filter(function (it) { return it && it.src; })
         .map(function (it) {
-          return { src: it.src, caption: it.caption || "", alt: it.alt || "" };
+          return { src: it.src, caption: it.caption || "", alt: it.alt || "",
+                   original: it.original || "", originalBytes: it.originalBytes || 0 };
         });
       if (!images.length) return false;
       opts = opts || {};
@@ -226,12 +258,15 @@
     /* Fade the subtitle in, then schedule it to dissolve after a gracious beat.
        Shared by the image-change, desktop mouse-move, and touch-drag paths. */
     function revealCaption() {
-      if (!captionEl || captionEl.classList.contains("is-empty")) return;
-      captionEl.classList.add("is-visible");
+      var shown = [captionEl, originalEl].filter(function (el) {
+        return el && !el.hidden && !el.classList.contains("is-empty");
+      });
+      if (!shown.length) return;
+      shown.forEach(function (el) { el.classList.add("is-visible"); });
       if (captionIdle) window.clearTimeout(captionIdle);
       captionIdle = window.setTimeout(function () {
         captionIdle = 0;
-        captionEl.classList.remove("is-visible");
+        shown.forEach(function (el) { el.classList.remove("is-visible"); });
       }, LB_CAPTION_HOLD);
     }
 
@@ -242,6 +277,17 @@
       imgEl.alt = im.alt;
       if (im.caption) { captionEl.textContent = im.caption; captionEl.classList.remove("is-empty"); }
       else { captionEl.textContent = ""; captionEl.classList.add("is-empty"); }
+      if (im.original) {
+        /* the format from the path; a blob: preview has none, and says none */
+        var type = (/\.([a-z0-9]+)(?:[?#]|$)/i.exec(im.original) || [])[1] || "";
+        originalEl.href = im.original;
+        originalEl.textContent = "See original" + (type ? " · " + type.toUpperCase() : "") +
+          (im.originalBytes ? " · " + sizeText(im.originalBytes) : "");
+        originalEl.hidden = false;
+      } else {
+        originalEl.hidden = true;
+        originalEl.removeAttribute("href");
+      }
       revealCaption();   /* glides in on every image change (incl. open) */
     }
     function go(i) {
@@ -257,6 +303,7 @@
       inert(false);
       if (captionIdle) { window.clearTimeout(captionIdle); captionIdle = 0; }
       if (captionEl) captionEl.classList.remove("is-visible");
+      if (originalEl) originalEl.classList.remove("is-visible");
       if (swipeSettle) { window.clearTimeout(swipeSettle); swipeSettle = 0; }
       if (imgInEl) { imgInEl.style.transition = ""; imgInEl.style.opacity = ""; }
       resetZoom();
@@ -812,7 +859,7 @@
           dot.className = "gallery__dot";
           dot.setAttribute("aria-label", "Show image " + (i + 1) + " of " + imgs.length);
           var dimg = doc.createElement("img");
-          dimg.src = img.getAttribute("data-sd") || img.src;   /* _sd thumb hook for later */
+          dimg.src = img.getAttribute("data-sd") || img.src;   /* the small copy, when there is one */
           dimg.alt = "";
           dimg.loading = "lazy";
           dot.appendChild(dimg);
@@ -986,6 +1033,7 @@
   AMH.work = {
     buildGalleries: buildGalleries,
     lightbox: lightbox,
+    sizeText: sizeText,
     /* The template the open deep-dive drawer was cloned from, or null. */
     openTemplate: function () { return openTpl; }
   };
