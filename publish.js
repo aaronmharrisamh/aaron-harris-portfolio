@@ -79,6 +79,32 @@
      ========================================================== */
   var BC_DRAFT_KEY = "amh-blog-draft";
 
+  /* The preview's phone: a screen of 9:20 at the width of an average phone,
+     in CSS pixels. The page inside lays itself out at this width, so every
+     phone rule in site.css applies there as it does on a phone. */
+  var BC_PHONE = { w: 390, h: 866 };
+  /* The phone's bezel on each side, and the room kept around the phone in
+     the preview, both in CSS pixels. */
+  var BC_PHONE_BEZEL = 12;
+  var BC_PHONE_ROOM = 16;
+  /* The smallest the phone is drawn. Below it a phone's text is too small
+     to read, so a short preview scrolls to the rest of the phone instead.
+     The panel's grip gives the phone more room. */
+  var BC_PHONE_MIN_SCALE = 0.75;
+  /* The phone page's own two rules. The section's top padding goes, because
+     the page has no header above it. The scrollbar goes, because a phone
+     draws none, and a scrollbar here would take its width out of the 390. */
+  var BC_PHONE_CSS = "html{scrollbar-width:none;}html::-webkit-scrollbar{display:none;}" +
+    ".blog-page{padding-block:1rem 2rem;}";
+  /* Which view the preview opens in, "desktop" or "mobile". A preference of
+     this browser, like the route, so a lost value costs one click. */
+  var BC_VIEW_KEY = "amh-blog-preview";
+  /* The refresh mark on the preview's bar, drawn once and stroked in
+     currentColor, so it follows the button's colour. */
+  var BC_REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>';
+
   /* The home page highlights block: which page carries it, which region, and
      how many posts it lists. The count is a constant rather than a number
      buried in the renderer, because it is the one thing about this block
@@ -93,6 +119,10 @@
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
   var bcStatus = null, bcCards = null, bcPreviewEl = null;
+  /* the preview: the stage a view is drawn in, the two view buttons, the
+     phone's box while Mobile shows, what watches the stage's size, and the
+     view in use, read from this browser once */
+  var bcPvStage = null, bcPvBtns = [], bcPvFit = null, bcPvWatch = null, bcPvViewNow = "";
   /* {num, caption, alt, uhd, truesize, published} and then either photo,
      the engine's record of a held photo, or the manifest's facts about a
      published one: src, sd, sdw, original, w, h, ow, oh, bytes, type,
@@ -594,9 +624,34 @@
     ".bc-card__meta.bc-err{color:var(--c-orange);}" +
     ".bc-card__meta .bc-err{color:var(--c-yellow);}" +
     ".bc-card__btns{display:flex;flex-direction:column;gap:.3rem;flex:none;}" +
-    ".bc-preview{overflow-y:auto;display:none;background:var(--bg);border:1px solid var(--line);" +
-    "border-radius:8px;padding:.4rem 1.2rem 1.2rem;}" +
-    ".bc-panel[data-tab=preview] .bc-preview{display:block;}" +
+    /* the preview: a bar with the two views and the refresh, then the stage
+       a view is drawn in. Only the stage scrolls, so the bar stays put. */
+    ".bc-preview{display:none;flex-direction:column;background:var(--bg);border:1px solid var(--line);" +
+    "border-radius:8px;overflow:hidden;}" +
+    ".bc-panel[data-tab=preview] .bc-preview{display:flex;}" +
+    ".bc-pvbar{flex:none;display:flex;align-items:center;gap:.5rem;padding:.45rem .6rem;" +
+    "border-bottom:1px solid var(--line);}" +
+    ".bc-pvseg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:999px;}" +
+    ".bc-pvbtn{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;margin:0;" +
+    "padding:.22rem .8rem;border:0;border-radius:999px;background:transparent;color:var(--text-soft);" +
+    "font:600 .72rem var(--font);cursor:pointer;}" +
+    ".bc-pvbtn:hover{color:var(--text);}" +
+    ".bc-pvbtn[aria-pressed=true]{background:var(--accent);color:var(--bg-deep);}" +
+    ".bc-pvagain{width:1.9rem;height:1.9rem;padding:0;border:1px solid var(--line);}" +
+    ".bc-pvagain svg{width:14px;height:14px;display:block;}" +
+    ".bc-pvnote{margin-left:auto;font-size:.7rem;color:var(--muted);}" +
+    ".bc-pvstage{flex:1;min-height:0;overflow-y:auto;padding:.4rem 1.2rem 1.2rem;}" +
+    ".bc-preview[data-view=mobile] .bc-pvstage{overflow:auto;display:flex;padding:" + BC_PHONE_ROOM + "px;}" +
+    /* the phone: the frame keeps its size inside and only its drawing is
+       scaled, so the box around it takes the scaled size. Auto margins
+       center it and still let a stage that is too short scroll to its top. */
+    ".bc-phone-fit{flex:none;position:relative;margin:auto;}" +
+    ".bc-phone{position:absolute;left:0;top:0;transform-origin:0 0;box-sizing:content-box;" +
+    "width:" + BC_PHONE.w + "px;height:" + BC_PHONE.h + "px;padding:" + BC_PHONE_BEZEL + "px;" +
+    "border-radius:" + (BC_PHONE_BEZEL + 30) + "px;background:#07090c;" +
+    "box-shadow:0 0 0 1px rgba(255,255,255,.1),0 30px 70px -30px rgba(0,0,0,.95);}" +
+    ".bc-phone__screen{display:block;width:" + BC_PHONE.w + "px;height:" + BC_PHONE.h + "px;" +
+    "border:0;border-radius:30px;background:var(--bg);}" +
     /* the bottom of this is the room above the rule that closes the panel */
     ".bc-status{padding:.35rem 1.1rem .55rem;font-size:.7rem;color:var(--muted);min-height:1.2em;}" +
     ".bc-imgnote{padding:.4rem 0;font-size:.7rem;color:var(--muted);}" +
@@ -986,17 +1041,27 @@
     if (cur === "preview") bcRenderPreview();
   }
 
-  /* The preview by mode: Markdown through the renderer, HTML as it is,
-     both through the tag renderer for the images. */
-  function bcRenderPreview() {
+  /* ---------------- the preview ----------------
+
+     The post as a reader sees it, in one of two views. Desktop draws it in
+     this page, in the blog's own column, so its width and its line breaks
+     are the stream's. Mobile draws it in a phone: a page of its own at
+     BC_PHONE's size, in a frame, so every phone rule in site.css applies
+     there as it does on a phone. Both views fold a long post where the
+     stream folds it, and Read more shows the rest in place. The refresh
+     button draws the view again, folded. */
+
+  /* The post's markup, as a string: the stream's own, so what is on screen
+     is what the publish writes. Markdown goes through the renderer and HTML
+     as it is, and both go through the tag renderer for the images. */
+  function bcPreviewPost() {
     var date = /^\d{6}$/.test(bcDate.value) ? bcDate.value : bcTodayYYMMDD();
     var B = AMH.blog;
     var src = bcBody.value.trim();
     var title = bcTitle.value.trim();
     var time = bcTimeParse(bcTime.value);
-    /* the preview is the stream's own markup, so what is on screen is
-       what the publish writes */
-    bcPreviewEl.innerHTML = '<article class="bs-post"><header class="bs-post__by">' +
+    var box = doc.createElement("div");
+    box.innerHTML = '<article class="bs-post"><header class="bs-post__by">' +
       '<img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />' +
       "<b>" + TOOL.escAttr(bcBrand) + "</b>" +
       '<span class="bs-post__when"><time datetime="' + B.dateTime(date) + '">' +
@@ -1009,7 +1074,7 @@
         ? '<div class="bs-post__tags">' + bcTagList(bcTagsClean(bcTags.value)).map(function (t) {
             return "<a>#" + TOOL.escAttr(t) + "</a>"; }).join(" ") + "</div>"
         : "") + "</article>";
-    var body = bcPreviewEl.querySelector(".bs-post__body");
+    var body = box.querySelector(".bs-post__body");
     /* the deployed manifest plus what this composer is holding, so a card's
        switch shows in the preview before anything is published */
     body.innerHTML = B.renderBody(bcMode === "md" ? AMH.markdown.render(src) : src,
@@ -1034,7 +1099,138 @@
         if (img.getAttribute("data-hd")) img.setAttribute("data-hd", urls.hd);
       });
     });
+    return box.innerHTML;
+  }
+
+  /* The view in use: the one this browser kept, and Desktop without one. */
+  function bcPvView() {
+    if (!bcPvViewNow) {
+      var kept = "";
+      try { kept = localStorage.getItem(BC_VIEW_KEY) || ""; } catch (err) {}
+      bcPvViewNow = kept === "mobile" ? "mobile" : "desktop";
+    }
+    return bcPvViewNow;
+  }
+  function bcPvSet(view) {
+    bcPvViewNow = view === "mobile" ? "mobile" : "desktop";
+    try { localStorage.setItem(BC_VIEW_KEY, bcPvViewNow); } catch (err) {}
+    bcRenderPreview();
+  }
+
+  /* Draw the preview in the view in use, folded. */
+  function bcRenderPreview() {
+    var view = bcPvView();
+    bcPreviewEl.setAttribute("data-view", view);
+    bcPvBtns.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    if (view === "mobile") bcPreviewPhone(bcPreviewPost());
+    else bcPreviewDesktop(bcPreviewPost());
+  }
+
+  /* Desktop: the post in this page. The .bs-stream box gives it the
+     stream's measure, so at this window's width it is the stream's width. */
+  function bcPreviewDesktop(html) {
+    bcPvUnwatch();
+    bcPvStage.innerHTML = '<div class="bs-stream">' + html + "</div>";
     if (AMH.work) AMH.work.buildGalleries();
+    bcPreviewFold(bcPvStage);
+  }
+
+  /* Mobile: the post in a phone. The frame holds a page of its own, so
+     site.css reads the phone's width in every media query and every vw.
+     A new frame for each draw, so a refresh starts from the top, folded. */
+  function bcPreviewPhone(html) {
+    var fit = doc.createElement("div");
+    fit.className = "bc-phone-fit";
+    var phone = doc.createElement("div");
+    phone.className = "bc-phone";
+    var frame = doc.createElement("iframe");
+    frame.className = "bc-phone__screen";
+    frame.title = "The post on a phone";
+    frame.tabIndex = -1;
+    frame.addEventListener("load", function () {
+      var page = frame.contentDocument;
+      if (!page) return;
+      bcPreviewFold(page);
+      page.addEventListener("click", bcPreviewReadMore);
+    });
+    frame.srcdoc = bcPhonePage(html);
+    phone.appendChild(frame);
+    fit.appendChild(phone);
+    bcPvStage.innerHTML = "";
+    bcPvStage.appendChild(fit);
+    bcPvFit = fit;
+    bcPhoneFit();
+    bcPvWatchStage();
+  }
+
+  /* The phone's page: this page's own stylesheets, so no path or font is
+     named twice, the blog's wrappers around the post, and work.js to build
+     its carousels. A photo no save has written loads from its blob: URL,
+     which the frame shares with this page. */
+  function bcPhonePage(html) {
+    var esc = TOOL.escAttr;
+    var sheets = Array.prototype.map.call(doc.querySelectorAll('link[rel="stylesheet"]'), function (l) {
+      return '<link rel="stylesheet" href="' + esc(l.href) + '">';
+    }).join("");
+    var work = doc.querySelector('script[src$="work.js"]');
+    return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' + sheets +
+      "<style>" + BC_PHONE_CSS + "</style></head><body>" +
+      '<section class="blog-page"><div class="wrap"><div class="bs-stream">' + html +
+      "</div></div></section>" +
+      (work ? '<script src="' + esc(work.src) + '"></script>' : "") +
+      "</body></html>";
+  }
+
+  /* Scale the phone to the room the stage has: never above its own size,
+     and never below BC_PHONE_MIN_SCALE. A stage with no size, a view not on
+     screen, keeps the last scale. */
+  function bcPhoneFit() {
+    if (!bcPvFit || !bcPvStage) return;
+    var w = BC_PHONE.w + BC_PHONE_BEZEL * 2, h = BC_PHONE.h + BC_PHONE_BEZEL * 2;
+    var roomW = bcPvStage.clientWidth - BC_PHONE_ROOM * 2;
+    var roomH = bcPvStage.clientHeight - BC_PHONE_ROOM * 2;
+    if (roomW <= 0 || roomH <= 0) return;
+    var s = Math.min(1, Math.max(BC_PHONE_MIN_SCALE, Math.min(roomW / w, roomH / h)));
+    bcPvFit.firstChild.style.transform = "scale(" + s + ")";
+    bcPvFit.style.width = Math.round(w * s) + "px";
+    bcPvFit.style.height = Math.round(h * s) + "px";
+  }
+  /* The stage changes size with the window and with the panel's grip, and
+     the phone follows it while Mobile shows. */
+  function bcPvWatchStage() {
+    if (bcPvWatch || !bcPvStage) return;
+    if (window.ResizeObserver) {
+      bcPvWatch = new ResizeObserver(function () { bcPhoneFit(); });
+      bcPvWatch.observe(bcPvStage);
+      return;
+    }
+    window.addEventListener("resize", bcPhoneFit);
+    bcPvWatch = { disconnect: function () { window.removeEventListener("resize", bcPhoneFit); } };
+  }
+  function bcPvUnwatch() {
+    if (bcPvWatch) { bcPvWatch.disconnect(); bcPvWatch = null; }
+    bcPvFit = null;
+  }
+
+  /* Fold the post where the stream would fold it. */
+  function bcPreviewFold(root) {
+    var post = root && root.querySelector(".bs-post");
+    if (post && AMH.blog && AMH.blog.fold) AMH.blog.fold(post);
+  }
+  /* Read more, in the preview. On the blog it is a link to the post's own
+     page, and a post that is not published has none, so here it shows the
+     rest of the post where it stands. Expand for more needs nothing of its
+     own: it opens in place on the blog too. */
+  function bcPreviewReadMore(e) {
+    var more = e.target && e.target.closest ? e.target.closest('[data-more="hard"]') : null;
+    if (!more || !more.parentNode) return;
+    e.preventDefault();
+    var body = more.parentNode;
+    body.removeChild(more);
+    Array.prototype.forEach.call(body.children, function (el) { el.hidden = false; });
   }
 
   /* ---------------- the clock, the zone, and the time field ----------------
@@ -1273,6 +1469,7 @@
   }
   function bcClose() {
     bcStopTicker();
+    bcPvUnwatch();
     if (bcSpec) { bcSpec.destroy(); bcSpec = null; }
     /* a photo the composer prepared and did not publish is the store's to
        release; a photo a page shows is held until a save writes it */
@@ -1631,9 +1828,47 @@
     imagesEl.appendChild(bcCards);
     bcPanel.appendChild(imagesEl);
 
-    /* preview view */
+    /* preview view: the bar, then the stage a view is drawn in. The bar's
+       buttons stay out of the tab ring, as the view tabs do. */
     bcPreviewEl = doc.createElement("div");
     bcPreviewEl.className = "bc-preview";
+    var pvBar = doc.createElement("div");
+    pvBar.className = "bc-pvbar";
+    var pvViews = doc.createElement("div");
+    pvViews.className = "bc-pvseg";
+    pvViews.setAttribute("role", "group");
+    pvViews.setAttribute("aria-label", "Preview size");
+    bcPvBtns = [["desktop", "Desktop"], ["mobile", "Mobile"]].map(function (v) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "bc-pvbtn";
+      b.setAttribute("data-view", v[0]);
+      b.setAttribute("aria-pressed", "false");
+      b.tabIndex = -1;
+      b.textContent = v[1];
+      b.addEventListener("click", function () { bcPvSet(v[0]); });
+      pvViews.appendChild(b);
+      return b;
+    });
+    pvBar.appendChild(pvViews);
+    var pvAgain = doc.createElement("button");
+    pvAgain.type = "button";
+    pvAgain.className = "bc-pvbtn bc-pvagain";
+    pvAgain.tabIndex = -1;
+    pvAgain.title = "Refresh: fold the post again";
+    pvAgain.setAttribute("aria-label", "Refresh the preview");
+    pvAgain.innerHTML = BC_REFRESH_SVG;
+    pvAgain.addEventListener("click", function () { bcRenderPreview(); });
+    pvBar.appendChild(pvAgain);
+    var pvNote = doc.createElement("span");
+    pvNote.className = "bc-pvnote";
+    pvNote.textContent = "Read more shows the rest of the post here.";
+    pvBar.appendChild(pvNote);
+    bcPreviewEl.appendChild(pvBar);
+    bcPvStage = doc.createElement("div");
+    bcPvStage.className = "bc-pvstage";
+    bcPvStage.addEventListener("click", bcPreviewReadMore);
+    bcPreviewEl.appendChild(bcPvStage);
     bcPanel.appendChild(bcPreviewEl);
 
     /* the tags, under whichever view is showing */

@@ -12896,6 +12896,160 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
+  // ============ PV. THE PREVIEW AS A READER SEES IT ============
+  // Desktop draws the post in the blog's own column. Mobile draws it in a
+  // phone: a page of its own, 390 x 866, in a frame, so the phone rules in
+  // site.css apply there. Both fold where the stream folds, Read more shows
+  // the rest in place, and the refresh folds the post again. This block
+  // opens its own composer and closes it, and every page promise settles.
+  const PV_PARA = (word) => word + " paragraph. " + "The words run on so the line count shows the measure. ".repeat(3);
+  const PV_STAGE = `document.querySelector('.bc-pvstage')`;
+  const PV_FRAME = `document.querySelector('.bc-phone__screen')`;
+  /* where the post's three paragraphs stand, and how wide its body is */
+  const PV_STATE = (root) => `(function () { var r = ${root}; var body = r && r.querySelector('.bs-post__body');
+    if (!body) return null;
+    var ps = [].slice.call(body.querySelectorAll('p'));
+    var shown = function (w) { var p = ps.filter(function (x) { return x.textContent.indexOf(w + ' paragraph') === 0; })[0];
+      return !!p && !p.hidden; };
+    return { soft: !!body.querySelector('[data-more="soft"]'), hard: !!body.querySelector('[data-more="hard"]'),
+             intro: shown('Intro'), middle: shown('Middle'), end: shown('End'), width: body.clientWidth }; })()`;
+  /* a post's body width in the stream itself, at this window's width */
+  const PV_LIVE = `(function () { var s = document.getElementById('blogStream'); if (!s) return -1;
+    var a = document.createElement('article'); a.className = 'bs-post';
+    a.innerHTML = '<div class="bs-post__body"><p>x</p></div>';
+    s.insertBefore(a, s.firstChild);
+    var w = a.querySelector('.bs-post__body').clientWidth;
+    a.remove();
+    return w; })()`;
+  const PV_CLICK = (root, sel) => `(function () { var r = ${root}; var b = r && r.querySelector('${sel}');
+    if (b) b.click(); return !!b; })()`;
+  const PV_TAB = (name) => `(function () { var t = [].filter.call(document.querySelectorAll('.bc-tab'),
+    function (b) { return b.textContent === '${name}'; })[0]; if (t) t.click(); return !!t; })()`;
+
+  await evaluate(`try { localStorage.removeItem('amh-blog-preview'); } catch (e) {}`);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await sleep(900);
+  const pvDropped = await evaluate(`(function () {
+    var zone = document.querySelector('.bc-panel .bc-drop');
+    if (!zone) return false;
+    var cv = document.createElement('canvas'); cv.width = 1200; cv.height = 800;
+    var cx = cv.getContext('2d'); cx.fillStyle = '#2b6cb0'; cx.fillRect(0, 0, 1200, 800);
+    return new Promise(function (res) { cv.toBlob(function (b) {
+      try {
+        var dt = new DataTransfer(); dt.items.add(new File([b], 'frame.png', { type: 'image/png' }));
+        zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        res(true);
+      } catch (err) { res(false); }
+    }, 'image/png'); });
+  })()`, { awaitPromise: true });
+  const pvNum = pvDropped ? await waitFor(`(function () { var c = document.querySelector('.bc-panel .bc-card');
+    return c ? (/(\\d{4})/.exec(c.querySelector('.bc-card__meta').textContent) || [])[1] || null : null; })()`, 12000) : null;
+  await evaluate(`(function () { var t = document.querySelector('.bc-panel .bc-write textarea'); if (!t) return false;
+    t.value = ${JSON.stringify(PV_PARA("Intro") + "\n\n[img" + "NUM" + ",The frame|A frame]\n\n{expandformore}\n\n" +
+      PV_PARA("Middle") + "\n\n{pagebreak}\n\n" + PV_PARA("End"))}.replace('NUM', ${JSON.stringify(pvNum || "0000")});
+    return true; })()`);
+  const pvLive = await evaluate(PV_LIVE);
+  await evaluate(PV_TAB("Preview"));
+
+  // PV1. the bar, Desktop first, and the stream's width
+  const pv1 = await waitFor(`(function () { var p = document.querySelector('.bc-preview');
+    if (!p || !p.querySelector('.bc-pvstage .bs-post .bs-more')) return null;
+    return { view: p.getAttribute('data-view'),
+      pressed: [].map.call(p.querySelectorAll('.bc-pvseg .bc-pvbtn'), function (b) {
+        return b.textContent + ':' + b.getAttribute('aria-pressed'); }).join(),
+      refresh: !!p.querySelector('.bc-pvagain svg'), note: (p.querySelector('.bc-pvnote') || {}).textContent || '',
+      width: p.querySelector('.bc-pvstage .bs-post__body').clientWidth }; })()`, 8000);
+  check("preview: the bar offers Desktop, Mobile and a refresh, Desktop comes first, and its post is as wide as the stream's",
+    !!pv1 && pv1.view === "desktop" && pv1.pressed === "Desktop:true,Mobile:false" && pv1.refresh &&
+    pv1.note === "Read more shows the rest of the post here." && pvLive > 0 && pv1.width === pvLive,
+    JSON.stringify({ stream: pvLive, preview: pv1, photo: pvNum }));
+
+  // PV2. the fold in the page: Expand, then Read more in place, then the refresh
+  const pv2a = await evaluate(PV_STATE(PV_STAGE));
+  await evaluate(PV_CLICK(PV_STAGE, '[data-more="soft"]'));
+  await sleep(300);
+  const pv2b = await evaluate(PV_STATE(PV_STAGE));
+  const pvHref = await evaluate(`location.href`);
+  await evaluate(PV_CLICK(PV_STAGE, '[data-more="hard"]'));
+  await sleep(500);
+  const pv2c = await evaluate(PV_STATE(PV_STAGE));
+  const pvHrefAfter = await evaluate(`location.href`);
+  await evaluate(PV_CLICK("document", ".bc-pvagain"));
+  await sleep(500);
+  const pv2d = await evaluate(PV_STATE(PV_STAGE));
+  check("preview: a long post folds where the stream folds it, Expand opens to Read more, and Read more shows the rest here",
+    !!pv2a && pv2a.soft && !pv2a.hard && pv2a.intro && !pv2a.middle && !pv2a.end &&
+    !!pv2b && !pv2b.soft && pv2b.hard && pv2b.middle && !pv2b.end &&
+    !!pv2c && !pv2c.soft && !pv2c.hard && pv2c.middle && pv2c.end && pvHref === pvHrefAfter,
+    JSON.stringify({ folded: pv2a, expanded: pv2b, whole: pv2c, stayed: pvHref === pvHrefAfter }));
+  check("preview: the refresh draws the post again, folded",
+    !!pv2d && pv2d.soft && !pv2d.middle && !pv2d.end, JSON.stringify(pv2d));
+
+  // PV3. Mobile: a phone page laid out as the blog is on a phone, with the
+  // site's styles, its carousel and the held photo, folded the same way
+  await evaluate(PV_CLICK("document", '.bc-pvseg [data-view="mobile"]'));
+  const pv3ready = await waitFor(`(function () { var f = ${PV_FRAME}; var d = f && f.contentDocument;
+    return !!(d && d.readyState === 'complete' && d.querySelector('.gallery.is-ready') && d.querySelector('[data-more="soft"]')); })()`, 15000);
+  await sleep(600);
+  const pv3 = pv3ready ? await evaluate(`(function () { var f = ${PV_FRAME}, w = f.contentWindow, d = f.contentDocument;
+    var img = d.querySelector('.gallery__img');
+    var scale = /scale\\(([\\d.]+)\\)/.exec(document.querySelector('.bc-phone').style.transform);
+    return { view: document.querySelector('.bc-preview').getAttribute('data-view'), inner: [w.innerWidth, w.innerHeight],
+             client: d.documentElement.clientWidth, where: w.location.href, sheets: d.styleSheets.length,
+             photo: !!img && img.complete && img.naturalWidth > 0 && /^blob:/.test(img.getAttribute('src')),
+             scale: scale ? parseFloat(scale[1]) : 0 }; })()`) : null;
+  const pv3a = pv3ready ? await evaluate(PV_STATE(`${PV_FRAME}.contentDocument`)) : null;
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(900);
+  const pvLive390 = await evaluate(PV_LIVE);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(900);
+  check("preview: Mobile draws a 9:20 phone page 390 px wide, laid out as the blog is on a phone, with the site's styles, the carousel and the held photo",
+    !!pv3 && pv3.view === "mobile" && pv3.inner.join() === "390,866" && pv3.client === 390 &&
+    pv3.where === "about:srcdoc" && pv3.sheets >= 2 && pv3.photo && pv3.scale >= 0.75 && pv3.scale <= 1 &&
+    !!pv3a && pvLive390 > 0 && pv3a.width === pvLive390,
+    JSON.stringify({ phone: pv3, post: pv3a, streamOnAPhone: pvLive390 }));
+  if (pv3ready) {
+    await evaluate(PV_CLICK(`${PV_FRAME}.contentDocument`, '[data-more="soft"]'));
+    await sleep(300);
+    await evaluate(PV_CLICK(`${PV_FRAME}.contentDocument`, '[data-more="hard"]'));
+    await sleep(500);
+  }
+  const pv3b = pv3ready ? await evaluate(PV_STATE(`${PV_FRAME}.contentDocument`)) : null;
+  const pv3where = pv3ready ? await evaluate(`${PV_FRAME}.contentWindow.location.href`) : "";
+  check("preview: in the phone the post folds too, and Read more shows the rest there",
+    !!pv3a && pv3a.soft && !pv3a.middle && !pv3a.end &&
+    !!pv3b && !pv3b.soft && !pv3b.hard && pv3b.middle && pv3b.end && pv3where === "about:srcdoc",
+    JSON.stringify({ folded: pv3a, whole: pv3b, frame: pv3where }));
+
+  // PV4. the view is kept in this browser, and Desktop takes the phone away
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(500);
+  await send("Page.navigate", { url: BLOGPAGE + "?pv=4" });
+  await waitLoaded();
+  await sleep(1200);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await sleep(900);
+  await evaluate(PV_TAB("Preview"));
+  await sleep(900);
+  const pv4a = await evaluate(`({ view: (document.querySelector('.bc-preview') || { getAttribute: function () { return ''; } }).getAttribute('data-view'),
+    phone: !!document.querySelector('.bc-phone__screen'), kept: localStorage.getItem('amh-blog-preview') })`);
+  await evaluate(PV_CLICK("document", '.bc-pvseg [data-view="desktop"]'));
+  await sleep(500);
+  const pv4b = await evaluate(`({ view: (document.querySelector('.bc-preview') || { getAttribute: function () { return ''; } }).getAttribute('data-view'),
+    phone: !!document.querySelector('.bc-phone__screen'), column: !!document.querySelector('.bc-pvstage > .bs-stream > .bs-post'),
+    kept: localStorage.getItem('amh-blog-preview') })`);
+  check("preview: the view chosen is kept in this browser, and Desktop takes the phone away",
+    pv4a.view === "mobile" && pv4a.phone && pv4a.kept === "mobile" &&
+    pv4b.view === "desktop" && !pv4b.phone && pv4b.column && pv4b.kept === "desktop",
+    JSON.stringify({ reopened: pv4a, desktop: pv4b }));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(400);
+
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
   process.exitCode = failed ? 1 : 0;

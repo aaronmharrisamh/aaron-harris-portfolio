@@ -1910,6 +1910,10 @@
                                   yet, and say how many. `only` limits it
                                   to a list, which the loader uses for the
                                   posts it appended.
+       fold(post)                 -> fold one post where the stream would,
+                                  whatever view the page is in, and say
+                                  whether it folded. The composer's preview
+                                  uses it, in the page and in its phone.
 
      AMH.search
        load()                     -> Promise of the packed index, read
@@ -1946,6 +1950,7 @@
     show: blogShow,
     editButtons: blogEditButtons,
     cut: blogCutAll,
+    fold: blogCutPost,
     filterTag: blogFilterTag
   };
   AMH.search = { load: searchLoad, tags: searchTags, unpack: searchUnpack,
