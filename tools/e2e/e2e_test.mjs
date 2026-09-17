@@ -3,7 +3,7 @@
 // Requires: node 22+ (native WebSocket/fetch), Chrome, py launcher (http.server).
 // The harness starts its own local server and Chrome, and cleans both up.
 import { spawn } from "node:child_process";
-import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -121,6 +121,15 @@ function searchTable(fileText) {
   if (open < 0 || close < open) return { error: "no table in search.js" };
   try { return JSON.parse(t.slice(open, close + 1)); }
   catch (e) { return { error: e.message }; }
+}
+// The image index, images.js: the same shape, one statement holding a
+// record, read the same way.
+function imagesTable(fileText) {
+  const t = String(fileText);
+  const open = t.indexOf("{"), close = t.lastIndexOf("}");
+  if (open < 0 || close < open) return { error: "no record in images.js", images: [] };
+  try { return JSON.parse(t.slice(open, close + 1)); }
+  catch (e) { return { error: e.message, images: [] }; }
 }
 // A run of base64 long enough to be a payload rather than a word. A
 // thumbnail is a data: URI and is base64 by its nature, so it is taken out
@@ -560,7 +569,7 @@ async function main() {
     const eng = await evaluate(`(function () {
       var I = window.AMH && window.AMH.images;
       if (!I) return { there: false };
-      var fns = ["intake", "hold", "letGo", "recall", "prune", "files", "saved", "attrs", "read", "orphans"];
+      var fns = ["intake", "hold", "letGo", "recall", "prune", "files", "saved", "attrs", "read", "unused"];
       return { there: true,
                missing: fns.filter(function (k) { return typeof I[k] !== "function"; }),
                renditions: (I.RENDITIONS || []).map(function (r) { return r.key; }).join() };
@@ -1546,15 +1555,17 @@ async function main() {
     galOut = await evaluate(`window.__zipB64`);
   }
   // A page with photos the engine still holds downloads as a zip: the page,
-  // and the three files each photo is saved as.
+  // the three files each photo is saved as, and the image index that
+  // records them.
   const galBuf = galOut ? Buffer.from(galOut, "base64") : null;
   const galFiles = galBuf && galBuf.slice(0, 2).toString("latin1") === "PK"
     ? unzipStore(galBuf) : null;
   const galHtml = galFiles ? String(galFiles["gallery.html"] || "")
     : (galBuf ? galBuf.toString("utf8") : "");
   const galNames = galFiles ? Object.keys(galFiles) : [];
-  check("gallery edit: the export downloads a zip of the page and its photos",
-    galHtml.includes("<!DOCTYPE html>") && galNames.length === 1 + 3 * 5 &&
+  check("gallery edit: the export downloads a zip of the page, its photos and the image index",
+    galHtml.includes("<!DOCTYPE html>") && galNames.length === 2 + 3 * 5 &&
+    galNames.indexOf("images.js") !== -1 &&
     galNames.filter(n => /^img\/work\/.*_sd\.webp$/.test(n)).length === 5,
     galNames.length ? galNames.length + " entries: " + galNames.slice(0, 4).join(", ")
                     : "nothing captured: " + galZip);
@@ -1777,14 +1788,20 @@ async function main() {
              fromFile: typeof t.imageRegion.fromFile,
              fromPhoto: typeof t.imageRegion.fromPhoto,
              addPhoto: typeof t.addPhoto, moveOrphans: typeof t.moveOrphans,
+             moveFiles: typeof t.moveFiles, unused: typeof window.AMH.images.unused,
+             orphans: typeof window.AMH.images.orphans,
              rename: typeof window.AMH.images.rename };
   })()`);
+  /* the sweep is gone with the older path: no save moves an image file.
+     moveFiles moves what a publish itself leaves behind, and the engine's
+     finder for files nothing uses stays, under its new name */
   check("gallery edit: the older image path is gone from the kit, and the engine's is there",
     galGone.dropFiles === "undefined" && galGone.addSlot === "undefined" &&
     galGone.openImage === "undefined" && galGone.emptyTile === "undefined" &&
     galGone.fromFile === "undefined" && galGone.fromPhoto === "function" &&
-    galGone.addPhoto === "function" && galGone.moveOrphans === "function" &&
-    galGone.rename === "function", JSON.stringify(galGone));
+    galGone.addPhoto === "function" && galGone.moveOrphans === "undefined" &&
+    galGone.moveFiles === "function" && galGone.unused === "function" &&
+    galGone.orphans === "undefined" && galGone.rename === "function", JSON.stringify(galGone));
 
   // GT16. the region editor edits a text region and nothing else. Its alt
   // row, its source line and its Delete belonged to the image mode.
@@ -2593,7 +2610,7 @@ async function main() {
   })()`);
   check("panel foot: the moves are filled, View stays plain, and Rebuild is not offered here",
     JSON.stringify(foot.labels) ===
-      '["Export","Save to repo","New post","Revert all","Exit"]' &&
+      '["Export","Save to repo","Images","New post","Revert all","Exit"]' &&
     /* every move is filled blue except Save to repo, which is yellow */
     foot.filled.every((c, i) => foot.labels[i] === "Save to repo"
       ? c === "rgb(242, 193, 78)" : c === "rgb(74, 165, 232)") &&
@@ -3236,9 +3253,9 @@ async function main() {
   const zip2 = dl2 && dl2.name === "publish.zip" ? unzipStore(Buffer.from(dl2.b64, "base64")) : {};
   const exported2 = zip2["index.html"] ? zip2["index.html"].toString("utf8") : "";
   const jpg2 = zip2[HANGAR2];
-  check("photos: Export downloads one zip holding the page and the three files of the photo it shows",
+  check("photos: Export downloads one zip holding the page, the three files of the photo it shows, and the image index",
     !!dl2 && dl2.name === "publish.zip" &&
-    Object.keys(zip2).sort().join() === trio(HANGAR2, "png").concat("index.html").join() &&
+    Object.keys(zip2).sort().join() === ["images.js"].concat(trio(HANGAR2, "png"), "index.html").join() &&
     !!jpg2 && jpg2[0] === 0xFF && jpg2[1] === 0xD8,
     JSON.stringify({ name: dl2 && dl2.name, files: Object.keys(zip2) }));
   if (exported2) {
@@ -3415,10 +3432,10 @@ async function main() {
   const dl3 = await waitFor(`window.__dl`, 12000);
   const zip3 = dl3 && dl3.name === "publish.zip" ? unzipStore(Buffer.from(dl3.b64, "base64")) : {};
   const exported3 = zip3["index.html"] ? zip3["index.html"].toString("utf8") : null;
-  check("nested export produced the page and both held photos",
+  check("nested export produced the page, both held photos and the image index",
     !!exported3 &&
     Object.keys(zip3).sort().join() ===
-      trio(HANGAR2, "png").concat(trio(ddFile, "png"), "index.html").sort().join(),
+      trio(HANGAR2, "png").concat(trio(ddFile, "png"), "index.html", "images.js").sort().join(),
     JSON.stringify(Object.keys(zip3)));
   if (exported3) {
     const ddA = exported3.indexOf("<!--[edit:fr3-deepdive]-->");
@@ -4076,6 +4093,10 @@ async function main() {
     /* a file put into the folder by hand, and every path the folder holds */
     window.__putFile = function (path, text) { files[path] = fileH(path, text); };
     window.__folder = function () { return Object.keys(files).sort(); };
+    /* a file taken out of the folder by hand, as a person would */
+    window.__dropFile = function (path) {
+      delete files[path]; delete raw[path]; delete window.__wrote[path]; delete window.__wroteBytes[path];
+    };
     function dirH(prefix) {
       return {
         kind: "directory",
@@ -4426,10 +4447,10 @@ async function main() {
     files: [...document.querySelectorAll('.ced-saved__file')].map(li => li.textContent),
     lead: document.querySelector('.ced-saved__body p').textContent,
     held: AMH.tool.photos() } : null`, 10000);
-  check("photos: Save to repo writes the photo's three files into img/work/ beside its page, and the box lists all four",
-    !!psSaved && psSaved.wrote.join() === trio(CARRIED, "png").concat("index.html").join() &&
-    psSaved.files.join() === trio(CARRIED, "png").concat("index.html").join() &&
-    /4 files were written/.test(psSaved.lead),
+  check("photos: Save to repo writes the photo's three files into img/work/ beside its page and the image index, and the box lists all five",
+    !!psSaved && psSaved.wrote.join() === ["images.js"].concat(trio(CARRIED, "png"), "index.html").join() &&
+    psSaved.files.join() === ["images.js"].concat(trio(CARRIED, "png"), "index.html").join() &&
+    /5 files were written/.test(psSaved.lead),
     JSON.stringify(psSaved));
   check("photos: what lands in img/work/ is the JPEG, and the editor marks the photo saved",
     !!psSaved && !!psSaved.bytes && psSaved.bytes[0] > 1000 &&
@@ -4629,12 +4650,12 @@ async function main() {
     /over the 0\.01 MB GitHub takes in one file/.test(en6.text) && /uploaded by hand/.test(en6.text),
     JSON.stringify(en6));
 
-  // ============ OR. THE IMAGE FILES NOTHING NAMES ============
+  // ============ OR. THE IMAGE FILES NOTHING USES ============
   // A photo the page already names has its three files on disk. When an edit
-  // takes it away, a folder save moves those files into deletethese/ and
-  // leaves a file named any other way where it is. A download cannot move a
-  // file, so it names them in the console. The served home page carries one
-  // such photo for these checks, and gets its seeds back after them.
+  // takes it away, the files stay where they are: no save moves an image
+  // file, and no save names one as a file to delete. A file the engine wrote
+  // stays until Super Delete moves it. The served home page carries one such
+  // photo for these checks, and gets its seeds back after them.
   const SERVED = "img/work/served-photo-abc123";
   const SERVED_FILES = [SERVED + ".jpg", SERVED + "_original.png", SERVED + "_sd.webp"];
   // The three files hold the seed's bytes: a browser reads an image by its
@@ -4719,7 +4740,8 @@ async function main() {
     check("engine: that export is byte-identical outside the region", or3Exact.ok, or3Exact.detail);
   }
 
-  // OR4. a download names the files the page stops naming, and moves nothing
+  // OR4. a download that no longer names the photo names no file and moves
+  // nothing: the files stay on the site (KI1)
   await evaluate(`window.__info = [];
     (function () {
       var said = console.info;
@@ -4736,15 +4758,16 @@ async function main() {
   await sleep(400);
   await evaluate(DL_CAPTURE + " window.edit.save();");
   const or4 = await waitFor(`window.__dl ? { name: window.__dl.name, info: window.__info.join(" | ") } : null`, 12000);
-  check("orphans: a save that falls back to a download names the three files, and moves nothing",
-    !!or4 && or4.name === "index.html" && SERVED_FILES.every((f) => or4.info.includes(f)) &&
-    or4.info.includes("deletethese/"),
+  check("files nothing uses: a save that falls back to a download names no file and moves nothing",
+    !!or4 && or4.name === "index.html" && !SERVED_FILES.some((f) => or4.info.includes(f)) &&
+    !/no longer name|deletethese/.test(or4.info),
     JSON.stringify(or4).slice(0, 400));
   await evaluate(`window.showDirectoryPicker = window.__realPicker;
     window.edit.revertAll(); window.edit.pending.clear(); window.edit();`);
   await sleep(400);
 
-  // OR5. a folder save moves them into deletethese/, and a hand-named file stays
+  // OR5. a folder save moves nothing and lists nothing: the three files stay
+  // at their paths, and so does a file named by hand (KI1)
   await send("Page.navigate", { url: PAGE + "?or=5" });
   await waitLoaded();
   await sleep(1400);
@@ -4764,13 +4787,12 @@ async function main() {
       .map(li => li.textContent),
     moved: [...document.querySelectorAll('.ced-saved__files--moved .ced-saved__file')].map(li => li.textContent),
     said: (document.querySelector('.ced-saved__moved') || {}).textContent || '' } : null`, 12000);
-  check("orphans: a folder save moves the three files nothing names into deletethese/, and the box lists them",
-    !!or5 && or5.files.join() === "index.html" && or5.moved.join() === SERVED_FILES.join() &&
-    /3 files nothing uses any more were moved into deletethese\//.test(or5.said),
+  check("files nothing uses: a folder save writes the page, moves nothing, and lists nothing as moved",
+    !!or5 && or5.files.join() === "index.html" && or5.moved.length === 0 && or5.said === "",
     JSON.stringify(or5));
-  check("orphans: they are gone from img/work/ and wait in deletethese/, and a file named by hand stays",
-    !!or5 && SERVED_FILES.every((f) => or5.folder.indexOf(f) === -1 &&
-      or5.folder.indexOf("deletethese/" + f) !== -1) &&
+  check("files nothing uses: the three files stay at their paths, nothing waits in deletethese/, and a file named by hand stays",
+    !!or5 && SERVED_FILES.every((f) => or5.folder.indexOf(f) !== -1) &&
+    !or5.folder.some((f) => f.indexOf("deletethese/") === 0) &&
     or5.folder.indexOf("img/work/hand-named.jpg") !== -1,
     JSON.stringify(or5 && or5.folder));
   await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent')?.click()`);
@@ -5090,6 +5112,15 @@ async function main() {
   const [, bt9orig, bt9sd] = trio(bt9hd, "gif");
   check("gif: a two-frame GIF's row says animated, and its switch is on",
     /^64 x 64 · GIF · animated · \d+ KB/.test(bt9row.facts) && bt9row.uhd === true, JSON.stringify(bt9row));
+  // IX3. the site save records the held photo it writes, with its facts,
+  // the day, and the region that shows it
+  const ixBt9 = bt9zip["images.js"] ? imagesTable(bt9zip["images.js"].toString("utf8")) : { images: [] };
+  const eBt9 = (ixBt9.images || []).find((e) => e.base === bt9hd.replace(/\.jpg$/, "")) || null;
+  check("index: a site save writes images.js with the held photo's entry, its facts, the day it was added and the region that shows it",
+    !!eBt9 && eBt9.type === "gif" && eBt9.animated === true && eBt9.ow === 64 && eBt9.oh === 64 && eBt9.bytes > 0 &&
+    /^\d{6}$/.test(eBt9.added) && eBt9.used.join() === "index.html#cog-gallery" && eBt9.num === undefined &&
+    ixBt9.nextImg === "0001",
+    JSON.stringify({ entry: eBt9, files: Object.keys(bt9zip).filter((k) => /images\.js|moving-orbit/.test(k)) }));
   check("gif: its page writes the original as src and no srcset",
     hashedPath("moving-orbit").test(bt9hd) && attrOf(bt9img, "src") === bt9orig && attrOf(bt9img, "srcset") === undefined &&
     attrOf(bt9img, "data-uhd") === "1",
@@ -7546,7 +7577,7 @@ async function main() {
     /blog-publish-260711\.zip/.test(doneStep.body) && /Downloads folder/.test(doneStep.body) &&
     JSON.stringify(doneStep.spliced) === '["blog.html","index.html"]' &&
     JSON.stringify(doneStep.regen) ===
-      '["blog/2607.html","feed.xml","robots.txt","search.js","sitemap.xml"]' &&
+      '["blog/2607.html","feed.xml","images.js","robots.txt","search.js","sitemap.xml"]' &&
     /* Publish stays live now: the staging layer means the next bundle
        builds on this one rather than fighting it */
     /* three files for each of the two photos */
@@ -7920,34 +7951,40 @@ async function main() {
     const names = Object.keys(zipFiles).sort();
     // Three files for each photo, all of them under blog/: the small copy,
     // the copy a page shows, and the original. Nothing goes to imgsources/.
+    // The image index records the two photos, so it is in the bundle too.
     check("bundle has the full publish layout", JSON.stringify(names) === JSON.stringify([
       "blog/260711_img0001.jpg", "blog/260711_img0001_sd.webp",
       "blog/260711_img0001_original.png",
       "blog/260711_img0002.jpg", "blog/260711_img0002_sd.webp",
       "blog/260711_img0002_original.png",
       "blog/2607.html",
-      "blog.html", "index.html", "robots.txt", "sitemap.xml", "search.js", "feed.xml",
+      "blog.html", "index.html", "robots.txt", "sitemap.xml", "search.js", "feed.xml", "images.js",
     ].sort()), names.join(", "));
     check("bundle: an original never goes to imgsources/",
       !names.some((n) => /^imgsources\//.test(n)), names.join(", "));
 
-    // IM. THE MANIFEST STATES EVERY IMAGE. One line each: the date its files
-    // are named for, the ORIGINAL's format, size and bytes, and the flags.
-    // Every path and every copy's size follows from those, so nothing else
-    // has to be written down and a rebuild needs no fetch.
+    // IM. THE INDEX STATES EVERY IMAGE (IX4). One entry each in images.js:
+    // the date its files are named for, the ORIGINAL's format, size and
+    // bytes, the switches, and the post that uses it. Every path and every
+    // copy's size follows from those, so nothing else has to be written
+    // down and a rebuild needs no fetch. The manifest carries none of it.
     const pubPage = zipFiles["blog.html"].toString("utf8");
     const pubMan = (/<script id="blogManifest"[^>]*>([\s\S]*?)<\/script>/.exec(pubPage) || [])[1] || "";
-    const imgLines = (pubMan.match(/image:\d{4}=[^\n]*/g) || []);
-    check("manifest: one image line per image, with the original's format, size and bytes",
-      imgLines.length === 2 &&
-      /^image:0001=260711 png 2400x1200 \d+$/.test(imgLines[0]) &&
-      /^image:0002=260711 png 900x1400 \d+ uhd$/.test(imgLines[1]),
-      imgLines.join(" | "));
-    // the lines sit after the months and before the entries, so both readers
-    // walk the payload the same way
-    check("manifest: the image lines sit after the month lines and before the entries",
-      pubMan.indexOf("\nmonth:") < pubMan.indexOf("\nimage:") &&
-      pubMan.indexOf("\nimage:") < pubMan.indexOf("2607110001"),
+    const pubIxText = zipFiles["images.js"] ? zipFiles["images.js"].toString("utf8") : "";
+    const pubIx = imagesTable(pubIxText);
+    const pubBlog = (pubIx.images || []).filter((e) => e.num);
+    check("index: a publish writes images.js with one entry per image, the original's facts, the switches, the post that uses it and the counter after it",
+      /^\/\* GENERATED by the site editor on \d{4}-\d{2}-\d{2}; stamp:[0-9a-z]{6}; hand edits are overwritten \*\/\nwindow\.AMH_IMAGES = \{/.test(pubIxText) &&
+      pubBlog.length === 2 &&
+      pubBlog[0].num === "0001" && pubBlog[0].base === "blog/260711_img0001" && pubBlog[0].date === "260711" &&
+      pubBlog[0].type === "png" && pubBlog[0].ow === 2400 && pubBlog[0].oh === 1200 && pubBlog[0].bytes > 0 &&
+      pubBlog[0].uhd === false && pubBlog[0].added === "260711" && pubBlog[0].used.join() === "p0001" &&
+      pubBlog[1].num === "0002" && pubBlog[1].ow === 900 && pubBlog[1].oh === 1400 && pubBlog[1].uhd === true &&
+      pubBlog[1].used.join() === "p0001" && pubIx.nextImg === "0003" && pubIx.stamp === (/stamp:([0-9a-z]{6})/.exec(pubIxText) || [])[1],
+      JSON.stringify(pubIx).slice(0, 500));
+    check("index: the manifest carries the post counter, the stamps, the months and the entries, and nothing about images",
+      /\nnext-post:0002\n/.test(pubMan) && pubMan.indexOf("\nmonth:") < pubMan.indexOf("2607110001") &&
+      !/image:|next-img/.test(pubMan),
       pubMan.replace(/\s+/g, " ").slice(0, 200));
 
     // The markup a page gets: the contract, with the stream's own paths and
@@ -8009,8 +8046,8 @@ async function main() {
     const srcIdx = servedSource("blog.html");
     const manSpan = outIdx.slice(outIdx.indexOf("<!--[edit:blog-manifest]-->"),
       outIdx.indexOf("<!--[/edit:blog-manifest]-->"));
-    check("manifest spliced: counters + entry",
-      manSpan.includes("next-post:0002") && manSpan.includes("next-img:0003") &&
+    check("manifest spliced: counter + entry",
+      manSpan.includes("next-post:0002") && !manSpan.includes("next-img:") &&
       manSpan.includes("2607110001E2E first post"),
       manSpan.replace(/\s+/g, " "));
 
@@ -8213,7 +8250,7 @@ async function main() {
     // them all, so a reader whose blog.js never arrives still sees the
     // post they asked for. blog.js removes the style and takes over.
     check("month file: the focus boot script names the wanted post",
-      month.includes('var m=/[?&]post=p(\\d{4})/.exec(location.search)') &&
+      month.includes('var m=/[?&]post=p([0-9a-z]\\d{3})/.exec(location.search)') &&
       month.includes('s.id="postBoot"') &&
       month.includes('main>.bs-post:not(#p"+m[1]+"),.bm-chain{display:none}') &&
       month.indexOf("postBoot") < month.indexOf("</head>"),
@@ -8476,6 +8513,14 @@ async function main() {
       return item.join(" | ");
     })()`) || "");
   }
+  // The image index a bundle carries, or the one the bundle folder holds
+  // when this bundle did not change it.
+  function indexIn(zip) {
+    if (zip && zip["images.js"]) return imagesTable(zip["images.js"].toString("utf8"));
+    const p = join(bdir, "images.js");
+    return existsSync(p) ? imagesTable(readFileSync(p, "utf8")) : { v: 1, stamp: "", nextImg: "0001", images: [] };
+  }
+  const entryIn = (table, num) => ((table && table.images) || []).find((e) => e.num === num) || null;
   if (zipB64) {
     writeBundle(zipFiles);
     // The stylesheet and the four script trunks are repo files, not bundle
@@ -9132,7 +9177,7 @@ async function main() {
     })()`);
     check("panel foot: blog.html offers Rebuild, filled, beside Export",
       JSON.stringify(blogFoot.labels) ===
-        '["Export","Save to repo","Rebuild","New post","Revert all","Exit"]' &&
+        '["Export","Save to repo","Rebuild","Images","New post","Revert all","Exit"]' &&
       blogFoot.filled === "rgb(74, 165, 232)" && blogFoot.shared,
       JSON.stringify(blogFoot));
 
@@ -10214,17 +10259,92 @@ async function main() {
     const moTp6 = zipTp6 && zipTp6["blog/2607.html"] ? zipTp6["blog/2607.html"].toString("utf8") : "";
     const imgTp6 = (moTp6.match(/<img[^>]*_img0002[^>]*>/) || [""])[0];
     const stampOf = (text) => (/\nstamp:([0-9a-z]{6})/.exec(text) || [])[1] || "";
-    check("true size: a published image's switch flips, and the publish writes the flag beside uhd under a new stamp",
+    const eTp6 = entryIn(indexIn(zipTp6), "0002");
+    check("true size: a published image's switch flips, and the publish writes both switches into its index entry under a new stamp",
       !!tp6flip && tp6flip.before.ts === false && tp6flip.before.uhd === true &&
       tp6flip.after.ts === true && tp6flip.after.uhd === true && tp6flip.after.locked === true &&
-      /\nimage:0002=260711 png 900x1400 \d+ uhd truesize\n/.test(manTp6) &&
+      !!eTp6 && eTp6.uhd === true && eTp6.truesize === true && eTp6.ow === 900 && eTp6.oh === 1400 && eTp6.date === "260711" &&
       !!stampOf(manTp6) && stampOf(manTp6) !== stampOf(wasTp6),
-      JSON.stringify({ flip: tp6flip, lines: (manTp6.match(/\nimage:[^\n]*/g) || []).join(" | ") }));
+      JSON.stringify({ flip: tp6flip, entry: eTp6 }));
     check("true size: the month file's image shows the original with data-truesize and no srcset",
       /src="\.\.\/blog\/260711_img0002_original\.png"/.test(imgTp6) && /data-truesize="1"/.test(imgTp6) &&
       /data-uhd="1"/.test(imgTp6) && !/srcset=/.test(imgTp6) && !/data-crisp=/.test(imgTp6),
       imgTp6.slice(0, 400));
     if (zipTp6) writeBundle(zipTp6);
+
+    // KI2 and KI4. A TAG WITH A TYPO COSTS NOTHING. The second tag is made
+    // almost a tag and the post is published: the confirm names the text,
+    // the image keeps its line and its files, and the Done step lists no
+    // file. Then the tag is fixed: the card comes back from the line with
+    // no upload, the preview shows the image, and the month file has its
+    // carousel again.
+    await send("Page.navigate", { url: B + "blog.html?ki=2" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.__asks = []; window.confirm = function (m) { window.__asks.push(String(m)); return true; };`);
+    await evaluate(`window.edit.blog.edit("0001")`);
+    await sleep(1200);
+    const ki2before = await evaluate(`document.querySelectorAll('.bc-card').length`);
+    await evaluate(`(function () { var t = document.querySelector('.bc-write textarea');
+      t.value = t.value.replace('[png0002,Cap two]', '[portrait1:1 png0002,Cap two]');
+      t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(300);
+    const ki2note = await evaluate(`(document.querySelector('.bc-tagnote') || {}).textContent || ''`);
+    await pressPublish();
+    const zipK2 = await capturePublish();
+    const ki2asks = await evaluate(`window.__asks`);
+    const ki2said = await orphansSaid();
+    const manK2 = zipK2 && zipK2["blog.html"] ? zipK2["blog.html"].toString("utf8") : "";
+    const moK2 = zipK2 && zipK2["blog/2607.html"] ? zipK2["blog/2607.html"].toString("utf8") : "";
+    check("near tag: the line under the body names it, and the publish confirm names it and publishes it as text",
+      ki2before === 2 && /1 tag is not a tag: \[portrait1:1 png0002,Cap two\]/.test(ki2note) &&
+      ki2asks.some((a) => /This is not a tag, and is published as text:\n\[portrait1:1 png0002,Cap two\]/.test(a)) &&
+      moK2.includes("[portrait1:1 png0002,Cap two]") && !/<img[^>]*260711_img0002\.jpg/.test(moK2),
+      JSON.stringify({ before: ki2before, note: ki2note, asks: ki2asks }).slice(0, 400));
+    const eK2 = entryIn(indexIn(zipK2), "0002");
+    const manSpanK2 = (/<script id="blogManifest"[^>]*>([\s\S]*?)<\/script>/.exec(manK2) || [])[1] || "";
+    check("keep: the image the near tag failed to name keeps its index entry and its files, loses only this post's use, and nothing is asked or listed about orphans",
+      !!eK2 && eK2.base === "blog/260711_img0002" && eK2.date === "260711" && eK2.used.indexOf("p0001") === -1 &&
+      !/\n(?:image|next-img):/.test(manSpanK2) &&
+      !ki2asks.some((a) => /orphan/i.test(a)) && ki2said === "" &&
+      !!zipK2 && !Object.keys(zipK2).some((n) => /_img/.test(n)) &&
+      existsSync(join(bdir, "blog/260711_img0002.jpg")) && existsSync(join(bdir, "blog/260711_img0002_original.png")),
+      JSON.stringify({ entry: eK2, said: ki2said, zip: zipK2 ? Object.keys(zipK2).sort() : null }).slice(0, 400));
+    if (zipK2) writeBundle(zipK2);
+    await send("Page.navigate", { url: B + "blog.html?ki=4" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.__asks = []; window.confirm = function (m) { window.__asks.push(String(m)); return true; };`);
+    await evaluate(`window.edit.blog.edit("0001")`);
+    await sleep(1200);
+    const ki4open = await evaluate(`({ cards: document.querySelectorAll('.bc-card').length,
+      note: (document.querySelector('.bc-tagnote') || {}).textContent || '' })`);
+    await evaluate(`(function () { var t = document.querySelector('.bc-write textarea');
+      t.value = t.value.replace('[portrait1:1 png0002,Cap two]', '[png0002,Cap two]');
+      t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(300);
+    const ki4fixed = await evaluate(`({ cards: document.querySelectorAll('.bc-card').length,
+      metas: [].map.call(document.querySelectorAll('.bc-card .bc-card__meta'), function (m) { return m.textContent; }),
+      note: (document.querySelector('.bc-tagnote') || {}).hidden })`);
+    await evaluate(`[...document.querySelectorAll('.bc-tab')].find(b => b.textContent === 'Preview').click()`);
+    await sleep(1200);
+    const ki4preview = await evaluate(`[].map.call(document.querySelectorAll('.bc-preview .gallery__img'), function (i) { return i.getAttribute('src'); })`);
+    await pressPublish();
+    const zipK4 = await capturePublish();
+    const ki4asks = await evaluate(`window.__asks`);
+    const moK4 = zipK4 && zipK4["blog/2607.html"] ? zipK4["blog/2607.html"].toString("utf8") : "";
+    check("reconnect: the fixed tag gets its card back from the manifest's line, with its facts and no upload, and the preview shows the image",
+      ki4open.cards === 1 && /1 tag is not a tag/.test(ki4open.note) &&
+      ki4fixed.cards === 2 && ki4fixed.metas.some((m) => /0002/.test(m) && /published/.test(m) && /900 x 1400/.test(m)) &&
+      ki4fixed.note === true && ki4preview.some((s) => /260711_img0002(_original\.png|\.jpg)$/.test(s)),
+      JSON.stringify({ open: ki4open, fixed: ki4fixed, preview: ki4preview }).slice(0, 400));
+    const eK4 = entryIn(indexIn(zipK4), "0002");
+    check("reconnect: the republish writes the carousel again with the image, records the use again, with no confirm and no image file in the bundle",
+      !ki4asks.some((a) => /not a tag|orphan/i.test(a)) && /<img[^>]*260711_img0002\.jpg/.test(moK4) &&
+      !moK4.includes("portrait1:1") && !!zipK4 && !Object.keys(zipK4).some((n) => /_img/.test(n)) &&
+      !!eK4 && eK4.used.indexOf("p0001") !== -1 && eK4.date === "260711",
+      JSON.stringify({ asks: ki4asks, entry: eK4, zip: zipK4 ? Object.keys(zipK4).sort() : null }).slice(0, 300));
+    if (zipK4) writeBundle(zipK4);
 
     // P2-4. retitle + cross-month date move (2607 -> 2606) with image renames
     await send("Page.navigate", { url: B + "blog.html" });
@@ -10258,11 +10378,15 @@ async function main() {
         !!zip4["blog/260609_img0001_sd.webp"] && !!zip4["blog/260609_img0001_original.png"] &&
         !!zip4["blog/260609_img0002.jpg"] && !!zip4["blog/260609_img0002_original.png"],
         Object.keys(zip4).filter((n) => /_img/.test(n)).sort().join(", "));
-      // the manifest's line moves with the files
-      check("P2: the manifest's image lines carry the new date",
-        /\nimage:0001=260609 png \d+x\d+ \d+/.test(man4) &&
-        /\nimage:0002=260609 png \d+x\d+ \d+/.test(man4),
-        (man4.match(/\nimage:[^\n]*/g) || []).join(" | "));
+      // the index entry moves with the files (IX5): only this post uses
+      // them, so the rename is safe
+      const ix4 = indexIn(zip4);
+      const e4a = entryIn(ix4, "0001"), e4b = entryIn(ix4, "0002");
+      check("P2: the index entries carry the new date and base with the files, because no other post shares them",
+        !!e4a && e4a.date === "260609" && e4a.base === "blog/260609_img0001" && e4a.used.join() === "p0001" &&
+        !!e4b && e4b.date === "260609" && e4b.base === "blog/260609_img0002" && e4b.used.join() === "p0001" &&
+        !/\nimage:/.test(man4),
+        JSON.stringify({ a: e4a, b: e4b }).slice(0, 300));
       writeBundle(zip4);
       // honor the orphan checklist, like the human workflow demands
       for (const o of ["blog/2607.html",
@@ -10611,11 +10735,25 @@ async function main() {
     await send("Page.navigate", { url: B + "blog.html" });
     await sleep(2200);
     await evaluate(ZIP_CAPTURE);
+    /* KI3: the ask is recorded, and the manifest's image lines before the
+       delete are what the delete must keep */
+    await evaluate(`window.__asks = []; window.confirm = function (m) { window.__asks.push(String(m)); return true; };`);
+    const ixBefore5 = indexIn(null);
+    const basesBefore5 = (ixBefore5.images || []).filter((e) => e.num).map((e) => e.num + ":" + e.base).sort().join("|");
     await evaluate(`window.edit.blog.edit("0002")`);
     await sleep(1200);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
     await passRouteStep();
     const zip5 = await capturePublish();
+    const asks5 = await evaluate(`window.__asks`);
+    const said5 = await orphansSaid();
+    const ixAfter5 = indexIn(zip5);
+    const basesAfter5 = (ixAfter5.images || []).filter((e) => e.num).map((e) => e.num + ":" + e.base).sort().join("|");
+    check("keep: a delete keeps every image entry, takes the post out of every use, names no image file, and its ask says the images stay",
+      basesAfter5 === basesBefore5 && basesBefore5.length > 0 &&
+      (ixAfter5.images || []).every((e) => e.used.indexOf("p0002") === -1) &&
+      asks5.some((a) => /Delete post p0002/.test(a) && !/orphan/i.test(a)) && !/_img/.test(said5),
+      JSON.stringify({ before: basesBefore5, after: basesAfter5, asks: asks5, said: said5 }).slice(0, 400));
     if (zip5 && zip5["search.js"]) {
       const t5 = searchTable(zip5["search.js"].toString("utf8"));
       check("search: a delete takes that post out of the index and leaves the rest",
@@ -10715,8 +10853,8 @@ async function main() {
       warned8.some((w) => /p0001 is "Hand title"/.test(w) && /The month file wins/.test(w)),
       JSON.stringify(warned8).slice(0, 220));
     check("rebuild: the counters never go down",
-      man8.includes("next-post:0009") && man8.includes("next-img:0003"),
-      (man8.match(/next-(post|img):\d{4}/g) || []).join(" "));
+      man8.includes("next-post:0009") && indexIn(zip8).nextImg === "0003",
+      (man8.match(/next-post:[0-9a-z]{4}/g) || []).join(" ") + " nextImg " + indexIn(zip8).nextImg);
     check("rebuild: a changed entry reaches the home page highlights",
       !!zip8 && !!zip8["index.html"] && zip8["index.html"].toString("utf8").includes("Hand title"),
       zip8 ? Object.keys(zip8).sort().join(", ") : "no zip");
@@ -10729,6 +10867,85 @@ async function main() {
         "stamp " + ms8);
       writeBundle(zip8);
     }
+
+    // IX6. THE MIGRATION. A manifest from before the index carries next-img
+    // and image lines, and the site has no images.js. The rebuild that finds
+    // them builds the index from the lines and from the site pages, writes
+    // the manifest without them, and names a tag whose image the site does
+    // not hold. The fixture is put back after, so the checks that follow
+    // see the state P2-8 left.
+    const keepMan6 = readFileSync(join(bdir, "blog.html"), "utf8");
+    const keepIx6 = existsSync(join(bdir, "images.js")) ? readFileSync(join(bdir, "images.js"), "utf8") : null;
+    writeFileSync(join(bdir, "blog.html"), keepMan6.replace(/\nnext-post:([0-9a-z]{4})\n/,
+      "\nnext-post:$1\nnext-img:0003\nimage:0001=260609 png 2400x1200 59900\n"));
+    rmSync(join(bdir, "images.js"), { force: true });
+    await send("Page.navigate", { url: B + "blog.html?ix=6" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.__warned = []; (function () { var ow = console.warn;
+      console.warn = function (m) { window.__warned.push(String(m)); ow.apply(console, arguments); }; })()`);
+    await evaluate(`window.edit.blog.rebuild()`);
+    await sleep(400);
+    const ix6job = await evaluate(`(document.querySelector('.bc-wiz__job') || {}).textContent || ''`);
+    await passRouteStep();
+    const zipIx6 = await capturePublish();
+    const ix6done = await evaluate(`((document.querySelector('.bc-wizard .bc-wiz__body') || {}).textContent || '')`);
+    const ix6warned = await evaluate(`window.__warned`);
+    const ix6 = zipIx6 && zipIx6["images.js"] ? imagesTable(zipIx6["images.js"].toString("utf8")) : { images: [] };
+    const ix6man = zipIx6 && zipIx6["blog.html"] ? zipIx6["blog.html"].toString("utf8") : "";
+    const ix6e1 = entryIn(ix6, "0001");
+    const ix6site = (ix6.images || []).filter((e) => !e.num);
+    check("migration: a rebuild on a manifest with image lines builds the index from them and from the site pages, and writes the manifest without them",
+      /and the image index/.test(ix6job) && !!ix6e1 && ix6e1.base === "blog/260609_img0001" && ix6e1.ow === 2400 &&
+      ix6e1.added === "260609" && ix6e1.used.join() === "p0001" && ix6.nextImg === "0003" &&
+      ix6site.length >= 1 && ix6site.every((e) => /^img\/work\//.test(e.base) && e.used.some((u) => /^index\.html#/.test(u))) &&
+      !/\nnext-img:|\nimage:/.test(ix6man) && /\nnext-post:/.test(ix6man),
+      JSON.stringify({ job: ix6job, index: ix6, man: (ix6man.match(/\n(next-[a-z]+|image):[^\n]*/g) || []) }).slice(0, 600));
+    check("migration: a tag whose image the site does not hold is a dead tag, named with its post on the Done step and on the console",
+      /1 tag names an image the site does not hold\. img0002 in p0001\. Fix each in the composer/.test(ix6done) &&
+      ix6warned.some((w) => /img0002 in p0001/.test(w)),
+      JSON.stringify({ done: ix6done.slice(0, 200), warned: ix6warned.filter((w) => /does not hold/.test(w)) }).slice(0, 400));
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!')?.click()`);
+    await sleep(300);
+    /* the fixture goes back: the manifest and the index as P2-8 left them.
+       The bundle was not written, so its staging layer would stand in for
+       the files at the next read: it is cleared with the fixture. */
+    writeFileSync(join(bdir, "blog.html"), keepMan6);
+    if (keepIx6 !== null) writeFileSync(join(bdir, "images.js"), keepIx6);
+    await evaluate(`sessionStorage.clear()`);
+
+    // IX6b and IX8. A rebuild on a site with its index recomputes every use
+    // and changes nothing when nothing changed; a tag taken out of a month
+    // file by hand leaves the entry's uses at the next rebuild.
+    await send("Page.navigate", { url: B + "blog.html?ix=6b" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
+    const zipIx6b = await capturePublish();
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!')?.click()`);
+    await sleep(300);
+    check("index: a rebuild with nothing to change leaves images.js out of the bundle, and its stamps are the only difference",
+      !!zipIx6b && !!zipIx6b["blog.html"] && !zipIx6b["images.js"],
+      zipIx6b ? Object.keys(zipIx6b).sort().join(", ") : "no zip");
+    await evaluate(`sessionStorage.clear()`);
+    const keepMo8 = readFileSync(join(bdir, "blog/2606.html"), "utf8");
+    writeFileSync(join(bdir, "blog/2606.html"), keepMo8.split("[png0002,Cap two]").join(""));
+    await send("Page.navigate", { url: B + "blog.html?ix=8" });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
+    const zipIx8 = await capturePublish();
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(b => b.textContent === 'OK! Done!')?.click()`);
+    await sleep(300);
+    const e8a = entryIn(indexIn(zipIx8), "0001"), e8b = entryIn(indexIn(zipIx8), "0002");
+    check("index: a rebuild reads every use again from the sources, so a tag taken out of a month file by hand leaves the entry's uses",
+      keepMo8.indexOf("[png0002,Cap two]") !== -1 && !!zipIx8 && !!zipIx8["images.js"] &&
+      !!e8b && e8b.used.indexOf("p0001") === -1 && !!e8a && e8a.used.indexOf("p0001") !== -1,
+      JSON.stringify({ a: e8a, b: e8b }).slice(0, 300));
+    writeFileSync(join(bdir, "blog/2606.html"), keepMo8);
+    await evaluate(`sessionStorage.clear()`);
 
     // P2-9. the two codes. BLG-E10: a month file from another publish is
     // warned about at the hand-off, with both stamps, and taken anyway.
@@ -10764,7 +10981,7 @@ async function main() {
     await evaluate(`document.querySelector('.bc-title').value = 'Stale manifest post'`);
     await evaluate(`document.querySelector('.bc-write textarea').value = '<p>Never built.</p>'`);
     const idx9 = readFileSync(join(bdir, "blog.html"), "utf8");
-    writeFileSync(join(bdir, "blog.html"), idx9.replace("next-img:0003", "next-img:0004"));
+    writeFileSync(join(bdir, "blog.html"), idx9.replace("next-post:0009", "next-post:0010"));
     const step9 = await pressPublish();
     await sleep(900);
     const e11 = await evaluate(`(function () {
@@ -10821,8 +11038,8 @@ async function main() {
     if (zip10) writeBundle(zip10);
 
     // P2-11. a Markdown post with a table, a flag, an image, tags, a time
-    // and a zone, and no title. The image number is the manifest's next.
-    const nextImg = (/next-img:(\d{4})/.exec(readFileSync(join(bdir, "blog.html"), "utf8")) || [])[1];
+    // and a zone, and no title. The image number is the index's next.
+    const nextImg = indexIn(null).nextImg;
     const MD_SRC = "We ran the **dome** test.\n\n| Rig | Frames |\n| --- | ---: |\n| new | 90 |\n\n" +
       "{expandformore}\n\n[img" + nextImg + ",Dome at dusk|The dome]\n\nThe rest.";
     await send("Page.navigate", { url: B + "blog.html" });
@@ -11943,6 +12160,105 @@ async function main() {
     JSON.stringify(unknownId));
   await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (b) { return b.textContent === 'Close'; })?.click()`);
   await sleep(300);
+  // IX2b. from disk the index loads by its script tag, where a fetch is refused
+  const ixDisk = await evaluate(`AMH.images.index.load().then(function (r) {
+    return { n: r.images.length, tags: document.querySelectorAll('script[src*="images.js"]').length, protocol: location.protocol }; })`,
+    { awaitPromise: true });
+  check("index: a page opened from disk loads images.js through its script tag, with the record the bundle folder holds",
+    ixDisk.protocol === "file:" && ixDisk.tags === 1 && ixDisk.n >= 1, JSON.stringify(ixDisk));
+
+  // ============ KI8. IDS ROLL OVER ============
+  // Four characters, the first place counting in base 36: after p9999 and
+  // img9999 come pa000 and imga000, and every writer and reader on the site
+  // takes them. The bundle's counters are set to 9999 by hand, one post
+  // with a photo is published, then another. This is the last thing the
+  // bundle is used for, and the file page comes back after it. The bundle
+  // server was stopped before the file page, so it is started again here
+  // and stopped at the end.
+  const ki8man = readFileSync(join(bdir, "blog.html"), "utf8");
+  writeFileSync(join(bdir, "blog.html"), ki8man.replace(/next-post:[0-9a-z]{4}/, "next-post:9999"));
+  /* the image counter lives in the index now */
+  const ki8ix = existsSync(join(bdir, "images.js")) ? readFileSync(join(bdir, "images.js"), "utf8") : "";
+  if (ki8ix) writeFileSync(join(bdir, "images.js"), ki8ix.replace(/"nextImg":"[0-9a-z]{4}"/, '"nextImg":"9999"'));
+  bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+  await sleep(1500);
+  const KI8_DROP = `(function () {
+    var zone = document.querySelector('.bc-panel .bc-drop');
+    if (!zone) return false;
+    var cv = document.createElement('canvas'); cv.width = 64; cv.height = 48;
+    cv.getContext('2d').fillRect(8, 8, 48, 32);
+    return new Promise(function (res) { cv.toBlob(function (b) {
+      try {
+        var dt = new DataTransfer(); dt.items.add(new File([b], 'rolled.png', { type: 'image/png' }));
+        zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        res(true);
+      } catch (err) { res(false); }
+    }, 'image/png'); });
+  })()`;
+  const KI8_NUM = `(function () { var c = document.querySelector('.bc-panel .bc-card');
+    return c ? (/^([0-9a-z]{4})/.exec(c.querySelector('.bc-card__meta').textContent) || [])[1] || null : null; })()`;
+  async function ki8publish(tag, date, words) {
+    await send("Page.navigate", { url: B + "blog.html?ki8=" + tag });
+    await sleep(2200);
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.confirm = function () { return true; };`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(900);
+    const dropped = await evaluate(KI8_DROP, { awaitPromise: true });
+    const num = dropped ? await waitFor(KI8_NUM, 12000) : null;
+    await evaluate(`(function () {
+      document.querySelector('.bc-date').value = ${JSON.stringify(date)};
+      var t = document.querySelector('.bc-write textarea');
+      t.value = ${JSON.stringify(words)} + "\\n\\n[img" + ${JSON.stringify(num || "")} + ",Rolled|Rolled]";
+      t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await pressPublish();
+    const zip = await capturePublish();
+    return { num, zip, man: zip && zip["blog.html"] ? zip["blog.html"].toString("utf8") : "", ix: indexIn(zip) };
+  }
+  const ki8a = await ki8publish("a", "260711", "Rolled one.");
+  check("ids: with the counters at 9999 a post and its photo take p9999 and img9999, and the counters roll over to a000",
+    ki8a.num === "9999" && !!ki8a.zip && ki8a.man.includes("\nnext-post:a000") && ki8a.ix.nextImg === "a000" &&
+    /\n(?:[^\n]*\|)?2607119999Rolled one/.test(ki8a.man) &&
+    !!entryIn(ki8a.ix, "9999") && entryIn(ki8a.ix, "9999").base === "blog/260711_img9999" && entryIn(ki8a.ix, "9999").ow === 64 &&
+    !!ki8a.zip["blog/260711_img9999.jpg"] && !!ki8a.zip["blog/260711_img9999_sd.webp"] && !!ki8a.zip["blog/260711_img9999_original.png"] &&
+    !!ki8a.zip["blog/2607.html"] && /id="p9999"/.test(ki8a.zip["blog/2607.html"].toString("utf8")),
+    JSON.stringify({ num: ki8a.num, counters: (ki8a.man.match(/next-post:[^\n]*/g) || []), nextImg: ki8a.ix.nextImg, files: ki8a.zip ? Object.keys(ki8a.zip).sort() : null }).slice(0, 400));
+  if (ki8a.zip) writeBundle(ki8a.zip);
+  const ki8b = await ki8publish("b", "260712", "Rolled two.");
+  const moK8 = ki8b.zip && ki8b.zip["blog/2607.html"] ? ki8b.zip["blog/2607.html"].toString("utf8") : "";
+  const namedK8 = await evaluate(`AMH.images.named(${JSON.stringify(moK8)})`);
+  check("ids: the next post and photo take pa000 and imga000 in the manifest, the files, the month file and the counters",
+    ki8b.num === "a000" && !!ki8b.zip && ki8b.man.includes("\nnext-post:a001") && ki8b.ix.nextImg === "a001" &&
+    /\n(?:[^\n]*\|)?260712a000Rolled two/.test(ki8b.man) &&
+    !!entryIn(ki8b.ix, "a000") && entryIn(ki8b.ix, "a000").base === "blog/260712_imga000" && entryIn(ki8b.ix, "a000").used.join() === "pa000" &&
+    !!ki8b.zip["blog/260712_imga000.jpg"] && !!ki8b.zip["blog/260712_imga000_sd.webp"] && !!ki8b.zip["blog/260712_imga000_original.png"] &&
+    /<!-- ===== POST a000 · 260712 ===== -->/.test(moK8) && /id="pa000" data-id="a000"/.test(moK8) &&
+    /<img[^>]*\.\.\/blog\/260712_imga000\.jpg/.test(moK8),
+    JSON.stringify({ num: ki8b.num, counters: (ki8b.man.match(/next-post:[^\n]*/g) || []), nextImg: ki8b.ix.nextImg, files: ki8b.zip ? Object.keys(ki8b.zip).filter((n) => /a000|2607/.test(n)).sort() : null }).slice(0, 400));
+  const searchK8 = ki8b.zip && ki8b.zip["search.js"] ? searchTable(ki8b.zip["search.js"].toString("utf8")) : { posts: [] };
+  const feedK8 = ki8b.zip && ki8b.zip["feed.xml"] ? ki8b.zip["feed.xml"].toString("utf8") : "";
+  check("ids: the search index, the feed and the engine's name rule all take an id with a letter",
+    searchK8.posts.some((e) => e.id === "a000" && /Rolled two/.test(e.text)) && feedK8.includes("#pa000") &&
+    Array.isArray(namedK8) && namedK8.indexOf("blog/260712_imga000.jpg") !== -1 &&
+    namedK8.indexOf("blog/260712_imga000_sd.webp") !== -1 && namedK8.indexOf("blog/260712_imga000_original.png") !== -1,
+    JSON.stringify({ search: searchK8.posts.map((e) => e.id), feed: feedK8.indexOf("#pa000") !== -1, named: namedK8 }).slice(0, 300));
+  if (ki8b.zip) writeBundle(ki8b.zip);
+  await send("Page.navigate", { url: B + "blog/2607.html?post=pa000" });
+  await sleep(2400);
+  const focusK8 = await evaluate(`(function () {
+    var posts = [].slice.call(document.querySelectorAll('main .bs-post'));
+    var shown = posts.filter(function (p) { return p.offsetParent !== null; });
+    return { focus: document.body.classList.contains('is-focus'), posts: posts.length,
+             shown: shown.map(function (p) { return p.id; }), boot: !!document.getElementById('postBoot') }; })()`);
+  check("ids: a month page opened on ?post=pa000 reads the post with a letter and shows it alone",
+    focusK8.posts >= 2 && focusK8.shown.join() === "pa000" && focusK8.focus,
+    JSON.stringify(focusK8));
+  try { bs?.kill(); } catch {}
+  /* the file page, as the block above left it: open, with the editor on */
+  await send("Page.navigate", { url: pathToFileURL(join(bdir, "blog.html")).href });
+  await sleep(2400);
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(500);
 
   // ============ ONE FRAME FOR EVERY BOX ============
   // Five surfaces wear the same paint: a rule under the head, a rule above
@@ -12551,6 +12867,12 @@ async function main() {
   // line saying what agrees with what.
   await send("Page.navigate", { url: PAGE });
   await waitLoaded();
+  /* the browser may answer this plain address from a copy cached at an
+     earlier visit, while the served file was written since; a hard reload
+     is what the mark tells a reader to press, and it makes the fixture
+     what the check claims: nothing behind */
+  await send("Page.reload", { ignoreCache: true });
+  await waitLoaded();
   await sleep(600);
   await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
   await sleep(2500);
@@ -12896,6 +13218,98 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
+  // ============ IX1 AND IX2. THE INDEX AS A UNIT, AND ON DEMAND ============
+  // No page carries a script tag for images.js. The editor turning on loads
+  // it once, by a tag, and a second turn adds none. The engine's text is a
+  // header and one statement, one image a line, and it reads back.
+  await send("Page.navigate", { url: PAGE + "?ix=2" });
+  await waitLoaded();
+  await sleep(1200);
+  const ix2a = await evaluate(`({ tags: document.querySelectorAll('script[src*="images.js"]').length, loaded: !!AMH.images.index.get() })`);
+  await evaluate(`window.edit()`);
+  await sleep(700);
+  const ix2b = await evaluate(`AMH.images.index.load().then(function (r) {
+    return { tags: document.querySelectorAll('script[src*="images.js"]').length, n: r.images.length, nextImg: r.nextImg }; })`, { awaitPromise: true });
+  await evaluate(`window.edit(); window.edit();`);
+  await sleep(500);
+  const ix2c = await evaluate(`document.querySelectorAll('script[src*="images.js"]').length`);
+  check("index: no page loads images.js on its own, the editor loads it once, and a second turn adds no tag",
+    ix2a.tags === 0 && ix2a.loaded === false && ix2b.tags === 1 && ix2b.n === 0 && ix2b.nextImg === "0001" && ix2c === 1,
+    JSON.stringify({ before: ix2a, on: ix2b, again: ix2c }));
+  const ix1 = await evaluate(`(function () {
+    var I = AMH.images.index;
+    var rec = { v: 1, stamp: "", nextImg: "0007", images: [
+      { base: "blog/260916_img0006", num: "0006", date: "260916", type: "png", ow: 32, oh: 32, bytes: 459, uhd: true, truesize: true, animated: false, added: "260916", used: ["p0011"] },
+      { base: "img/work/hangar-bay-01-k3f9zq", type: "png", ow: 2400, oh: 1200, bytes: 3145728, animated: false, added: "260910", used: ["index.html#fr3-gallery"] } ] };
+    var text = I.text(rec, "abc123");
+    var lines = text.split("\\n");
+    var keep = window.AMH_IMAGES;
+    window.AMH_IMAGES = undefined;
+    (new Function(text))();
+    var back = I.set(window.AMH_IMAGES);
+    var out = { head: lines[0], open: lines[1], lines: lines.length, n: back.images.length,
+      blog: I.blog("0006") ? I.blog("0006").base : null,
+      entry: I.entry("img/work/hangar-bay-01-k3f9zq") ? I.entry("img/work/hangar-bay-01-k3f9zq").ow : null,
+      map: Object.keys(I.blogMap()).join(), nextImg: back.nextImg, stamp: back.stamp,
+      same: I.stampText(rec) === I.stampText(back),
+      usage: AMH.images.usageOf('<!--[edit:a]--><div><img src="img/work/x-aaaaaa.jpg" data-original="img/work/x-aaaaaa_original.png"><!--[edit:b]--><img src="img/work/y-bbbbbb.jpg" data-original="img/work/y-bbbbbb_original.png"><!--[/edit:b]--><img src="blog/260101_img0001.jpg" data-original="blog/260101_img0001_original.png"></div><!--[/edit:a]-->', 'index.html') };
+    I.set(keep || {});
+    return out;
+  })()`);
+  check("index: the file's text is a header and one statement with one image a line, it reads back with every lookup, and usage is by the innermost region",
+    /^\/\* GENERATED by the site editor on \d{4}-\d{2}-\d{2}; stamp:abc123; hand edits are overwritten \*\/$/.test(ix1.head) &&
+    ix1.open === 'window.AMH_IMAGES = {"v":1,"stamp":"abc123","nextImg":"0007","images":[' && ix1.lines === 6 &&
+    ix1.n === 2 && ix1.blog === "blog/260916_img0006" && ix1.entry === 2400 && ix1.map === "0006" &&
+    ix1.nextImg === "0007" && ix1.stamp === "abc123" && ix1.same === true &&
+    JSON.stringify(ix1.usage) === '{"img/work/x-aaaaaa":["index.html#a"],"img/work/y-bbbbbb":["index.html#b"]}',
+    JSON.stringify(ix1).slice(0, 500));
+  await evaluate(`if (AMH.tool.editorOn()) window.edit(); window.edit.pending.clear();`);
+  await send("Page.navigate", { url: BLOGPAGE + "?ix=1" });
+  await waitLoaded();
+  await sleep(1200);
+
+  // ============ KI5 TO KI7. NEAR TAGS AND IDS, AS UNITS ============
+  // The near-tag finder on a fixed list, the two id functions on a fixed
+  // list, and a number no image has, refused at publish with the new words.
+  const ki6 = await evaluate(`(function () {
+    var B = AMH.blog;
+    return ["[portrait1:1 img0005,a|b]", "[Portrait img0005]", "[img 0005]", "x [png0005] y", "[!img0005]", "[img0005]", "[link](url)",
+            "[img0005,caption with img0006 inside|alt]", "[imga000]"].map(function (s) { return B.nearTags(s).length; });
+  })()`);
+  check("near tag: the finder names text that is almost a tag and never a tag, an escape, a link or a caption that holds a number",
+    JSON.stringify(ki6) === "[1,1,1,0,0,0,0,0,0]", JSON.stringify(ki6));
+  const ki7 = await evaluate(`(function () {
+    var B = AMH.blog;
+    var threw = ""; try { B.idOf(36000); } catch (e) { threw = e.message; }
+    return { of: [0, 11, 9999, 10000, 10001, 35999].map(B.idOf).join(),
+             num: ["0000", "0011", "9999", "a000", "a001", "z999", "00a1", "x"].map(B.idNum).join(),
+             threw: threw, ID: B.ID, tag: new RegExp("^" + B.TAG + "$").test("[portrait imgz999,Cap|Alt]"),
+             sorted: ["a000", "9999", "0011", "z999"].sort().join() };
+  })()`);
+  check("ids: idOf and idNum agree on a fixed list, the first place counts in base 36, and ids sort as strings",
+    ki7.of === "0000,0011,9999,a000,a001,z999" && ki7.num === "0,11,9999,10000,10001,35999,0,0" &&
+    /no id left/.test(ki7.threw) && ki7.ID === "[0-9a-z]\\d{3}" && ki7.tag === true &&
+    ki7.sorted === "0011,9999,a000,z999",
+    JSON.stringify(ki7));
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await sleep(900);
+  await evaluate(`(function () { var t = document.querySelector('.bc-panel .bc-write textarea'); if (!t) return;
+    t.value = 'Words.\\n\\n[img0077,None|None]'; t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await sleep(300);
+  const ki5note = await evaluate(`(document.querySelector('.bc-tagnote') || {}).textContent || ''`);
+  await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Publish')?.click()`);
+  await sleep(500);
+  const ki5 = await evaluate(`({ status: (document.querySelector('.bc-status') || {}).textContent || '',
+    wizard: !!document.querySelector('.bc-wizard'), cards: document.querySelectorAll('.bc-panel .bc-card').length })`);
+  check("reconnect: a tag for a number no image has is named under the body and refused at publish with the new words",
+    /No image on this site has the number 0077\./.test(ki5note) && ki5.cards === 0 && !ki5.wizard &&
+    ki5.status === "No image on this site has the number 0077. Add it on the Images tab, or fix the tag.",
+    JSON.stringify({ note: ki5note, ...ki5 }));
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(400);
+
   // ============ PV. THE PREVIEW AS A READER SEES IT ============
   // Desktop draws the post in the blog's own column. Mobile draws it in a
   // phone: a page of its own, 390 x 866, in a frame, so the phone rules in
@@ -13049,6 +13463,603 @@ async function main() {
     JSON.stringify({ reopened: pv4a, desktop: pv4b }));
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
+
+  // ============ SD. THE IMAGES BOX, SUPER DELETE AND RESTORE ============
+  // Every image the site holds in one box, from the record and never from
+  // a page. Super Delete is the one move that takes an image off the site:
+  // it moves the three files into deletethese/, takes the entry out of the
+  // index and appends to superdeleted.js, the committed log. Restore undoes
+  // it while the files are there. Both need the repo folder, which is the
+  // suite's fake folder here, and the record is a fixture set on the engine
+  // after its load, the way a save leaves one.
+  const SD_REC = {
+    v: 1, stamp: "sdfix1", nextImg: "0009", images: [
+      { base: "blog/260917_img0007", type: "png", ow: 64, oh: 64, bytes: 2048, animated: false, added: "260917",
+        used: ["p0012"], num: "0007", date: "260917", uhd: true, truesize: true },
+      /* used on this page alone: an image used on another surface is
+         refused before the ask, which the in-use section covers */
+      { base: "img/work/hangar-bay-01-k3f9zq", type: "png", ow: 853, oh: 645, bytes: 367973, animated: false, added: "260916",
+        used: ["index.html#fr3-gallery"] },
+      { base: "blog/260915_img0005", type: "gif", ow: 320, oh: 200, bytes: 90000, animated: true, added: "260915",
+        used: [], num: "0005", date: "260915", uhd: true, truesize: false }
+    ]
+  };
+  const SD_STATE = `(function () {
+    var box = document.querySelector('.ced-images');
+    if (!box) return null;
+    return { tag: box.querySelector('.ced-b').textContent, title: box.querySelector('.ced-slug').textContent,
+      note: box.querySelector('.ced-images__note').textContent,
+      pills: [...box.querySelectorAll('.ced-images__filters .ced-btn')].map(function (b) { return b.textContent + ':' + b.getAttribute('aria-pressed'); }),
+      rows: [...box.querySelectorAll('.ced-image')].map(function (li) {
+        var pic = li.querySelector('.ced-image__pic');
+        return { name: li.querySelector('.ced-image__name').textContent, facts: li.querySelector('.ced-image__facts').textContent,
+          used: (li.querySelector('.ced-image__used') || {}).textContent, pic: pic.tagName === 'IMG' ? pic.getAttribute('src') : pic.className,
+          links: [...li.querySelectorAll('.ced-image__used a')].map(function (a) { return a.getAttribute('href'); }),
+          paths: [...li.querySelectorAll('.ced-image__paths code')].map(function (c) { return c.textContent; }),
+          acts: [...li.querySelectorAll('.ced-image__acts button')].map(function (b) { return b.textContent || b.getAttribute('aria-label'); }) }; }),
+      status: box.querySelector('.ced-modal__status').textContent,
+      empty: box.querySelector('.ced-empty').hidden ? '' : box.querySelector('.ced-empty').textContent };
+  })()`;
+  const SD_ASK = `(function () {
+    var a = document.querySelector('.ced-ask');
+    if (!a) return null;
+    var yes = [...a.querySelectorAll('.ced-modal__btns .ced-btn')].pop();
+    return { tag: a.querySelector('.ced-b').textContent, orange: a.querySelector('.ced-b').classList.contains('ced-b--o'),
+      title: a.querySelector('.ced-slug').textContent, code: a.querySelector('code').textContent,
+      thumb: a.querySelector('.ced-ask__thumb').getAttribute('src'),
+      lines: [...a.querySelectorAll('.ced-ask__text p')].map(function (p) { return p.textContent; }),
+      yes: yes.textContent, yesCls: yes.className, focus: document.activeElement.textContent };
+  })()`;
+  const SD_SAVED = `(function () {
+    var s = document.querySelector('.ced-saved');
+    if (!s) return null;
+    return { title: s.querySelector('.ced-slug').textContent, lead: s.querySelector('.ced-saved__lead').textContent,
+      files: [...s.querySelectorAll('.ced-saved__files:not(.ced-saved__files--moved) li')].map(function (li) { return li.textContent; }),
+      moved: (s.querySelector('.ced-saved__moved') || {}).textContent,
+      movedFiles: [...s.querySelectorAll('.ced-saved__files--moved li')].map(function (li) { return li.textContent; }) };
+  })()`;
+  const SD_STATUS = `({ status: (document.querySelector('.ced-images .ced-modal__status') || {}).textContent, ask: !!document.querySelector('.ced-ask'),
+    saved: !!document.querySelector('.ced-saved'), folder: window.__folder ? window.__folder() : [], picks: window.__picks })`;
+  const SD_FOOT = `[...document.querySelectorAll('.ced-panel__foot .ced-btn')].map(function (b) { return b.textContent; })`;
+  const sdAct = (rowName, label) => `(function () {
+    var li = [...document.querySelectorAll('.ced-image')].find(function (l) { return l.querySelector('.ced-image__name').textContent === ${JSON.stringify(rowName)}; });
+    if (!li) return 'no row ' + ${JSON.stringify(rowName)};
+    var b = [...li.querySelectorAll('.ced-image__acts button')].find(function (x) { return (x.textContent || x.getAttribute('aria-label')) === ${JSON.stringify(label)}; });
+    if (!b) return 'no button ' + ${JSON.stringify(label)};
+    b.click(); return 'clicked'; })()`;
+  const sdPill = (key) => `(function () { var b = document.querySelector('.ced-images__filters .ced-btn[data-show="${key}"]'); if (!b) return false; b.click(); return true; })()`;
+  const sdPress = (boxSel, label) => `(function () { var b = [...document.querySelectorAll('${boxSel} .ced-modal__btns .ced-btn')].find(function (x) { return x.textContent === ${JSON.stringify(label)}; }); if (!b) return false; b.click(); return true; })()`;
+  const sdPut = (base, ext) => `(function () { window.__putFile(${JSON.stringify(base + ".jpg")}, "jpg"); window.__putFile(${JSON.stringify(base + "_sd.webp")}, "webp");
+    window.__putFile(${JSON.stringify(base + "_original." + ext)}, "orig"); return true; })()`;
+  const sdSet = () => evaluate(`AMH.images.index.load().then(function () { AMH.images.index.set(${JSON.stringify(SD_REC)}); return true; })`, { awaitPromise: true });
+  /* The editor, once the page has it. A fixed sleep after a navigation
+     races the trunks, and a bare AMH on a page still parsing throws a
+     page exception, which ends the run rather than one check. */
+  const sdEditorOn = async () => {
+    await waitLoaded();
+    const there = await waitFor(`typeof AMH !== "undefined" && !!(AMH.tool && AMH.tool.editorOn) && typeof window.edit === "function"`, 15000);
+    if (!there) return false;
+    await evaluate(`if (!AMH.tool.editorOn()) window.edit();`);
+    await sleep(500);
+    return true;
+  };
+  const sdOpen = async () => { await evaluate(`window.edit.images()`); await sleep(700); };
+  const sdClose = async () => { await evaluate(`(document.querySelector('.ced-images .ced-modal__x') || { click: function () {} }).click()`); await sleep(250); };
+  const sdWrote = () => evaluate(`({ folder: window.__folder(), ix: window.__wrote['images.js'] || '', log: window.__wrote['superdeleted.js'] || '' })`);
+  /* the image SD6 deletes: the one nothing uses, so the delete is the
+     plain one. An image still in use comes out of its places first, which
+     the in-use section covers. */
+  const SD_TRIO = ["blog/260915_img0005.jpg", "blog/260915_img0005_sd.webp", "blog/260915_img0005_original.gif"];
+
+  await send("Page.navigate", { url: PAGE + "?sd=1" });
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  await sdSet();
+  await evaluate(sdPut("blog/260917_img0007", "png"));
+  await evaluate(sdPut("blog/260915_img0005", "gif"));
+
+  // SD1. the button, the console name, and the three ways out
+  const sd1 = await evaluate(`({ names: ${SD_FOOT}, api: typeof window.edit.images })`);
+  await sdOpen();
+  const sd1open = await evaluate(SD_STATE);
+  await sdClose();
+  const sd1x = await evaluate(`!!document.querySelector('.ced-images')`);
+  await sdOpen();
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(250);
+  const sd1esc = await evaluate(`!!document.querySelector('.ced-images')`);
+  await sdOpen();
+  await evaluate(`document.querySelector('.ced-scrim').click()`);
+  await sleep(250);
+  const sd1scrim = await evaluate(`({ box: !!document.querySelector('.ced-images'), scrim: !!document.querySelector('.ced-scrim') })`);
+  check("images: the panel's foot offers Images between Save to repo and New post, edit.images() opens the box, and the X, Escape and the scrim close it",
+    sd1.names.indexOf("Images") === sd1.names.indexOf("Save to repo") + 1 && sd1.names[sd1.names.indexOf("Images") + 1] === "New post" &&
+    sd1.api === "function" && !!sd1open && sd1open.tag === "IMAGES" && sd1open.title === "Every image the site holds" &&
+    sd1open.note === "as of the last save or publish" && !sd1x && !sd1esc && !sd1scrim.box && !sd1scrim.scrim,
+    JSON.stringify({ names: sd1.names, api: sd1.api, open: !!sd1open, x: sd1x, esc: sd1esc, scrim: sd1scrim }));
+
+  // SD2. the rows, newest first, with the small copy, the name, the facts
+  // and the places; and the filters with their counts
+  await sdOpen();
+  const sd2 = await evaluate(SD_STATE);
+  await evaluate(sdPill("unused"));
+  await sleep(200);
+  const sd2u = await evaluate(SD_STATE);
+  await evaluate(sdPill("deleted"));
+  await sleep(200);
+  const sd2d = await evaluate(SD_STATE);
+  await evaluate(sdPill("all"));
+  await sleep(200);
+  check("images: the box lists the record newest first, each row with its small copy, its name, its facts and where it is used, a post as a link",
+    !!sd2 && sd2.rows.map((r) => r.name).join() === "img0007,hangar-bay-01-k3f9zq,img0005" &&
+    sd2.rows[0].pic === "blog/260917_img0007_sd.webp" && sd2.rows[1].pic === "img/work/hangar-bay-01-k3f9zq_sd.webp" &&
+    sd2.rows[0].facts === "PNG · 64 x 64 · 2 KB · added 2026-09-17 · true pixel size" &&
+    sd2.rows[1].facts === "PNG · 853 x 645 · 359 KB · added 2026-09-16" &&
+    sd2.rows[2].facts === "GIF · animated · 320 x 200 · 88 KB · added 2026-09-15 · UHD" &&
+    sd2.rows[0].used === "Used in p0012" && sd2.rows[0].links.join() === "blog.html#p0012" &&
+    sd2.rows[1].used === "Used in index.html · Forerunner 3" && sd2.rows[2].used === "Not used" &&
+    sd2.rows[0].acts.join() === "Copy tag,Super delete" && sd2.rows[1].acts.join() === "Copy path,Super delete",
+    JSON.stringify(sd2 && sd2.rows).slice(0, 900));
+  check("images: the filters count All, Unused and Super deleted, Unused shows the one entry nothing uses, and an empty filter says so",
+    !!sd2 && sd2.pills.join() === "All (3):true,Unused (1):false,Super deleted (0):false" &&
+    !!sd2u && sd2u.pills.join() === "All (3):false,Unused (1):true,Super deleted (0):false" && sd2u.rows.map((r) => r.name).join() === "img0005" &&
+    !!sd2d && sd2d.rows.length === 0 && sd2d.empty === "Nothing has been super deleted.",
+    JSON.stringify({ all: sd2 && sd2.pills, unused: sd2u && sd2u.pills, rows: sd2u && sd2u.rows.map((r) => r.name), deleted: sd2d && sd2d.empty }));
+
+  // SD3. Copy tag and Copy path, on a stubbed clipboard
+  await evaluate(`navigator.clipboard.writeText = function (t) { window.__clip = t; return Promise.resolve(); }; true`);
+  await evaluate(sdAct("img0007", "Copy tag"));
+  await sleep(300);
+  const sd3a = await evaluate(`({ clip: window.__clip, status: document.querySelector('.ced-images .ced-modal__status').textContent })`);
+  await evaluate(sdAct("hangar-bay-01-k3f9zq", "Copy path"));
+  await sleep(300);
+  const sd3b = await evaluate(`({ clip: window.__clip, status: document.querySelector('.ced-images .ced-modal__status').textContent })`);
+  check("images: Copy tag writes the tag to the clipboard and the status says so, and Copy path writes a site image's display path",
+    sd3a.clip === "[img0007]" && sd3a.status === "Copied [img0007]" &&
+    sd3b.clip === "img/work/hangar-bay-01-k3f9zq.jpg" && sd3b.status === "Copied img/work/hangar-bay-01-k3f9zq.jpg",
+    JSON.stringify({ tag: sd3a, path: sd3b }));
+
+  // SD4 and SD5. the trash can with no folder taken runs the folder
+  // decision, then asks in orange with the focus on the way out; an image
+  // in use has each place named
+  const sdPicks0 = await evaluate(`window.__picks`);
+  await evaluate(sdAct("hangar-bay-01-k3f9zq", "Super delete"));
+  await sleep(900);
+  const sd4 = await evaluate(SD_ASK);
+  const sdPicks1 = await evaluate(`window.__picks`);
+  check("images: with no folder taken the trash can runs the folder decision, then asks SUPER DELETE in orange with the base, three lines, and the focus on Cancel",
+    sdPicks1 === sdPicks0 + 1 && !!sd4 && sd4.tag === "SUPER DELETE" && sd4.orange && sd4.title === "Super delete hangar-bay-01-k3f9zq?" &&
+    sd4.code === "img/work/hangar-bay-01-k3f9zq" && sd4.thumb === "img/work/hangar-bay-01-k3f9zq_sd.webp" && sd4.lines.length === 3 &&
+    sd4.lines[0] === "Its three files move into deletethese/, and it leaves the index. Nothing on the site shows it after this." &&
+    sd4.lines[2] === "Commit and push, then empty deletethese/ when you are sure." &&
+    sd4.yes === "Super delete" && /ced-btn--fill-danger/.test(sd4.yesCls) && sd4.focus === "Cancel",
+    JSON.stringify({ picks: [sdPicks0, sdPicks1], ask: sd4 }));
+  check("images: the ask on an image in use names the place it is in and says what is written",
+    !!sd4 && sd4.lines[1] === "It is taken out of Forerunner 3, and this page is saved.",
+    sd4 ? sd4.lines[1] : "no ask");
+  await evaluate(sdPress(".ced-ask", "Cancel"));
+  await sleep(300);
+  const sd4after = await evaluate(SD_STATUS);
+
+  // SD6. the move: the files, the index, the log, the saved box and the row
+  await evaluate(sdAct("img0005", "Super delete"));
+  await sleep(700);
+  const sd6ask = await evaluate(SD_ASK);
+  await evaluate(sdPress(".ced-ask", "Super delete"));
+  await sleep(1500);
+  const sd6 = await sdWrote();
+  const sd6ix = imagesTable(sd6.ix), sd6log = imagesTable(sd6.log);
+  const sd6saved = await evaluate(SD_SAVED);
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(400);
+  const sd6state = await evaluate(SD_STATE);
+  const sd6line = sd6log && sd6log.deleted ? sd6log.deleted[0] : null;
+  check("images: Super delete moves the three files into deletethese/, writes images.js without the entry, and appends one line to superdeleted.js with the time, the paths, the entry and restored empty",
+    !sd4after.ask && sd4after.folder.every((p) => p.indexOf("deletethese/") !== 0) &&
+    !!sd6ask && sd6ask.title === "Super delete img0005?" && sd6ask.lines.length === 2 &&
+    SD_TRIO.every((p) => sd6.folder.indexOf("deletethese/" + p) !== -1 && sd6.folder.indexOf(p) === -1) &&
+    sd6ix.images.length === 2 && !sd6ix.images.some((e) => e.base === "blog/260915_img0005") && sd6ix.nextImg === "0009" &&
+    !!sd6line && sd6log.deleted.length === 1 && /^\d{6}-\d{6}$/.test(sd6line.at) && sd6line.base === "blog/260915_img0005" &&
+    sd6line.paths.slice().sort().join() === SD_TRIO.slice().sort().join() &&
+    sd6line.entry.num === "0005" && sd6line.entry.used.length === 0 && sd6line.entry.uhd === true && sd6line.restored === "" &&
+    /^\/\* GENERATED by the site editor on \d{4}-\d{2}-\d{2}; stamp:[0-9a-z]{6}; hand edits are overwritten \*\/\n/.test(sd6.log),
+    JSON.stringify({ cancelled: sd4after, folder: sd6.folder, ix: sd6ix, log: sd6log }).slice(0, 900));
+  check("images: the saved box names what was written and what moved, and the row moves under Super deleted with its time, its paths and Restore",
+    !!sd6saved && sd6saved.title === "Super deleted img0005" && /^img0005 left the index\. 2 files were written into /.test(sd6saved.lead) &&
+    sd6saved.files.join() === "images.js,superdeleted.js" && sd6saved.moved === "3 files were moved into deletethese/, to empty when you are sure:" &&
+    sd6saved.movedFiles.slice().sort().join() === SD_TRIO.slice().sort().join() &&
+    !!sd6state && sd6state.pills.join() === "All (2):false,Unused (0):false,Super deleted (1):true" &&
+    sd6state.rows.length === 1 && sd6state.rows[0].name === "img0005" && /^Super deleted \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(sd6state.rows[0].used) &&
+    sd6state.rows[0].paths.length === 3 && sd6state.rows[0].acts.join() === "Restore" && /^blob:/.test(sd6state.rows[0].pic) &&
+    sd6state.status === "Super deleted img0005.",
+    JSON.stringify({ saved: sd6saved, state: sd6state }).slice(0, 900));
+
+  // SD7. Restore, while the files are in deletethese/
+  await evaluate(sdAct("img0005", "Restore"));
+  await sleep(1500);
+  const sd7 = await sdWrote();
+  const sd7ix = imagesTable(sd7.ix), sd7log = imagesTable(sd7.log);
+  const sd7saved = await evaluate(SD_SAVED);
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(400);
+  const sd7state = await evaluate(SD_STATE);
+  const sd7entry = sd7ix.images.find((e) => e.base === "blog/260915_img0005") || null;
+  check("images: Restore moves the files back, puts the entry back with no uses and its added day, marks the log's line restored, and the row is under Unused",
+    SD_TRIO.every((p) => sd7.folder.indexOf(p) !== -1 && sd7.folder.indexOf("deletethese/" + p) === -1) &&
+    !!sd7entry && sd7entry.used.length === 0 && sd7entry.added === "260915" && sd7entry.num === "0005" && sd7entry.uhd === true &&
+    sd7log.deleted.length === 1 && /^\d{6}-\d{6}$/.test(sd7log.deleted[0].restored) &&
+    !!sd7saved && sd7saved.title === "Restored img0005" && sd7saved.files.join() === "images.js,superdeleted.js" &&
+    sd7saved.moved === "3 files were moved back from deletethese/:" &&
+    !!sd7state && sd7state.pills.join() === "All (3):false,Unused (1):true,Super deleted (0):false" &&
+    sd7state.rows.map((r) => r.name).join() === "img0005",
+    JSON.stringify({ folder: sd7.folder, entry: sd7entry, log: sd7log, saved: sd7saved, pills: sd7state && sd7state.pills }).slice(0, 900));
+
+  // SD8. Restore refuses with a name when a file is missing from
+  // deletethese/, and when a file is already at its place, and moves nothing
+  await evaluate(sdPill("all"));
+  await sleep(200);
+  await evaluate(sdAct("img0005", "Super delete"));
+  await sleep(700);
+  await evaluate(sdPress(".ced-ask", "Super delete"));
+  await sleep(1500);
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(300);
+  const sd8before = await evaluate(`window.__folder()`);
+  await evaluate(`window.__dropFile('deletethese/blog/260915_img0005_sd.webp')`);
+  await evaluate(sdAct("img0005", "Restore"));
+  await sleep(800);
+  const sd8a = await evaluate(SD_STATUS);
+  await evaluate(`window.__putFile('deletethese/blog/260915_img0005_sd.webp', 'webp'); window.__putFile('blog/260915_img0005.jpg', 'stale'); true`);
+  await evaluate(sdAct("img0005", "Restore"));
+  await sleep(800);
+  const sd8b = await evaluate(SD_STATUS);
+  check("images: Restore refuses and names the file when one is missing from deletethese/, and moves nothing",
+    sd8before.indexOf("deletethese/blog/260915_img0005.jpg") !== -1 && sd8before.indexOf("blog/260915_img0005.jpg") === -1 &&
+    sd8a.status === "blog/260915_img0005_sd.webp is not in deletethese/. Add the image again instead." && !sd8a.saved &&
+    sd8a.folder.indexOf("deletethese/blog/260915_img0005.jpg") !== -1 && sd8a.folder.indexOf("blog/260915_img0005.jpg") === -1,
+    JSON.stringify({ before: sd8before, after: sd8a }));
+  check("images: Restore refuses and names the file when one is already at its place on the site",
+    sd8b.status === "blog/260915_img0005.jpg is already on the site. Nothing was moved." && !sd8b.saved &&
+    sd8b.folder.indexOf("deletethese/blog/260915_img0005_sd.webp") !== -1 && sd8b.folder.indexOf("blog/260915_img0005_sd.webp") === -1,
+    JSON.stringify(sd8b));
+  await sdClose();
+
+  // SD9. an image the open composer holds as a card is refused. The card
+  // comes from a tag typed into the composer, which reconnects to the
+  // record's entry with no upload.
+  await send("Page.navigate", { url: BLOGPAGE + "?sd=9" });
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  await sdSet();
+  const sdFootBlog = await evaluate(SD_FOOT);
+  await evaluate(`window.edit.blog()`);
+  await sleep(900);
+  await evaluate(`(function () { var t = document.querySelector('.bc-write textarea');
+    t.value = "A post with [img0007,Seven|Seven] in it."; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const sd9card = await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 1 && AMH.publish.holds().join() === '0007'`, 6000);
+  await sdOpen();
+  const sd9picks = await evaluate(`window.__picks`);
+  await evaluate(sdAct("img0007", "Super delete"));
+  await sleep(600);
+  const sd9 = await evaluate(SD_STATUS);
+  check("images: an image the open composer holds as a card is refused with Close the composer first, and nothing is asked or moved",
+    sd9card && sd9.status === "Close the composer first." && !sd9.ask && sd9.picks === sd9picks &&
+    sd9.folder.every((p) => p.indexOf("deletethese/") !== 0),
+    JSON.stringify({ card: sd9card, after: sd9 }));
+  await sdClose();
+  await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+  await sleep(400);
+
+  // SD1b. the button on the blog page, between Rebuild and New post; on the
+  // gallery page; and on a month page, which carries the editor too
+  /* A page that never loads its trunks is a check that fails with the
+     address it landed on, and not an exception that ends the run. */
+  const sdFootOn = async (url) => {
+    await send("Page.navigate", { url });
+    const reached = await sdEditorOn();
+    return { reached: reached, labels: reached ? await evaluate(SD_FOOT) : [],
+             where: await evaluate(`location.href`) };
+  };
+  const sdFootGal = await sdFootOn(`http://127.0.0.1:${SERVER_PORT}/gallery.html?sd=1b`);
+  /* The served folder holds the three managed pages and the trunks, and no
+     month file: a month page is generated. So the month page comes from the
+     bundle folder this run published into, as the ids section reads one. */
+  const sdMonthFile = ["blog/2607.html", "blog/2606.html"].filter((p) => existsSync(join(bdir, p)))[0] || "";
+  let sdFootMonth = null;
+  if (sdMonthFile) {
+    bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+    await sleep(1500);
+    sdFootMonth = await sdFootOn(B + sdMonthFile + "?sd=1b");
+    try { bs?.kill(); } catch {}
+    bs = null;
+  }
+  check("images: the Images button is on the gallery page, on the blog page between Rebuild and New post, and on a month page",
+    sdFootGal.labels.indexOf("Images") !== -1 && sdFootBlog.indexOf("Rebuild") !== -1 &&
+    sdFootBlog[sdFootBlog.indexOf("Rebuild") + 1] === "Images" && sdFootBlog[sdFootBlog.indexOf("Images") + 1] === "New post" &&
+    !!sdMonthFile && !!sdFootMonth && sdFootMonth.labels.indexOf("Images") !== -1,
+    JSON.stringify({ gallery: sdFootGal, blog: sdFootBlog, monthFile: sdMonthFile, month: sdFootMonth }));
+
+  // SD10. from disk: the box opens on the record, and with no folder taken
+  // Super Delete says what it needs. The picker is the browser's here, so
+  // it is stubbed to a closed dialog.
+  await send("Page.navigate", { url: pathToFileURL(join(REPO, "index.html")).href + "?sd=10" });
+  await sdEditorOn();
+  await evaluate(`window.showDirectoryPicker = function () { return Promise.reject(new DOMException("closed", "AbortError")); }; true`);
+  await sdSet();
+  await sdOpen();
+  const sd10 = await evaluate(SD_STATE);
+  await evaluate(sdAct("img0005", "Super delete"));
+  await sleep(900);
+  const sd10b = await evaluate(`({ protocol: location.protocol, status: document.querySelector('.ced-images .ced-modal__status').textContent, ask: !!document.querySelector('.ced-ask') })`);
+  check("images: on a page opened from disk the box lists the record, and with no folder taken the status says Super delete needs the repo folder",
+    !!sd10 && sd10.rows.length === 3 && sd10b.protocol === "file:" && sd10b.status === "Super delete needs the repo folder." && !sd10b.ask,
+    JSON.stringify({ rows: sd10 && sd10.rows.map((r) => r.name), after: sd10b }));
+  await sdClose();
+
+  // ============ UL. AN IMAGE IN USE COMES OUT OF EVERY PLACE ============
+  // A Super Delete leaves the site whole. The posts that showed the image
+  // are written again without it, the regions that held it lose it, and
+  // then the files move: the site stops naming a file before the file
+  // stops existing.
+  //
+  // One surface at a time, because only blog.html writes month files and
+  // only the page a region is on can serialize that region. An image used
+  // on another surface is refused with the page named, before anything
+  // happens.
+
+  /* a page with one region cut out, to compare the rest byte for byte */
+  const ulOutside = (text, slug) => {
+    const open = "<!--[edit:" + slug + "]-->", close = "<!--[/edit:" + slug + "]-->";
+    const a = String(text).indexOf(open), b = String(text).indexOf(close);
+    return a === -1 || b === -1 ? null : text.slice(0, a) + text.slice(b);
+  };
+  const ulUse = (base, used) => `(function () {
+    var rec = JSON.parse(JSON.stringify(AMH.images.index.get()));
+    rec.images.forEach(function (e) { if (e.base === ${JSON.stringify(base)}) e.used = ${JSON.stringify(used)}; });
+    AMH.images.index.set(rec);
+    return (AMH.images.index.get().images.filter(function (e) { return e.base === ${JSON.stringify(base)}; })[0] || {}).used;
+  })()`;
+
+  // The served home page is the seeded one, so the photograph this section
+  // deletes is one it adds itself, the way a person adds one: through ADD
+  // PHOTO, then Save to repo. The record then says where it is because the
+  // save wrote it, and the page really shows it.
+  await send("Page.navigate", { url: PAGE + "?ul=1" });
+  await waitLoaded();
+  /* a clean page: no edit another section staged, so the save this makes
+     writes what this section changed and nothing else */
+  await evaluate(`sessionStorage.clear()`);
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('UL Frame.png', 1200, 800, '#2b6cb0').then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(700);
+  const ulBase = await evaluate(`(function () {
+    var s = AMH.tool.regionFor('fr3-gallery').model.map(function (e) { return e.src; })
+      .filter(function (x) { return /^img\\/work\\//.test(x || ''); })[0] || '';
+    return s ? AMH.images.baseOf(s) : ''; })()`);
+  const ulRow = String(ulBase).replace(/^.*\//, "");
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await waitFor(`!!document.querySelector('.ced-saved')`, 20000);
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent').click()`);
+  await sleep(400);
+  /* what the save wrote: the baseline every later byte is compared against */
+  const ulPageBase = await evaluate(`window.__wrote['index.html'] || ''`);
+  const ulUsed0 = await evaluate(`(AMH.images.index.get().images.filter(function (e) { return e.base === ${JSON.stringify(ulBase)}; })[0] || {}).used || []`);
+  const ulTrioSite = [ulBase + ".jpg", ulBase + "_sd.webp", ulBase + "_original.png"];
+
+  // UL5. an image used on another surface: refused with the page named,
+  // before the folder is even asked for
+  await evaluate(ulUse(ulBase, ["index.html#fr3-gallery", "gallery.html#gal-tbg"]));
+  await sdOpen();
+  const ulPicks0 = await evaluate(`window.__picks`);
+  await evaluate(sdAct(ulRow, "Super delete"));
+  await sleep(700);
+  const ul5 = await evaluate(SD_STATUS);
+  await sdClose();
+  check("in use: an image used on another page is refused with that page named, and nothing is asked, written or moved",
+    ulUsed0.join() === "index.html#fr3-gallery" &&
+    ul5.status === ulRow + " is also used on gallery.html. Open gallery.html to take it out there first." &&
+    !ul5.ask && ul5.picks === ulPicks0 && ul5.folder.every((p) => p.indexOf("deletethese/") !== 0),
+    JSON.stringify({ used: ulUsed0, after: ul5 }).slice(0, 320));
+
+  // UL2, UL3 and UL4. the photograph is this carousel's only one, and the
+  // page has an unsaved change: the ask says all three things, the region
+  // is written without it, the seeds come back, and the files move last
+  await evaluate(ulUse(ulBase, ["index.html#fr3-gallery"]));
+  await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'hero-h1').click()`);
+  await sleep(250);
+  await evaluate(`document.querySelector('.ced-modal textarea').value =
+    '<h1>I help ambitious teams <span class="hl">ship the UL4 impossible</span>.</h1>'`);
+  await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+  await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Cancel')?.click()`);
+  await sleep(300);
+  await sdOpen();
+  await evaluate(sdAct(ulRow, "Super delete"));
+  await sleep(1000);
+  const ul2ask = await evaluate(SD_ASK);
+  await evaluate(sdPress(".ced-ask", "Super delete"));
+  await waitFor(`!!document.querySelector('.ced-saved')`, 20000);
+  const ul2saved = await evaluate(SD_SAVED);
+  const ul2 = await evaluate(`({ folder: window.__folder(), page: window.__wrote['index.html'] || '',
+    ix: window.__wrote['images.js'] || '' })`);
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(400);
+  await sdClose();
+  const ul2ix = imagesTable(ul2.ix);
+  const ul2region = ul2.page.slice(ul2.page.indexOf("<!--[edit:fr3-gallery]-->"),
+    ul2.page.indexOf("<!--[/edit:fr3-gallery]-->"));
+  const ulSame = (a, b) => ulOutside(ulOutside(a, "fr3-gallery"), "hero-h1") ===
+    ulOutside(ulOutside(b, "fr3-gallery"), "hero-h1");
+  check("in use: the ask on a site image names the region it is in and says this page is saved",
+    !!ul2ask && ul2ask.title === "Super delete " + ulRow + "?" &&
+    ul2ask.lines[1] === "It is taken out of Forerunner 3, and this page is saved." &&
+    ul2ask.lines[ul2ask.lines.length - 1] === "Commit and push, then empty deletethese/ when you are sure." &&
+    ul2ask.focus === "Cancel",
+    JSON.stringify(ul2ask).slice(0, 460));
+  check("in use: the region is written without the image, every other byte of the page is as it was, and only then do the files move",
+    !ul2region.includes(ulBase) && ulSame(ul2.page, ulPageBase) &&
+    ulTrioSite.every((p) => ul2.folder.indexOf("deletethese/" + p) !== -1 && ul2.folder.indexOf(p) === -1) &&
+    !ul2ix.images.some((e) => e.base === ulBase) &&
+    !!ul2saved && ul2saved.title === "Super deleted " + ulRow &&
+    ul2saved.files.join() === "images.js,index.html,superdeleted.js" &&
+    ul2saved.moved === "3 files were moved into deletethese/, to empty when you are sure:",
+    JSON.stringify({ saved: ul2saved, region: ul2region.slice(0, 120),
+      outside: ulSame(ul2.page, ulPageBase),
+      folder: ul2.folder.filter((p) => p.indexOf("deletethese/") === 0) }).slice(0, 500));
+  check("in use: the ask carries the kind's note for the last photograph, and the seed placeholders come back in the written page",
+    !!ul2ask && ul2ask.lines.indexOf("This is the last image: the seed placeholders will return.") !== -1 &&
+    /img\/seed\//.test(ul2region),
+    JSON.stringify({ lines: ul2ask && ul2ask.lines, region: ul2region.slice(0, 200) }).slice(0, 500));
+  check("in use: the ask says an unsaved change on the page is saved with it, and the written page carries that change",
+    !!ul2ask && ul2ask.lines.indexOf("Your unsaved changes on this page are saved with it.") !== -1 &&
+    /ship the UL4 impossible/.test(ul2.page),
+    JSON.stringify({ lines: ul2ask && ul2ask.lines, edit: /ship the UL4 impossible/.test(ul2.page) }).slice(0, 400));
+
+  // ---- the blog surface: a rebuild without the image ----
+  // ---- the blog surface: a rebuild without the image ----
+  // The bundle folder is this run's own site, with month files and an
+  // index. One more post is published that reconnects an image another
+  // post already uses, so the delete has two posts to write again.
+  const ulIx0 = existsSync(join(bdir, "images.js"))
+    ? imagesTable(readFileSync(join(bdir, "images.js"), "utf8")) : { images: [] };
+  const ulPick = (ulIx0.images || []).filter((e) => e.num && e.used.length === 1)[0] || null;
+  bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+  await sleep(1500);
+  let ulShared = null;
+  if (ulPick) {
+    await send("Page.navigate", { url: B + "blog.html?ul=share" });
+    await sdEditorOn();
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.confirm = function () { return true; };`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(900);
+    await evaluate(`(function () {
+      document.querySelector('.bc-date').value = "260714";
+      var t = document.querySelector('.bc-write textarea');
+      t.value = "Two posts share one image.\\n\\n[img${ulPick.num},ULshared|ULshared]";
+      t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(600);
+    await pressPublish();
+    const ulZip = await capturePublish();
+    if (ulZip) writeBundle(ulZip);
+    ulShared = ulZip ? entryIn(indexIn(ulZip), ulPick.num) : null;
+  }
+
+  const ulName = ulPick ? "img" + ulPick.num : "";
+  const ulTrio = ulPick ? [ulPick.base + ".jpg", ulPick.base + "_sd.webp", ulPick.base + "_original.png"] : [];
+  let ul1ask = null, ul6 = null, ul7 = null, ul1 = null, ul8 = null;
+  if (ulShared && ulShared.used.length === 2) {
+    await send("Page.navigate", { url: B + "blog.html?ul=1" });
+    await sdEditorOn();
+    await evaluate(FAKE_REPO);
+    /* the original keeps the file's own type, which is what pathsOf names */
+    await evaluate(sdPut(ulPick.base, ulPick.type));
+
+    // UL6. the composer holds a card for the image: refused
+    await evaluate(`window.edit.blog()`);
+    await sleep(800);
+    await evaluate(`(function () { var t = document.querySelector('.bc-write textarea');
+      t.value = "A draft naming [img${ulPick.num}]."; t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await waitFor(`AMH.publish.holds().indexOf("${ulPick.num}") !== -1`, 8000);
+    await sdOpen();
+    await evaluate(sdAct(ulName, "Super delete"));
+    await sleep(600);
+    ul6 = await evaluate(SD_STATUS);
+    await sdClose();
+    await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
+    await sleep(500);
+
+    // UL7. the route step cancelled: no month file written, no file moved
+    await sdOpen();
+    await evaluate(sdAct(ulName, "Super delete"));
+    await sleep(900);
+    ul1ask = await evaluate(SD_ASK);
+    await evaluate(sdPress(".ced-ask", "Super delete"));
+    await waitFor(`(document.querySelector('.bc-wizard') || { getAttribute: function () { return null; } }).getAttribute('data-step') === 'route'`, 12000);
+    const ul7job = await evaluate(`(document.querySelector('.bc-wiz__job') || {}).textContent`);
+    await evaluate(sdPress(".bc-wizard", "Cancel"));
+    await sleep(900);
+    ul7 = await evaluate(`({ job: ${JSON.stringify(ul7job)}, wrote: Object.keys(window.__wrote).sort(),
+      status: (document.querySelector('.ced-images .ced-modal__status') || {}).textContent,
+      entry: !!(AMH.images.index.get().images.filter(function (e) { return e.num === "${ulPick.num}"; })[0]) })`);
+
+    // UL1. through the folder route: both posts written again without the
+    // image, then the files, the record and the log
+    await evaluate(sdAct(ulName, "Super delete"));
+    await sleep(900);
+    await evaluate(sdPress(".ced-ask", "Super delete"));
+    await waitFor(`(document.querySelector('.bc-wizard') || { getAttribute: function () { return null; } }).getAttribute('data-step') === 'route'`, 12000);
+    await evaluate(sdPress(".bc-wizard", "Write into my repo folder"));
+    await waitFor(`(document.querySelector('.bc-wizard') || { getAttribute: function () { return null; } }).getAttribute('data-step') === 'done'`, 90000);
+    ul1 = await evaluate(`({ wrote: Object.keys(window.__wrote).sort(), folder: window.__folder(),
+      done: (document.querySelector('.bc-wizard .bc-wiz__body') || {}).textContent || '',
+      months: Object.keys(window.__wrote).filter(function (n) { return /^blog\\/\\d{4}\\.html$/.test(n); })
+        .map(function (n) { return { name: n, names: window.__wrote[n].indexOf("${ulPick.base}") !== -1,
+                                     tag: /\\[(?:[a-z]+ )?(?:img|png)${ulPick.num}\\b/.test(window.__wrote[n]) }; }),
+      ix: window.__wrote['images.js'] || '', log: window.__wrote['superdeleted.js'] || '',
+      search: window.__wrote['search.js'] || '' })`);
+    await evaluate(`[...document.querySelectorAll('.bc-wizard .ced-modal__btns .ced-btn')].find(b => /OK/.test(b.textContent))?.click()`);
+    await sleep(600);
+
+    // UL8. Restore puts the image back, and leaves the posts as they are
+    await sdOpen();
+    await evaluate(sdAct(ulName, "Restore"));
+    await waitFor(`!!document.querySelector('.ced-saved')`, 20000);
+    ul8 = await evaluate(`({ folder: window.__folder(), ix: window.__wrote['images.js'] || '',
+      log: window.__wrote['superdeleted.js'] || '',
+      months: Object.keys(window.__wrote).filter(function (n) { return /^blog\\/\\d{4}\\.html$/.test(n); })
+        .map(function (n) { return window.__wrote[n].indexOf("${ulPick.base}") !== -1; }) })`);
+    await evaluate(sdPress(".ced-saved", "OK! Done!"));
+    await sleep(400);
+    await sdClose();
+  }
+  try { bs?.kill(); } catch {}
+  bs = null;
+
+  const ul1ix = ul1 ? imagesTable(ul1.ix) : { images: [] };
+  const ul1log = ul1 ? imagesTable(ul1.log) : { deleted: [] };
+  const ul1line = (ul1log.deleted || []).filter((d) => d.base === (ulPick || {}).base)[0] || null;
+  check("in use: the ask on an image two posts share names both posts and says they are written again",
+    !!ulShared && ulShared.used.length === 2 && !!ul1ask &&
+    ul1ask.title === "Super delete " + ulName + "?" &&
+    /^It is taken out of p[0-9a-z]{4} and p[0-9a-z]{4}, and those posts are written again\.$/.test(ul1ask.lines[1]) &&
+    ulShared.used.every((p) => ul1ask.lines[1].indexOf(p) !== -1),
+    JSON.stringify({ shared: ulShared && ulShared.used, ask: ul1ask && ul1ask.lines }).slice(0, 400));
+  check("in use: the composer holding a card for the image refuses the super delete",
+    !!ul6 && ul6.status === "Close the composer first." && !ul6.ask &&
+    ul6.folder.every((p) => p.indexOf("deletethese/") !== 0),
+    JSON.stringify(ul6).slice(0, 300));
+  check("in use: the rebuild says which image it leaves out, and a cancelled route step writes nothing and moves nothing",
+    !!ul7 && /without img/.test(ul7.job) && ul7.job.indexOf(ulName) !== -1 &&
+    ul7.wrote.length === 0 && ul7.entry &&
+    ul7.status === "Nothing was written, so nothing moved.",
+    JSON.stringify(ul7).slice(0, 400));
+  check("in use: every post that used the image is written again without it, and the files move only after that",
+    !!ul1 && ul1.months.length >= 2 && ul1.months.every((m) => !m.names && !m.tag) &&
+    ulTrio.every((p) => ul1.folder.indexOf("deletethese/" + p) !== -1 && ul1.folder.indexOf(p) === -1) &&
+    !ul1ix.images.some((e) => e.base === ulPick.base) &&
+    !/ULshared/.test(ul1.search) &&
+    !!ul1line && ul1line.entry.used.length === 2 && ul1line.restored === "" &&
+    new RegExp(ulName + " was super deleted").test(ul1.done),
+    JSON.stringify({ months: ul1 && ul1.months, done: ul1 && ul1.done.slice(0, 160),
+      line: ul1line && ul1line.entry.used }).slice(0, 500));
+  const ul8ix = ul8 ? imagesTable(ul8.ix) : { images: [] };
+  const ul8log = ul8 ? imagesTable(ul8.log) : { deleted: [] };
+  check("in use: Restore brings the image and its entry back, used nowhere, and leaves the posts as the delete wrote them",
+    !!ul8 && ulTrio.every((p) => ul8.folder.indexOf(p) !== -1 && ul8.folder.indexOf("deletethese/" + p) === -1) &&
+    ul8ix.images.some((e) => e.base === ulPick.base && e.used.length === 0) &&
+    (ul8log.deleted || []).some((d) => d.base === ulPick.base && /^\d{6}-\d{6}$/.test(d.restored)) &&
+    ul8.months.every((names) => !names),
+    JSON.stringify({ folder: ul8 && ul8.folder.filter((p) => p.indexOf("deletethese/") === 0),
+      entry: ul8ix.images.filter((e) => e.base === (ulPick || {}).base), months: ul8 && ul8.months }).slice(0, 400));
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

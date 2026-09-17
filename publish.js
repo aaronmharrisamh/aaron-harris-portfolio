@@ -78,6 +78,14 @@
      opening value, because a stale page would splice a stale manifest.
      ========================================================== */
   var BC_DRAFT_KEY = "amh-blog-draft";
+  /* The image index the engine reads and every publish writes; see
+     imagesengine.js. The record a bundle leaves waits here until the
+     bundle is delivered, and then becomes the current record. */
+  var INDEX_FILE = "images.js";
+  var bcIndexPending = null;
+  /* the dead tags a rebuild found: a tag whose image the site does not
+     hold, named with its post on the Done step */
+  var bcDeadTags = [];
 
   /* The preview's phone: a screen of 9:20 at the width of an average phone,
      in CSS pixels. The page inside lays itself out at this width, so every
@@ -116,6 +124,12 @@
   var bcAdv = null, bcAdvSum = null, bcAdvBody = null;   /* the advanced section */
   var bcSpec = null;                     /* the special-commands flyout, from TOOL */
   var bcTime = null, bcZone = null, bcTags = null, bcCountsEl = null;
+  /* the line under the body that names text which is almost a tag, and a
+     number no image on the site has */
+  var bcTagNoteEl = null;
+  /* the manifest's images, read once per composer: bcSyncCards runs on
+     each keystroke, and a keystroke is not the time to parse the manifest */
+  var bcManImages = null;
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
   var bcStatus = null, bcCards = null, bcPreviewEl = null;
@@ -129,7 +143,7 @@
      animated, date0 */
   var bcImages = [];
   var bcManAtOpen = null;       /* manifest payload string at composer open (staleness check) */
-  var bcImgCounter = 0;         /* session-local offset over manifest next-img */
+  var bcImgCounter = 0;         /* session-local offset over the index's image counter */
   var bcPublished = false;
   var bcTakeChain = Promise.resolve();   /* serializes drops: numbers follow drop order */
   var bcEditing = null;         /* null = new post; else {id, date0, title0, source0, format0, time, zone, tags} */
@@ -229,7 +243,10 @@
   var bcProg = null;            /* the progress step, while a bundle is built */
   var bcPublishBtn = null;
 
-  function pad4(n) { return ("000" + n).slice(-4); }
+  /* an id's two functions, from blog.js: four characters, the first place
+     counting in base 36, so the ten-thousandth post is pa000 */
+  function bcIdOf(n) { return AMH.blog.idOf(n); }
+  function bcIdNum(id) { return AMH.blog.idNum(id); }
   function pushOrphan(f) { if (bcOrphans.indexOf(f) === -1) bcOrphans.push(f); }
   function bcDirty() {
     if (!bcPanel || !bcPanel.parentNode || bcPublished) return false;
@@ -253,19 +270,19 @@
     if (!m) return out;
     m[1].split("\n").map(function (l) { return l.trim(); }).forEach(function (l) {
       if (!l) return;
-      if (l.indexOf("next-post:") === 0) out.nextPost = parseInt(l.slice(10), 10) || 1;
-      else if (l.indexOf("next-img:") === 0) out.nextImg = parseInt(l.slice(9), 10) || 1;
+      if (l.indexOf("next-post:") === 0) out.nextPost = bcIdNum(l.slice(10)) || 1;
+      else if (l.indexOf("next-img:") === 0) out.nextImg = bcIdNum(l.slice(9)) || 1;
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
-      else if (/^image:\d{4}=/.test(l)) {
+      else if (/^image:[0-9a-z]\d{3}=/.test(l)) {
         var img = bcImageLineRead(l);
         if (img) out.images[img.num] = img;
         else console.warn("[blog] manifest image line not understood, skipped: " + l);
       }
       else {
         l.split("|").forEach(function (e) {
-          var em = /^(\d{6})(\d{4})(.*)$/.exec(e);
+          var em = /^(\d{6})([0-9a-z]\d{3})(.*)$/.exec(e);
           if (em) out.entries.push({ date: em[1], id: em[2], title: em[3] });
           else console.warn("[blog] manifest line not understood, skipped: " + e);
         });
@@ -273,7 +290,8 @@
     });
     return out;
   }
-  /* One image on the site, as the manifest states it:
+  /* One image on the site, as a manifest from before the image index
+     states it:
 
        image:0001=260903 png 4032x3024 3145728 uhd
 
@@ -285,23 +303,19 @@
      original.
 
      The date and the number give every path: blog/<date>_img<num>.jpg,
-     _sd.webp and _original.<type>. Nothing else has to be written down.
+     _sd.webp and _original.<type>. These facts live in images.js now: a
+     line is read so that such a manifest still opens, and the rebuild
+     that finds one moves it into the index. Nothing writes one again.
 
      blog.js reads the same line, and the two must agree. */
   function bcImageLineRead(line) {
-    var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line.trim());
+    var m = /^image:([0-9a-z]\d{3})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line.trim());
     if (!m) return null;
     var flags = m[7].split(/\s+/).filter(Boolean);
     var truesize = flags.indexOf("truesize") !== -1;
     return { num: m[1], date: m[2], type: m[3], ow: +m[4], oh: +m[5], bytes: +m[6],
              uhd: truesize || flags.indexOf("uhd") !== -1, truesize: truesize,
              animated: flags.indexOf("gif") !== -1 };
-  }
-  function bcImageLineWrite(img) {
-    return "image:" + img.num + "=" + img.date + " " + img.type + " " +
-      img.ow + "x" + img.oh + " " + img.bytes +
-      (img.uhd || img.truesize ? " uhd" : "") + (img.truesize ? " truesize" : "") +
-      (img.animated ? " gif" : "");
   }
   /* The three paths one image line names. */
   function bcImagePaths(img) {
@@ -311,20 +325,16 @@
   }
 
   /* stamps is {publish, months}. With none given the payload has the shape
-     from before V044, which is what the empty page carries. images is the
-     map of every image on the site, written after the months. */
-  function bcManifestPayload(nextPost, nextImg, entries, stamps, images) {
+     from before V044, which is what the empty page carries. The image
+     counter and the image lines live in images.js now: a manifest from
+     before the index is read with them, and written without them. */
+  function bcManifestPayload(nextPost, entries, stamps) {
     var line = entries.map(function (e) { return e.date + e.id + e.title; }).join("|");
-    var head = "\nnext-post:" + pad4(nextPost) + "\nnext-img:" + pad4(nextImg);
+    var head = "\nnext-post:" + bcIdOf(nextPost);
     if (stamps) {
       if (stamps.publish) head += "\nstamp:" + stamps.publish;
       Object.keys(stamps.months).sort().forEach(function (mo) {
         head += "\nmonth:" + mo + "=" + stamps.months[mo];
-      });
-    }
-    if (images) {
-      Object.keys(images).sort().forEach(function (num) {
-        head += "\n" + bcImageLineWrite(images[num]);
       });
     }
     return head + (line ? "\n" + line : "") + "\n";
@@ -341,7 +351,7 @@
      before it. A stamp equal to the previous one is rehashed with a counter
      until it differs: the live check tells pending from live by the two
      being different. */
-  function bcStamps(man, nextPost, nextImg, entries, touched, images) {
+  function bcStamps(man, nextPost, entries, touched) {
     var months = {};
     var has = {};
     entries.forEach(function (e) { has[e.date.slice(0, 4)] = true; });
@@ -349,17 +359,92 @@
       if (has[mo]) months[mo] = man.monthStamps[mo];
     });
     Object.keys(touched).forEach(function (mo) { months[mo] = touched[mo]; });
-    /* the image lines are hashed with the rest, so a switch flipped on a
-       published image changes the stamp, which is what makes it a publish */
-    var bare = bcManifestPayload(nextPost, nextImg, entries,
-                                 { publish: "", months: months }, images);
+    /* a switch flipped on a published image reaches the stamp through the
+       month file it re-renders, whose line is hashed with the rest */
+    var bare = bcManifestPayload(nextPost, entries, { publish: "", months: months });
     var publish = TOOL.stamp(man.stamp + "\n" + bare);
     for (var n = 1; publish === man.stamp; n++) {
       publish = TOOL.stamp(man.stamp + "\n" + bare + "\n" + n);
     }
     return { publish: publish, months: months,
-             payload: bcManifestPayload(nextPost, nextImg, entries,
-                                        { publish: publish, months: months }, images) };
+             payload: bcManifestPayload(nextPost, entries, { publish: publish, months: months }) };
+  }
+
+  /* Every image the site holds, by number: the index's blog entries, and
+     the lines a manifest from before the index still carries. The map is
+     what the renderer, the cards and the search index take. */
+  function bcSiteMap() {
+    var out = {};
+    var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
+    Object.keys(man.images || {}).forEach(function (n) { out[n] = man.images[n]; });
+    var rec = AMH.images.index.get();
+    if (rec) rec.images.forEach(function (e) { if (e.num) out[e.num] = e; });
+    return out;
+  }
+  /* The next image number: the index's counter, and the manifest's where
+     a manifest from before the index still carries one. Never goes down. */
+  function bcNextImg() {
+    var rec = AMH.images.index.get();
+    var man = AMH.blog ? AMH.blog.parseManifest() : { nextImg: 1 };
+    return Math.max(rec ? bcIdNum(rec.nextImg) : 1, man.nextImg || 1);
+  }
+  /* The index after a publish, a delete or a rebuild.
+
+     images is the map of every blog image the site holds after the write:
+     each gets an entry with its facts and its switches, kept where it had
+     one and added where it had none. postId and refs say where this post's
+     tags name images, and gone is a post whose uses leave, for a delete.
+     nextImg is the counter after this write, as a number. site is a map of
+     site entries by base, for the migration, and pages the usage the pages
+     gave, both optional. Returns { rec, text }, or null when nothing
+     changed and the file exists. */
+  function bcIndexNext(o) {
+    var I = AMH.images.index;
+    var was = I.get() || I.set({});
+    var rec = JSON.parse(JSON.stringify(was));
+    Object.keys(o.images || {}).forEach(function (num) {
+      var line = o.images[num];
+      var base = bcImgBase(line.date, num);
+      var had = null;
+      rec.images.forEach(function (e) { if (e.num === num) had = e; });
+      var entry = { base: base, num: num, date: line.date, type: line.type, ow: line.ow, oh: line.oh,
+                    bytes: line.bytes, uhd: !!line.uhd, truesize: !!line.truesize, animated: !!line.animated,
+                    added: had ? had.added : (line.added || line.date), used: had ? had.used : (line.used || []) };
+      if (had) rec.images[rec.images.indexOf(had)] = entry; else rec.images.push(entry);
+    });
+    Object.keys(o.site || {}).forEach(function (base) {
+      var had = null;
+      rec.images.forEach(function (e) { if (e.base === base) had = e; });
+      var entry = o.site[base];
+      if (had) { entry.added = had.added; entry.used = had.used; rec.images[rec.images.indexOf(had)] = entry; }
+      else rec.images.push(entry);
+    });
+    var gone = o.gone || o.postId;
+    rec.images.forEach(function (e) {
+      if (o.pages && !e.num) {
+        e.used = e.used.filter(function (u) { return u.indexOf("p") === 0 && u.indexOf("#") === -1; })
+          .concat(o.pages[e.base] || []);
+      }
+      if (!e.num) return;
+      if (gone) e.used = e.used.filter(function (u) { return u !== "p" + gone; });
+      if (o.postId && o.refs && o.refs[e.num] && e.used.indexOf("p" + o.postId) === -1) e.used.push("p" + o.postId);
+      if (o.uses) {
+        e.used = e.used.filter(function (u) { return u.indexOf("p") !== 0; });
+        (o.uses[e.num] || []).forEach(function (u) { if (e.used.indexOf(u) === -1) e.used.push(u); });
+      }
+    });
+    if (o.nextImg) rec.nextImg = bcIdOf(Math.max(bcIdNum(rec.nextImg), o.nextImg));
+    var before = I.stampText(was), after = I.stampText(rec);
+    if (before === after && was.stamp && !o.always) return null;
+    rec.stamp = TOOL.stamp(after);
+    return { rec: rec, text: I.text(rec, rec.stamp) };
+  }
+  /* the numbers a body's tags name, as { num: true } */
+  function bcRefsOf(source) {
+    var refs = {}, m;
+    var re = new RegExp(AMH.blog.TAG, "g");
+    while ((m = re.exec(String(source || "")))) refs[m[3]] = true;
+    return refs;
   }
 
   /* ==========================================================
@@ -394,16 +479,17 @@
   function bcTakePhoto(file) {
     var date = bcDateNow();
     var num = "";
-    return AMH.images.intake(file, {
-      keepMeta: bcKeepMeta,
-      /* The number is taken HERE and nowhere earlier. The engine calls this
-         once the photo is made, so a file it refuses never burns a number,
-         and the numbers still follow the order the files were taken in. */
-      name: function () {
-        var man = AMH.blog ? AMH.blog.parseManifest() : { nextImg: 1 };
-        num = pad4(man.nextImg + bcImgCounter++);
-        return bcImgBase(date, num);
-      }
+    return AMH.images.index.load().then(function () {
+      return AMH.images.intake(file, {
+        keepMeta: bcKeepMeta,
+        /* The number is taken HERE and nowhere earlier. The engine calls this
+           once the photo is made, so a file it refuses never burns a number,
+           and the numbers still follow the order the files were taken in. */
+        name: function () {
+          num = bcIdOf(bcNextImg() + bcImgCounter++);
+          return bcImgBase(date, num);
+        }
+      });
     }).then(function (photo) {
       AMH.images.hold(photo);
       /* the engine says which switches a new photo starts with */
@@ -470,9 +556,17 @@
   function bcTagRe(num, global) {
     /* global flag for rewrites (a tag can be duplicated in the body);
        plain for .test - a /g regex's lastIndex makes repeated tests lie */
-    return new RegExp(AMH.blog.TAG.replace("(\\d{4})", "(" + num + ")"), global ? "g" : "");
+    return new RegExp(AMH.blog.TAG.replace("(" + AMH.blog.ID + ")", "(" + num + ")"), global ? "g" : "");
   }
   function bcFindTag(num) { return bcTagRe(num).test(bcBody.value); }
+  /* One image out of a post's source: every tag for the number, and a
+     paragraph an HTML post is left with nothing in. Everything else stays
+     byte for byte, so a post keeps its words exactly as they were. */
+  function bcSourceWithout(source, num, html) {
+    var out = String(source == null ? "" : source).replace(bcTagRe(num, true), "");
+    if (html) out = out.replace(/[ \t]*<p>\s*<\/p>[ \t]*\r?\n?/g, "");
+    return out;
+  }
   /* pull the tag's current caption/alt into the card before its inputs make
      their first rewrite, so typed-in-tag values are never clobbered */
   function bcHarvestTag(im) {
@@ -538,6 +632,10 @@
     ".bc-tags input{width:100%;background:var(--bg-deep);color:var(--text);border:1px solid var(--line);" +
     "border-radius:8px;padding:.4rem .7rem;font:12.5px Consolas,'Courier New',monospace;}" +
     ".bc-tags input:focus-visible{outline:2px solid var(--accent);}" +
+    /* a number the site does not have, or text that is almost a tag, in
+       the editor's yellow under the body */
+    ".bc-tagnote{flex:none;padding:.3rem 0 0;font-size:.7rem;color:var(--c-yellow);}" +
+    ".bc-tagnote[hidden]{display:none;}" +
     ".bc-counts{position:absolute;right:.9rem;bottom:.5rem;font:10.5px Consolas,monospace;" +
     "color:var(--dim);pointer-events:none;}" +
     /* A tab strip, not a row of pills. The strip's own line is the baseline
@@ -949,29 +1047,25 @@
       TOOL.insert(bcBuildTag(im));
       bcSetStatus("Tag for " + im.num + " inserted at the cursor.");
     }, btns);
+    /* Remove takes the image out of this post and nothing else. A
+       published image stays on the site, and its tag typed again brings
+       its card back. */
     bcBtn("Remove", "ced-btn--danger", function () {
       if (!window.confirm("Remove image " + im.num + " from this post?" +
-          (im.published ? "\n\nIts three files on the server are no longer named by " +
-            "anything. This publish moves them into deletethese/." : ""))) return;
+          (im.published ? "\n\nIt stays on the site. Type its tag again to bring it back." : ""))) return;
       if (bcFindTag(im.num)) {
         bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), "");
         bcSetStatus("Image " + im.num + " and its tag(s) removed.");
       } else {
         bcSetStatus("Image " + im.num + " removed.");
       }
-      if (im.published) bcOrphanImage(im);
-      else if (im.photo) AMH.images.letGo(im.photo);
+      if (im.photo) AMH.images.letGo(im.photo);
       bcImages.splice(bcImages.indexOf(im), 1);
       card.remove();
     }, btns);
     card.appendChild(btns);
     bcNoTab(card);   /* by click: the ring is title, body, images, Publish, Close */
     return card;
-  }
-
-  /* Every file of one published image, on the orphan list. */
-  function bcOrphanImage(im) {
-    [im.src, im.sd, im.original].forEach(function (p) { if (p) pushOrphan(p); });
   }
 
   /* One image's manifest line, from a card. A held photo answers from
@@ -991,9 +1085,7 @@
   /* What the preview renders from: what the site holds, with this
      composer's cards over the top. */
   function bcPreviewImages(date) {
-    var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
-    var out = {};
-    Object.keys(man.images || {}).forEach(function (n) { out[n] = man.images[n]; });
+    var out = bcSiteMap();
     bcImages.forEach(function (im) { out[im.num] = bcImLine(im, im.published ? im.date0 : date); });
     return out;
   }
@@ -1038,7 +1130,7 @@
       b.classList.toggle("on", on);
       b.setAttribute("aria-selected", on ? "true" : "false");
     });
-    if (cur === "preview") bcRenderPreview();
+    if (cur === "preview") { bcSyncCards(); bcRenderPreview(); }
   }
 
   /* ---------------- the preview ----------------
@@ -1084,7 +1176,7 @@
        the carousel builds its blurred backdrop from data-sd, and a path to
        a file that is not there yet would draw nothing. */
     Array.prototype.forEach.call(body.querySelectorAll("img"), function (img) {
-      var m = /_img(\d{4})[._]/.exec(img.getAttribute("src") || "");
+      var m = /_img([0-9a-z]\d{3})[._]/.exec(img.getAttribute("src") || "");
       if (!m) return;
       bcImages.forEach(function (im) {
         if (im.num !== m[1] || !im.photo) return;
@@ -1119,6 +1211,9 @@
 
   /* Draw the preview in the view in use, folded. */
   function bcRenderPreview() {
+    /* the preview draws published images from the index, so the index
+       comes first; the draw follows the load once */
+    if (!AMH.images.index.get()) { AMH.images.index.load().then(bcRenderPreview); return; }
     var view = bcPvView();
     bcPreviewEl.setAttribute("data-view", view);
     bcPvBtns.forEach(function (b) {
@@ -1304,6 +1399,26 @@
     var c = bcCounts(bcBody.value);
     bcCountsEl.textContent = c.chars.toLocaleString("en-US") + (c.chars === 1 ? " character, " : " characters, ") +
       c.words.toLocaleString("en-US") + (c.words === 1 ? " word" : " words");
+    bcTagNote(bcSyncCards() || []);
+  }
+  /* The line under the body: a number no image on the site has, and text
+     that is almost a tag. Both are warnings, and neither is a refusal
+     here: the publish asks. A long piece of text is cut, so the line stays
+     a line. */
+  function bcTagNote(unknown) {
+    if (!bcTagNoteEl) return;
+    var near = AMH.blog && AMH.blog.nearTags ? AMH.blog.nearTags(bcBody.value) : [];
+    var cut = function (s) { return s.length > 48 ? s.slice(0, 47) + "..." : s; };
+    var parts = [];
+    if (unknown.length) {
+      parts.push("No image on this site has the number " + unknown.join(", ") + ".");
+    }
+    if (near.length) {
+      parts.push(near.length + (near.length === 1 ? " tag is not a tag: " : " tags are not tags: ") +
+        near.map(cut).join("  "));
+    }
+    bcTagNoteEl.textContent = parts.join(" ");
+    bcTagNoteEl.hidden = !parts.length;
   }
 
   /* THE SPECIAL COMMANDS.
@@ -1537,6 +1652,7 @@
     if (bcPanel && bcPanel.parentNode) return;
     bcEditing = editing || null;
     bcOrphans = [];
+    bcManImages = null;
     if (!bcEscBound) {
       bcEscBound = true;
       doc.addEventListener("keydown", function (e) {
@@ -1733,9 +1849,13 @@
       tabbable: false
     });
     writeEl.appendChild(bcBody);
-    bcCountsEl = doc.createElement("span");    bcCountsEl = doc.createElement("span");
+    bcCountsEl = doc.createElement("span");
     bcCountsEl.className = "bc-counts";
     writeEl.appendChild(bcCountsEl);
+    bcTagNoteEl = doc.createElement("div");
+    bcTagNoteEl.className = "bc-tagnote";
+    bcTagNoteEl.hidden = true;
+    writeEl.appendChild(bcTagNoteEl);
     bcPanel.appendChild(writeEl);
 
     /* images tab */
@@ -2825,13 +2945,15 @@
       ? [["review", "Review the diff"]]
       : [["extract", "Extract <code>" + esc(rec.zip) + "</code> at the repo root"],
          ["review", "Review the diff"]];
-    /* The files nothing names any more. A folder write moved them itself,
+    /* The files this publish left behind: a month file it emptied, and the
+       old-date files of a post it moved. A folder write moved them itself,
        so the reader only has to look; a zip cannot move anything, so the
-       list is here and the paths are named. */
+       list is here and the paths are named. An image no post uses is not
+       among them: it stays on the site. */
     if (rec.orphans && rec.orphans.length) {
       items.push(["orphans", rec.moved && rec.moved.length
         ? rec.moved.length + " file" + (rec.moved.length === 1 ? "" : "s") +
-          " nothing uses any more moved into <code>deletethese/</code> - " +
+          " this publish left behind moved into <code>deletethese/</code> - " +
           "empty that folder when you are sure"
         : "Move these out of the repo, nothing names them any more: <code>" +
           rec.orphans.map(esc).join("</code> <code>") + "</code>"]);
@@ -2844,6 +2966,21 @@
       (rec.fellBack
         ? '<p class="bc-wiz__fell"><strong>The folder write did not happen.</strong> ' +
           esc(rec.fellBack) + "</p>"
+        : "") +
+      (rec.deadTags && rec.deadTags.length
+        ? '<p class="bc-wiz__fell"><strong>' + rec.deadTags.length +
+          (rec.deadTags.length === 1 ? " tag names" : " tags name") +
+          " an image the site does not hold.</strong> " + esc(rec.deadTags.join(", ")) +
+          ". Fix each in the composer, or add the image again.</p>"
+        : "") +
+      (rec.superDeleted
+        ? "<p><strong>" + esc(rec.superDeleted.name) + " was super deleted.</strong> " +
+          "The posts above no longer name it. " +
+          rec.superDeleted.moved.length + " file" + (rec.superDeleted.moved.length === 1 ? "" : "s") +
+          " moved into <code>deletethese/</code>, and <code>" +
+          rec.superDeleted.wrote.map(esc).join("</code> <code>") + "</code> " +
+          (rec.superDeleted.wrote.length === 1 ? "was" : "were") +
+          " written. Empty that folder when you are sure.</p>"
         : "") +
       (rec.indexShort
         ? '<p class="bc-wiz__fell"><strong>Find will not see every post.</strong> The ' +
@@ -3245,7 +3382,7 @@
          It names the wanted post in the rule rather than hiding them
          all, so the right post is on screen even if blog.js never
          arrives. blog.js removes this style and takes the work over. */
-      '  <script>(function(){var m=/[?&]post=p(\\d{4})/.exec(location.search);' +
+      '  <script>(function(){var m=/[?&]post=p([0-9a-z]\\d{3})/.exec(location.search);' +
       'if(!m)return;var s=document.createElement("style");s.id="postBoot";' +
       's.textContent="main>.bs-post:not(#p"+m[1]+"),.bm-chain{display:none}";' +
       'document.head.appendChild(s);})();</script>\n' +
@@ -3313,7 +3450,7 @@
   /* parse an existing (generated or fixture) month file back into article
      blocks so a new post can merge in; blocks are carried verbatim */
   function bcParseMonthBlocks(text) {
-    var re = /[ \t]*<!-- ===== POST (\d{4}) · (\d{6}) ===== -->[\s\S]*?<!-- ===== \/POST \1 ===== -->/g;
+    var re = /[ \t]*<!-- ===== POST ([0-9a-z]\d{3}) · (\d{6}) ===== -->[\s\S]*?<!-- ===== \/POST \1 ===== -->/g;
     var out = [], m;
     while ((m = re.exec(text))) {
       out.push({ id: m[1], date: m[2], text: m[0].replace(/^\n+/, "") });
@@ -3333,7 +3470,7 @@
   /* Both shapes: a month file written before V051 carries blog-post, and
      one written since carries the stream's own bs-post. The identity
      attributes and their order are the same in both. */
-  var BC_META_RE = /<article class="(?:blog-post|bs-post)" id="p(\d{4})" data-id="\d{4}" data-date="(\d{6})"(?: data-time="(\d{0,4})")?(?: data-zone="([^"]*)")?(?: data-tags="([^"]*)")? data-title="([^"]*)"/;
+  var BC_META_RE = /<article class="(?:blog-post|bs-post)" id="p([0-9a-z]\d{3})" data-id="[0-9a-z]\d{3}" data-date="(\d{6})"(?: data-time="(\d{0,4})")?(?: data-zone="([^"]*)")?(?: data-tags="([^"]*)")? data-title="([^"]*)"/;
   function bcExtractPost(blockText) {
     var meta = BC_META_RE.exec(blockText);
     var srcM = BC_SRC_RE.exec(blockText);
@@ -3393,8 +3530,10 @@
        none of those. It could not read a month file this tab had published
        and not yet uploaded, and from disk it could not read anything at
        all, because a page opened from disk cannot fetch. */
-    bcFetchMonth(yymm)
-      .then(function (text) {
+    /* the index with the month: the cards it builds read their facts there */
+    Promise.all([bcFetchMonth(yymm), AMH.images.index.load()])
+      .then(function (both) {
+        var text = both[0];
         if (text === null) {
           throw new Error("blog/" + yymm + ".html could not be read.");
         }
@@ -3443,35 +3582,73 @@
      manifest's line for that number, which is where the site records what
      an image is. A number with no line is an image from before the engine:
      its card says so, and Remove is all it offers. */
+  /* A card for one published image. m is the tag's match, for the words
+     it carries; line is the manifest's line, or nothing for an image from
+     before the engine, whose card says so and offers Remove alone. */
+  function bcPublishedCard(m, line, date0) {
+    var im = {
+      num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
+      published: true, photo: null, date0: line ? line.date : date0,
+      uhd: !!(line && line.uhd), truesize: !!(line && line.truesize)
+    };
+    if (line) {
+      var paths = bcImagePaths(line);
+      var hd = AMH.images.copySize(line.ow, line.oh, "hd");
+      var sd = AMH.images.copySize(line.ow, line.oh, "sd");
+      im.src = paths.src; im.sd = paths.sd; im.original = paths.original;
+      im.sdw = sd.w; im.w = hd.w; im.h = hd.h;
+      im.ow = line.ow; im.oh = line.oh; im.bytes = line.bytes;
+      im.type = line.type; im.animated = line.animated;
+    } else {
+      /* before the engine: one file, and the manifest says nothing */
+      im.src = "blog/" + date0 + "_img" + m[3] + (m[2] === "png" ? ".png" : ".jpg");
+      im.sd = ""; im.original = ""; im.before = true;
+    }
+    bcImages.push(im);
+    bcCards.appendChild(bcRenderCard(im, null));
+    return im;
+  }
   function bcLoadPublishedImages(source, date0) {
     var re = new RegExp(AMH.blog.TAG, "g"), m;
-    var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
+    var map = bcSiteMap();
+    /* a number with a card already, from bcSyncCards on the body's first
+       refresh, gets no second card */
     var seen = {};
+    bcImages.forEach(function (im) { seen[im.num] = true; });
     while ((m = re.exec(source))) {
       if (seen[m[3]]) continue;
       seen[m[3]] = true;
-      var line = (man.images || {})[m[3]];
-      var im = {
-        num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
-        published: true, photo: null, date0: line ? line.date : date0,
-        uhd: !!(line && line.uhd), truesize: !!(line && line.truesize)
-      };
-      if (line) {
-        var paths = bcImagePaths(line);
-        var hd = AMH.images.copySize(line.ow, line.oh, "hd");
-        var sd = AMH.images.copySize(line.ow, line.oh, "sd");
-        im.src = paths.src; im.sd = paths.sd; im.original = paths.original;
-        im.sdw = sd.w; im.w = hd.w; im.h = hd.h;
-        im.ow = line.ow; im.oh = line.oh; im.bytes = line.bytes;
-        im.type = line.type; im.animated = line.animated;
-      } else {
-        /* before the engine: one file, and the manifest says nothing */
-        im.src = "blog/" + date0 + "_img" + m[3] + (m[2] === "png" ? ".png" : ".jpg");
-        im.sd = ""; im.original = ""; im.before = true;
-      }
-      bcImages.push(im);
-      bcCards.appendChild(bcRenderCard(im, null));
+      bcPublishedCard(m, map[m[3]], date0);
     }
+  }
+  /* A TAG RECONNECTS BY ITS NUMBER.
+
+     A tag typed after the composer opened, pasted from another post, or
+     fixed after a typo names an image the site holds: it gets a card here,
+     from the manifest's line, with no upload. A number the site does not
+     have gets no card, and the caller says so. Runs on each input, on the
+     Preview view and at publish. Returns the numbers with no image. */
+  function bcSyncCards() {
+    if (!bcBody || !bcCards) return [];
+    /* the map waits for the index; the refresh that follows the load runs
+       this again with it */
+    if (!AMH.images.index.get()) {
+      AMH.images.index.load().then(function () { bcManImages = null; bcRefreshCounts(); });
+      return [];
+    }
+    if (!bcManImages) bcManImages = bcSiteMap();
+    var re = new RegExp(AMH.blog.TAG, "g"), m;
+    var known = {};
+    bcImages.forEach(function (im) { known[im.num] = true; });
+    var unknown = [];
+    while ((m = re.exec(bcBody.value))) {
+      if (known[m[3]]) continue;
+      known[m[3]] = true;
+      var line = bcManImages[m[3]];
+      if (line) bcPublishedCard(m, line, line.date);
+      else unknown.push(m[3]);
+    }
+    return unknown;
   }
   /* The highlights block: the newest few posts as static HTML, for the home
      page. Rendered from the manifest this publish writes, so the block
@@ -4237,13 +4414,14 @@
       indexShort: bcIndexShort,
       spliced: names.filter(function (n) { return managed.indexOf(n) !== -1; }),
       regenerated: names.filter(function (n) {
-        return managed.indexOf(n) === -1 && (/\.(html|xml|txt)$/.test(n) || n === SEARCH_FILE);
+        return managed.indexOf(n) === -1 && (/\.(html|xml|txt)$/.test(n) || n === SEARCH_FILE || n === INDEX_FILE);
       }),
       added: names.filter(function (n) {
-        return !/\.(html|xml|txt)$/.test(n) && n !== SEARCH_FILE;
+        return !/\.(html|xml|txt)$/.test(n) && n !== SEARCH_FILE && n !== INDEX_FILE;
       }),
       orphans: orphans,
       checks: { extract: false, review: false, orphans: false, commit: false, push: false, live: false },
+      deadTags: (rec.deadTags || []).slice(),
       at: new Date().toISOString()
     };
     /* the layer: the text of this bundle, so the next one splices what
@@ -4256,6 +4434,9 @@
       else images.push(n);
     });
     TOOL.layerKeep(record, staged, images);
+    /* the record this bundle leaves is the current one from here, so the
+       next bundle in this page load builds on it */
+    if (bcIndexPending) { AMH.images.index.set(bcIndexPending); bcIndexPending = null; }
     /* and onto the page, so a second post is composed against the first */
     bcLayerOnto(true);
     var prog = bcProg;
@@ -4263,6 +4444,10 @@
     if (prog) prog.mark(6);
     (prog ? prog.finish() : Promise.resolve())
       .then(function () { return bcDeliver(files, names, zipName, record); })
+      /* what the job asked to run on the written bundle, before the Done
+         step draws: a Super Delete moves its files here, so the checklist
+         names the posts and the files in one place */
+      .then(function () { return bcJobAfter ? bcJobAfter(record) : null; })
       .then(function () {
         /* the record was staged before the bundle was delivered, and
            delivery is what decides the route: a folder write that fell
@@ -4278,6 +4463,7 @@
           detail: { kind: record.kind, route: record.route }
         }));
         bcWizDone(record);
+        if (bcJobSettle) bcJobSettle(record);
       });
   }
 
@@ -4316,12 +4502,13 @@
         console.info("[blog] written into the repo folder:\n  " + written.join("\n  "));
         /* the bytes are on disk now, so the engine stops holding them */
         if (AMH.images) AMH.images.saved(written);
-        /* A folder can move a file, so the files nothing names any more go
-           into deletethese/ rather than onto a list for the reader. The
-           scan runs over blog/ as well, so an image no post uses is found
-           even when this publish did not touch it. */
-        if (!TOOL.moveOrphans) return;
-        return TOOL.moveOrphans().then(function (moved) {
+        /* A folder can move a file, so what this publish itself left behind
+           goes into deletethese/ rather than onto a list for the reader: a
+           month file it emptied, and the old-date files of a post it moved.
+           Nothing else is touched. An image no post uses stays on the site,
+           until Super Delete. */
+        if (!TOOL.moveFiles || !record.orphans || !record.orphans.length) return;
+        return TOOL.moveFiles(record.orphans).then(function (moved) {
           record.moved = moved || [];
           if (record.moved.length) {
             console.info("[blog] moved into deletethese/:\n  " + record.moved.join("\n  "));
@@ -4421,6 +4608,9 @@
        line in the manifest, so there is no format for a tag to disagree
        with; a tag written before the engine may still say png, and it is
        read as img. */
+    /* a tag typed since the composer opened gets its card here, so a fixed
+       typo needs no reopen */
+    bcSyncCards();
     var refs = {}, m2;
     BC_TAG_RE_G.lastIndex = 0;
     while ((m2 = BC_TAG_RE_G.exec(source))) {
@@ -4430,23 +4620,27 @@
     bcImages.forEach(function (im) { known[im.num] = im; });
     var dangling = Object.keys(refs).filter(function (n) { return !known[n]; });
     if (dangling.length) {
-      bcSetStatus("These tags name images that are not in the Images tab: " + dangling.join(", ")); return;
+      bcSetStatus("No image on this site has the number " + dangling.join(", ") +
+        ". Add it on the Images tab, or fix the tag."); return;
+    }
+    /* text that is almost a tag is published as text, and the composer
+       says so once. Nothing is lost by it: the image it failed to name
+       stays on the site. */
+    var near = AMH.blog.nearTags(source);
+    if (near.length && !window.confirm("This is not a tag, and is published as text:\n" +
+        near.join("\n") + "\n\nPublish anyway?")) {
+      bcSetStatus("Not published. Fix the tag, or publish anyway."); return;
     }
     var usedNew = bcImages.filter(function (im) { return refs[im.num] && !im.published; });
     var usedPub = bcImages.filter(function (im) { return refs[im.num] && im.published; });
     var unusedNew = bcImages.filter(function (im) { return !refs[im.num] && !im.published; });
-    var unusedPub = bcImages.filter(function (im) { return !refs[im.num] && im.published; });
     if (unusedNew.length && !window.confirm(unusedNew.length +
         " new image(s) have no tag in the body. They are not published:\n" +
         unusedNew.map(function (im) { return im.num; }).join(", ") + "\n\nPublish without them?")) {
       return;
     }
-    if (unusedPub.length && !window.confirm(unusedPub.length +
-        " published image(s) have no tag in the body now. Their files become orphans:\n" +
-        unusedPub.map(function (im) { return im.src; }).join("\n") + "\n\nContinue?")) {
-      return;
-    }
-    unusedPub.forEach(bcOrphanImage);
+    /* A published image with no tag now stays on the site, with its line
+       and its files: nothing is asked, and nothing is orphaned. */
     /* A publish can rewrite more than one page now, so name them before it
        builds: an out-of-date repo turns a good splice into a silent revert.
 
@@ -4457,7 +4651,7 @@
     var willWrite = TOOL.changedPages();
     if (willWrite.indexOf(TOOL.currentPage()) === -1) willWrite.push(TOOL.currentPage());
     var willReplace = ["blog/" + date.slice(0, 4) + ".html", "sitemap.xml", "robots.txt",
-                       "search.js", "feed.xml"];
+                       "search.js", "feed.xml", INDEX_FILE];
     if (bcEditing && bcEditing.date0.slice(0, 4) !== date.slice(0, 4)) {
       willReplace.unshift("blog/" + bcEditing.date0.slice(0, 4) + ".html");
     }
@@ -4499,7 +4693,7 @@
         if (!go) { bcSetStatus("Not published. Nothing was written."); return; }
         bcPublishBuild({ date: date, title: title, entryTitle: entryTitle, source: source,
                          meta: { format: format, time: time, zone: zone, tags: tags },
-                         usedNew: usedNew, usedPub: usedPub, unusedPub: unusedPub,
+                         usedNew: usedNew, usedPub: usedPub,
                          willWrite: willWrite,
                          reads: reads, route: route });
       });
@@ -4558,7 +4752,7 @@
   function bcPublishBuild(p) {
     var date = p.date, title = p.title, source = p.source, meta0 = p.meta;
     var entryTitle = p.entryTitle || title;
-    var usedNew = p.usedNew, usedPub = p.usedPub, unusedPub = p.unusedPub || [];
+    var usedNew = p.usedNew, usedPub = p.usedPub;
     var yymm = date.slice(0, 4);
     bcSetStatus("Building the bundle.");
     bcProg = bcWizProgress([
@@ -4582,9 +4776,11 @@
     /* held across the chain: the page's source and manifest, the entry list
        this publish writes, and the stamp of each month file it renders */
     var meta, id, entries, man, src, deployed, stamps, months, images;
+    var renamed = {};     /* num -> true for a published image renamed with this post's date */
     var touched = {};     /* month -> the stamp of the file written for it */
     var blocksFor = {};   /* month -> its blocks, for the stream */
-    TOOL.pristine()
+    bcIndexPending = null;
+    AMH.images.index.load().then(function () { return TOOL.pristine(); })
       .then(function (text) {
         bcProg.mark(0);
         src = text;
@@ -4594,18 +4790,31 @@
            gained, so it stops here */
         if (man.payload.trim() !== bcManAtOpen.trim()) throw TOOL.error("BLG-E11");
         /* Every image on the site after this publish: the lines the manifest
-           carries, less the ones this post orphaned, plus a line for each
-           image the post uses now.
+           carries, plus a line for each image the post uses now. No line is
+           dropped here: an image the post stopped using stays on the site.
 
            FIRST, before anything is rendered. Every month file and the
            stream are written from these lines, so a map built later would
            leave the month files with an image tag and nothing to expand it
            from. */
-        images = {};
-        Object.keys(man.images || {}).forEach(function (n) { images[n] = man.images[n]; });
-        unusedPub.forEach(function (im) { delete images[im.num]; });
-        usedNew.concat(usedPub).forEach(function (im) {
-          if (!im.before) images[im.num] = bcImLine(im, date);
+        /* A published image keeps its date, and so its files, unless this
+           post alone uses it and the post's date moved: then its files are
+           renamed with the post, below. An image another post shares
+           stays where it is, or that post's month file would name files
+           that are gone. The index says who shares it. */
+        var recNow = AMH.images.index.get() || { images: [] };
+        var shared = {};
+        recNow.images.forEach(function (e) {
+          if (!e.num) return;
+          shared[e.num] = e.used.some(function (u) {
+            return u.indexOf("p") === 0 && (!bcEditing || u !== "p" + bcEditing.id);
+          });
+        });
+        usedPub.forEach(function (im) { renamed[im.num] = dateChanged && !im.before && !shared[im.num]; });
+        images = bcSiteMap();
+        usedNew.forEach(function (im) { images[im.num] = bcImLine(im, date); });
+        usedPub.forEach(function (im) {
+          if (!im.before) images[im.num] = bcImLine(im, renamed[im.num] ? date : im.date0);
         });
         bcSiteImages = images;
         /* what the deployed manifest knows, read before this post is added
@@ -4618,7 +4827,7 @@
           id = bcEditing.id;
           entries = entries.filter(function (e) { return e.id !== id; });
         } else {
-          id = pad4(man.nextPost);
+          id = bcIdOf(man.nextPost);
         }
         var at = entries.length;
         while (at > 0 && entries[at - 1].date > date) at--;
@@ -4675,8 +4884,7 @@
         /* the manifest, stamped, and the stream, which shows the newest
            month; then the files every operation writes whole, each
            carrying the publish stamp */
-        stamps = bcStamps(man, bcEditing ? man.nextPost : man.nextPost + 1,
-          man.nextImg + bcImgCounter, entries, touched, images);
+        stamps = bcStamps(man, bcEditing ? man.nextPost : man.nextPost + 1, entries, touched);
         var out = TOOL.spliceRegion(src, "blog-manifest", stamps.payload);
         if (out === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
         return bcStreamInto(out, months, blocksFor, meta.brand, deployed);
@@ -4685,6 +4893,11 @@
         src = text;
         bcProg.mark(2);
         bcCommonFiles(files, src, entries, meta, stamps.publish);
+        /* the index: every image the site holds, this post's uses, and the
+           counter after the photos this publish numbered */
+        var ix = bcIndexNext({ images: images, postId: id, refs: bcRefsOf(source),
+                               nextImg: bcNextImg() + bcImgCounter });
+        if (ix) { files[INDEX_FILE] = enc.encode(ix.text); bcIndexPending = ix.rec; }
         bcProg.mark(3);
         /* A held photo is three files, and all three go into blog/ beside
            the page that shows them. The date may have changed since the
@@ -4705,7 +4918,9 @@
         if (!dateChanged || !usedPub.length) return;
         var jobs = [];
         usedPub.forEach(function (im) {
-          if (im.before) return;   /* one file, and no manifest line to move */
+          /* an image from before the engine has one file and no line to
+             move, and an image another post shares keeps its files */
+          if (im.before || !renamed[im.num]) return;
           var to = bcImagePaths(bcImLine(im, date));
           [["src", to.src], ["sd", to.sd], ["original", to.original]].forEach(function (pair) {
             var from = im[pair[0]];
@@ -4769,27 +4984,17 @@
   function bcDeletePost() {
     if (!bcEditing) return;
     var id = bcEditing.id;
-    var date0 = bcEditing.date0;
-    var yymm = date0.slice(0, 4);
-    /* Every file the CURRENT source references becomes an orphan, and the
-       manifest loses the line of each image only this post used. */
-    var imgOrphans = [];
-    var goneNums = [];
-    var manNow = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
+    /* The post's images stay on the site, with their lines and their
+       files. The ask names them, so the reader knows they are not lost. */
+    var kept = [];
     var re = new RegExp(AMH.blog.TAG, "g"), m;
     while ((m = re.exec(bcEditing.source0))) {
-      if (goneNums.indexOf(m[3]) === -1) goneNums.push(m[3]);
-      var line = (manNow.images || {})[m[3]];
-      var was = line ? bcImagePaths(line)
-        : { src: "blog/" + date0 + "_img" + m[3] + "." + (m[2] === "png" ? "png" : "jpg") };
-      [was.src, was.sd, was.original].forEach(function (f) {
-        if (f && imgOrphans.indexOf(f) === -1) imgOrphans.push(f);
-      });
+      if (kept.indexOf(m[3]) === -1) kept.push(m[3]);
     }
     if (!window.confirm("Delete post p" + id + " (\"" + (bcEditing.title0 || bcDerivedTitle(bcEditing.source0, bcMode)) + "\")?\n\n" +
         "Its manifest entry is removed. Its month file is written again without it." +
-        (imgOrphans.length
-          ? "\nThese image files become orphans. Delete them by hand:\n  " + imgOrphans.join("\n  ")
+        (kept.length
+          ? "\nIts images stay on the site: img" + kept.join(", img") + "."
           : "") +
         "\n\nThis builds a publish bundle. The post stays live until you upload the bundle.")) {
       return;
@@ -4797,11 +5002,9 @@
     bcWizJob("DELETE", "This post, and the files it leaves behind");
     bcWizRoutePick("Where should the deletion bundle land?",
       "The post stays live until this reaches the repo and you commit it.")
-      .then(function (route) { if (route) bcDeleteBuild(route, imgOrphans, goneNums); });
+      .then(function (route) { if (route) bcDeleteBuild(route); });
   }
-  /* imgOrphans is decided before the ask, from the source the composer
-     holds, so the question and the build name the same files. */
-  function bcDeleteBuild(route, imgOrphans, goneNums) {
+  function bcDeleteBuild(route) {
     var id = bcEditing.id;
     var date0 = bcEditing.date0;
     var yymm = date0.slice(0, 4);
@@ -4811,7 +5014,8 @@
     var touched = {};
     var blocksFor = {};
     TOOL.expectFiles([TOOL.currentPage(), "blog/" + yymm + ".html"]);
-    TOOL.pristine()
+    bcIndexPending = null;
+    AMH.images.index.load().then(function () { return TOOL.pristine(); })
       .then(function (src) {
         man = bcManifestFrom(src);
         if (man.payload.trim() !== bcManAtOpen.trim()) throw TOOL.error("BLG-E11");
@@ -4827,9 +5031,6 @@
         TOOL.expectOptional(["search.js"]);
         src = TOOL.spliceAllEdits(src);
         meta = bcSiteMeta(src);
-        imgOrphans.forEach(function (f) {
-          if (bcOrphans.indexOf(f) === -1) bcOrphans.push(f);
-        });
         /* the post being deleted lives in this month, so its file must
            exist; a missing one is a real problem and is thrown below */
         return bcFetchMonth(yymm).then(function (text) {
@@ -4854,19 +5055,18 @@
           }
           return repair;
         }).then(function () {
-          /* the lines of the images this post alone used go with it */
-          var images = {};
-          Object.keys(man.images || {}).forEach(function (n) {
-            if ((goneNums || []).indexOf(n) === -1) images[n] = man.images[n];
-          });
-          bcSiteImages = images;
-          stamps = bcStamps(man, man.nextPost, man.nextImg, entries, touched, images);
+          /* every image keeps its entry: the post's images stay on the site */
+          bcSiteImages = bcSiteMap();
+          stamps = bcStamps(man, man.nextPost, entries, touched);
           var out = TOOL.spliceRegion(src, "blog-manifest", stamps.payload);
           if (out === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
           return bcStreamInto(out, months, blocksFor, meta.brand, deployed);
         }).then(function (text2) {
           src = text2;
           bcCommonFiles(files, src, entries, meta, stamps.publish);
+          /* the post's uses leave the index; its images stay */
+          var ix = bcIndexNext({ images: bcSiteImages, gone: id });
+          if (ix) { files[INDEX_FILE] = new TextEncoder().encode(ix.text); bcIndexPending = ix.rec; }
           return bcFetchText("search.js").then(function (deployed) {
             return bcSearchWrite(files, deployed, { remove: id }, stamps.publish, entries.length)
               .then(function (table) {
@@ -4894,13 +5094,73 @@
   }
 
   /* ---------------- rebuild: every month file, current chrome ---------------- */
-  function bcRebuild() {
+  /* A manifest from before the index still carries the image counter and
+     image lines. The rebuild that finds them is the migration: it builds
+     the index from them and from the site pages, and writes the manifest
+     without them. */
+  function bcMigrating() {
+    var el = doc.getElementById("blogManifest");
+    return !!el && /^(next-img:|image:)/m.test(el.textContent || "");
+  }
+  /* The site's images on one managed page, as entries by base, with the
+     regions that show them: the migration's read of a page it did not
+     write. The facts come off each image's own markup, through the
+     engine's contract. */
+  function bcSiteEntries(text, path) {
+    var out = {};
+    var dom = new DOMParser().parseFromString(text, "text/html");
+    var uses = AMH.images.usageOf(text, path);
+    Array.prototype.forEach.call(dom.querySelectorAll("img[data-original]"), function (im) {
+      var f = AMH.images.read(im);
+      var base = AMH.images.baseOf(f.original);
+      if (base.indexOf("img/work/") !== 0 || out[base]) return;
+      out[base] = { base: base, type: f.type, ow: f.ow, oh: f.oh, bytes: f.bytes,
+                    animated: f.type === "gif", added: bcTodayYYMMDD(), used: uses[base] || [] };
+    });
+    return out;
+  }
+  /* A REBUILD, AND A REBUILD WITHOUT ONE IMAGE.
+
+     opts.without is an image number. Every tag for it leaves each post's
+     source, so the month files, the stream, the search index and the feed
+     are all written without it, and the record's uses for it are empty by
+     construction. The site stops naming the image before the Images box
+     moves its files.
+
+     opts.after runs once the bundle is written and before the Done step,
+     so one box says both what was written and what was moved. It is given
+     the record and may add to it.
+
+     Returns the record the bundle left, or null when the route pick was
+     closed or the rebuild failed. */
+  var bcWithout = "";        /* the image this rebuild leaves out */
+  var bcJobAfter = null;     /* what runs between the write and Done */
+  var bcJobSettle = null;    /* told what the running job delivered */
+  function bcRebuild(opts) {
+    opts = opts || {};
     TOOL.injectStyles();
-    bcWizJob("REBUILD", "Every month file, current design");
-    bcWizRoutePick("Where should the rebuild bundle land?",
-      "Every month file is written again with the current design.")
-      .then(function (route) { if (route) bcRebuildBuild(route); });
-    return "rebuilding: choose where the bundle should land";
+    bcWithout = opts.without ? String(opts.without) : "";
+    bcJobAfter = opts.after || null;
+    bcWizJob("REBUILD", bcWithout ? "Every month file, without img" + bcWithout
+      : bcMigrating() ? "Every month file, and the image index" : "Every month file, current design");
+    return new Promise(function (resolve) {
+      var done = false;
+      bcJobSettle = function (rec) {
+        if (done) return;
+        done = true;
+        bcJobSettle = null;
+        bcJobAfter = null;
+        bcWithout = "";
+        resolve(rec || null);
+      };
+      bcWizRoutePick("Where should the rebuild bundle land?",
+        bcWithout ? "Every month file is written again, without img" + bcWithout + "."
+          : "Every month file is written again with the current design.")
+        .then(function (route) {
+          if (route) bcRebuildBuild(route);
+          else if (bcJobSettle) bcJobSettle(null);
+        });
+    });
   }
   function bcRebuildBuild(route) {
     console.info("[blog] rebuild: rendering every month file again with the current chrome.");
@@ -4915,23 +5175,33 @@
        back into the page */
     var blocksFor = {}, rebuiltSrc = "", rebuiltMan = null, meta = null, allMonths = [];
     var enc = new TextEncoder();
-    TOOL.pristine()
+    /* the migration reads the site pages the composer is not on, for the
+       images they show; a page from disk is asked for at the hand-off */
+    var migrating = false, sitePages = [], siteEntries = {}, pageUses = {};
+    bcIndexPending = null;
+    bcDeadTags = [];
+    AMH.images.index.load().then(function () { return TOOL.pristine(); })
       .then(function (src) {
         var man = bcManifestFrom(src);
         if (!man.entries.length) throw new Error("The manifest is empty. There is nothing to rebuild.");
+        migrating = /^(next-img:|image:)/m.test(man.payload || "");
+        sitePages = migrating
+          ? TOOL.pages.map(function (pg) { return pg.path; }).filter(function (p) { return p !== TOOL.currentPage(); })
+          : [];
         /* A rebuild reads every month, and only knows which ones once the
            manifest is in hand. Declaring them here still lets the hand-off
            show the list and the progress for all the asks that follow. */
         TOOL.expectFiles([TOOL.currentPage()].concat(
           bcUniqueMonths(man.entries).map(function (m) { return "blog/" + m + ".html"; }))
-          .concat(["search.js"]));
+          .concat(sitePages).concat(["search.js"]));
         TOOL.expectOptional(["search.js"]);
         meta = bcSiteMeta(src);
         rebuiltSrc = src;
         rebuiltMan = man;
-        /* a rebuild changes no image: the lines the manifest carries are
-           what every month file it writes renders from */
-        bcSiteImages = man.images || {};
+        /* a rebuild changes no image: the entries the index holds, and the
+           lines a manifest from before it carries, are what every month
+           file it writes renders from */
+        bcSiteImages = bcSiteMap();
         var months = allMonths = bcUniqueMonths(man.entries);
         /* every one of these is in the manifest, so every one should exist;
            a folder that lacks one is a fact about the folder, not a reason
@@ -4948,6 +5218,10 @@
                 carried.push({ id: b.id, label: "p" + b.id + " (" + yymm + ")" });
                 return b;   /* no source: carry the block verbatim */
               }
+              /* the image this rebuild leaves out goes here, before the
+                 article is rendered: the render writes the source block
+                 too, so the post stops naming it in both places at once */
+              if (bcWithout) post.source = bcSourceWithout(post.source, bcWithout, post.format !== "md");
               /* by format: a month with both kinds regenerates both kinds */
               found.push(post);
               return { id: post.id, date: post.date,
@@ -4978,13 +5252,59 @@
            out of step. The stamp changes at every rebuild, so the page is
            always in the bundle. */
         var derived = bcDerivedManifest(rebuiltMan, found, carried);
-        var stamps = bcStamps(rebuiltMan, derived.nextPost, derived.nextImg, derived.entries,
-                              touched, bcSiteImages);
+        var stamps = bcStamps(rebuiltMan, derived.nextPost, derived.entries, touched);
         var src = TOOL.spliceRegion(rebuiltSrc, "blog-manifest", stamps.payload);
         if (src === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
         var months2 = bcUniqueMonths(derived.entries);
-        return bcStreamInto(src, months2, blocksFor, meta.brand, allMonths).then(function (text) {
+        /* the migration reads the site pages for the images they show */
+        var read = Promise.all(sitePages.map(function (path) {
+          return TOOL.pristine(path).then(function (text) {
+            var entries = bcSiteEntries(text, path);
+            Object.keys(entries).forEach(function (base) { siteEntries[base] = entries[base]; });
+            var uses = AMH.images.usageOf(text, path);
+            Object.keys(uses).forEach(function (base) {
+              pageUses[base] = (pageUses[base] || []).concat(uses[base]);
+            });
+          }, function (err) {
+            /* a page that cannot be read is skipped and named: the rebuild
+               is the thing the user came to do, and the next save of that
+               page records its images */
+            console.warn("[blog] " + path + " could not be read for the image index (" +
+              (err && err.message ? err.message : err) + "). Its images are not indexed yet.");
+          });
+        }));
+        return read.then(function () {
+          return bcStreamInto(src, months2, blocksFor, meta.brand, allMonths);
+        }).then(function (text) {
           bcCommonFiles(files, text, derived.entries, meta, stamps.publish);
+          /* the index: every blog image's uses again from every post's
+             source, the site's images from its pages when migrating, and a
+             counter that never goes down. A tag whose image the site does
+             not hold is a dead tag, named with its post. */
+          var uses = {};
+          var carriedIds = {};
+          carried.forEach(function (c) { carriedIds["p" + c.id] = true; });
+          found.forEach(function (p) {
+            Object.keys(bcRefsOf(p.source)).forEach(function (num) {
+              if (!uses[num]) uses[num] = [];
+              uses[num].push("p" + p.id);
+              if (!bcSiteImages[num]) bcDeadTags.push("img" + num + " in p" + p.id);
+            });
+          });
+          /* a post carried verbatim has no source to read: its uses stay */
+          var rec0 = AMH.images.index.get() || { images: [] };
+          rec0.images.forEach(function (e) {
+            if (!e.num) return;
+            e.used.forEach(function (u) { if (carriedIds[u]) { uses[e.num] = uses[e.num] || []; uses[e.num].push(u); } });
+          });
+          var ix = bcIndexNext({ images: bcSiteImages, uses: uses, nextImg: derived.nextImg,
+                                 site: migrating ? siteEntries : null, pages: migrating ? pageUses : null,
+                                 always: migrating });
+          if (ix) { files[INDEX_FILE] = enc.encode(ix.text); bcIndexPending = ix.rec; }
+          if (bcDeadTags.length) {
+            console.warn("[blog] rebuild: " + bcDeadTags.length + " tag(s) name an image the site does not hold: " +
+              bcDeadTags.join(", ") + ". Fix each in the composer, or add the image again.");
+          }
           /* the index, from the same sources the month files were written
              from, so the three cannot disagree */
           return bcRebuildSearch(files, found, carried, stamps.publish)
@@ -4995,11 +5315,11 @@
         }).then(function () {
           /* the highlights block reads the entries, so a rebuild that
              changed one has to reach the home page as a publish would */
-          var same = bcManifestPayload(1, 1, derived.entries) === bcManifestPayload(1, 1, rebuiltMan.entries);
+          var same = bcManifestPayload(1, derived.entries) === bcManifestPayload(1, rebuiltMan.entries);
           return (same ? Promise.resolve() : bcOtherPages(files, derived.entries)).then(function () {
             if (!same) TOOL.markExported();
             bcFinishBundle(files, "blog-rebuild-" + bcTodayYYMMDD() + ".zip", "", "",
-              { kind: "rebuild", stamp: stamps.publish, route: route });
+              { kind: "rebuild", stamp: stamps.publish, route: route, deadTags: bcDeadTags });
             console.info("[blog] rebuild bundle ready. Extract it at the repo root, review, commit, push.");
           });
         });
@@ -5007,6 +5327,7 @@
       .catch(function (err) {
         console.error("[blog] rebuild failed:", err.message);
         bcWizFail(err, "Rebuild");
+        if (bcJobSettle) bcJobSettle(null);
       })
       .then(function () { bcOrphans = savedOrphans; });
   }
@@ -5083,10 +5404,10 @@
       }
     });
     var maxId = 0, maxImg = 0, m;
-    entries.forEach(function (e) { maxId = Math.max(maxId, parseInt(e.id, 10) || 0); });
+    entries.forEach(function (e) { maxId = Math.max(maxId, bcIdNum(e.id)); });
     found.forEach(function (p) {
       BC_TAG_RE_G.lastIndex = 0;
-      while ((m = BC_TAG_RE_G.exec(p.source))) maxImg = Math.max(maxImg, parseInt(m[3], 10) || 0);
+      while ((m = BC_TAG_RE_G.exec(p.source))) maxImg = Math.max(maxImg, bcIdNum(m[3]));
     });
     return { entries: entries,
              nextPost: Math.max(man.nextPost, maxId + 1),
@@ -5120,8 +5441,10 @@
        edit(id)        load a published post into the composer
        rebuild()       re-render every month file with the current chrome
        dirty()         true while the composer holds unpublished work
+       holds()         the numbers of the cards the open composer holds
+       busy()          true while a publish or a rebuild is on screen
 
-     tool.js calls all four. The unload guard calls dirty(), which is why
+     tool.js calls all six. The unload guard calls dirty(), which is why
      a composer that is open but empty must answer false. */
   AMH.publish = {
     open: openComposer,
@@ -5136,6 +5459,15 @@
       return "checklist open";
     },
     checkLive: bcCheckLive,
+    /* the numbers of the images the open composer holds as cards, so the
+       Images box refuses to super delete one from under it */
+    holds: function () {
+      if (!bcPanel || !bcPanel.parentNode) return [];
+      return bcImages.map(function (im) { return im.num; });
+    },
+    /* a publish or a rebuild is running: the wizard is on screen. The
+       Images box waits for it rather than writing over it. */
+    busy: function () { return !!(bcWiz && bcWiz.box && bcWiz.box.parentNode); },
     /* the page's own lifecycle hook, run again when the page's manifest
        changes under it */
     arrive: function () { bcArrive(); },
@@ -5218,7 +5550,7 @@
      is a plain blog page and Back is not a loop. */
   function bcArriveEdit() {
     bcArrive();
-    var m = /[?&]edit=(p(\d{4})|new)(?:&|$)/.exec(location.search);
+    var m = /[?&]edit=(p([0-9a-z]\d{3})|new)(?:&|$)/.exec(location.search);
     if (!m) return;
     /* only the edit parameter goes. Rebuilding from the path took every
        reader parameter with it, and null took the visit as well. */

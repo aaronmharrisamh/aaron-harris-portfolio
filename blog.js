@@ -68,7 +68,8 @@
   var MONTHS_EN = ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"];
 
-  /* One image on the site, as the manifest states it:
+  /* One image on the site, as a manifest from before the image index
+     states it:
 
        image:0001=260903 png 4032x3024 3145728 uhd
 
@@ -80,9 +81,12 @@
      original.
 
      The date and the number give every path, so nothing else is written
-     down. publish.js writes the same line, and the two must agree. */
+     down. These facts live in images.js now. Such a line is read so that a
+     manifest from before the index still opens, and the next rebuild moves
+     it into the index; nothing writes one again. publish.js reads the
+     same line, and the two must agree. */
   function blogImageLine(line) {
-    var m = /^image:(\d{4})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line);
+    var m = /^image:([0-9a-z]\d{3})=(\d{6})\s+([a-z0-9]+)\s+(\d+)x(\d+)\s+(\d+)(.*)$/.exec(line);
     if (!m) return null;
     var flags = m[7].split(/\s+/).filter(Boolean);
     var truesize = flags.indexOf("truesize") !== -1;
@@ -91,13 +95,37 @@
              animated: flags.indexOf("gif") !== -1 };
   }
 
-  /* The lines: next-post and next-img are the counters; stamp names the
-     publish that wrote the manifest; month:YYMM=stamp names the publish
-     that last wrote that month file; image:NNNN= is one image on the site;
-     months: is the month list a month page states outright, having no
-     entries of its own; every other line is entries. A line that matches
-     nothing is reported and skipped. publish.js reads the same shape from
-     the pristine source, and the two must agree line for line. */
+  /* The lines: next-post is the post counter; stamp names the publish that
+     wrote the manifest; month:YYMM=stamp names the publish that last
+     wrote that month file; months: is the month list a month page states
+     outright, having no entries of its own; every other line is entries.
+     next-img and image:NNNN= are from before images.js held the image
+     counter and every image: a manifest that still carries them is read
+     with them, and the next rebuild writes it without them. A line that
+     matches nothing is reported and skipped. publish.js reads the same
+     shape from the pristine source, and the two must agree line for line. */
+  /* AN ID, FOR A POST OR AN IMAGE.
+
+     Four characters. The first place counts in base 36 and the last three
+     in decimal: 0000 to 9999, then a000 to a999, and so on to z999. That
+     is 36,000 ids, every existing id unchanged, digits until the
+     ten-thousandth, and a letter then says which block an id is in. Ids
+     sort as strings, because a digit sorts before a letter. */
+  var ID_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
+  var BLOG_ID = "[0-9a-z]\\d{3}";
+  /* the id of the n-th post or image, from 0 to 35999 */
+  function blogIdOf(n) {
+    n = Math.floor(Number(n));
+    if (!(n >= 0 && n < 36000)) throw new Error("The site has no id left for a new post or image.");
+    return ID_DIGITS.charAt(Math.floor(n / 1000)) + ("00" + (n % 1000)).slice(-3);
+  }
+  /* the number an id stands for, or 0 for anything that is not an id */
+  function blogIdNum(id) {
+    var s = String(id || "").trim();
+    if (!/^[0-9a-z]\d{3}$/.test(s)) return 0;
+    return ID_DIGITS.indexOf(s.charAt(0)) * 1000 + parseInt(s.slice(1), 10);
+  }
+
   function blogParseManifest() {
     var el = doc.getElementById("blogManifest");
     var out = { nextPost: 1, nextImg: 1, entries: [], months: [], stamp: "",
@@ -106,8 +134,8 @@
     var lines = el.textContent.split("\n").map(function (l) { return l.trim(); })
       .filter(function (l) { return l !== ""; });
     lines.forEach(function (l) {
-      if (l.indexOf("next-post:") === 0) out.nextPost = parseInt(l.slice(10), 10) || 1;
-      else if (l.indexOf("next-img:") === 0) out.nextImg = parseInt(l.slice(9), 10) || 1;
+      if (l.indexOf("next-post:") === 0) out.nextPost = blogIdNum(l.slice(10)) || 1;
+      else if (l.indexOf("next-img:") === 0) out.nextImg = blogIdNum(l.slice(9)) || 1;
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
@@ -118,7 +146,7 @@
       }
       else {
         l.split("|").forEach(function (e) {
-          var m = /^(\d{6})(\d{4})(.*)$/.exec(e);
+          var m = /^(\d{6})([0-9a-z]\d{3})(.*)$/.exec(e);
           if (m) out.entries.push({ date: m[1], id: m[2], title: m[3], month: m[1].slice(0, 4) });
           else console.warn("[blog] manifest line not understood, skipped: " + e);
         });
@@ -212,7 +240,25 @@
      means one thing to the composer and to the page. markdown.js keeps a
      copy of its own, because it also loads on the home page, where this
      file does not; the harness runs one list of tags through both. */
-  var BLOG_TAG = "\\[(?:(portrait|landscape) )?(img|png)(\\d{4})(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+  var BLOG_TAG = "\\[(?:(portrait|landscape) )?(img|png)(" + BLOG_ID + ")(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+
+  /* TEXT THAT IS ALMOST A TAG.
+
+     A bracketed run that holds img or png and an id, and that the tag
+     rule does not match whole: [portrait1:1 img0005,...], [Portrait
+     img0005], [img 0005]. The composer names such text while it is typed
+     and once more at publish, because a typo here used to cost the image.
+     The escape [!img0005] is a deliberate non-tag and is never named. */
+  var NEAR_TAG = /\[(?!!)[^\]\n]*\b(?:img|png)\s?[0-9a-z]\d{3}\b[^\]\n]*\]/g;
+  function blogNearTags(source) {
+    var whole = new RegExp("^" + BLOG_TAG + "$");
+    var out = [], m;
+    NEAR_TAG.lastIndex = 0;
+    while ((m = NEAR_TAG.exec(String(source || "")))) {
+      if (!whole.test(m[0]) && out.indexOf(m[0]) === -1) out.push(m[0]);
+    }
+    return out;
+  }
 
   /* One image tag, as an entry the engine writes markup from. The manifest
      names the original's format and size; every path and the copies' sizes
@@ -766,7 +812,7 @@
     if (note) note.remove();
     var unknown = false;
 
-    if (/^p\d{4}$/.test(target)) {
+    if (/^p[0-9a-z]\d{3}$/.test(target)) {
       var id = target.slice(1);
       var entry = null;
       blogManifest.entries.forEach(function (e) { if (e.id === id) entry = e; });
@@ -813,7 +859,7 @@
 
   /* The post the address asks for, or "" for ordinary browsing. */
   function blogWantPost() {
-    var m = /[?&]post=p(\d{4})/.exec(location.search);
+    var m = /[?&]post=p([0-9a-z]\d{3})/.exec(location.search);
     return m ? m[1] : "";
   }
   /* The article that id names, and only when this month holds it. An id
@@ -1888,6 +1934,11 @@
                                   each run of image tags a carousel
        TAG                        the image tag's pattern, as a regular
                                   expression's source; see section 3
+       ID                         an id's pattern, [0-9a-z]\d{3}
+       idOf(n) / idNum(id)        the id of the n-th post or image, and
+                                  the number an id stands for
+       nearTags(source)           the pieces of a body that are almost a
+                                  tag and are not one
        encodeSource(s) / decodeSource(s) -> the escaped form stored in a
                                    month file's x-blog-source tag
        monthTitle(yymm) / dateLabel(yymmdd) / dateTime(yymmdd) -> display
@@ -1937,6 +1988,10 @@
     parseManifest: blogParseManifest,
     renderBody: blogRenderBody,
     TAG: BLOG_TAG,
+    ID: BLOG_ID,
+    idOf: blogIdOf,
+    idNum: blogIdNum,
+    nearTags: blogNearTags,
     encodeSource: blogEncodeSource,
     decodeSource: blogDecodeSource,
     monthTitle: blogMonthTitle,

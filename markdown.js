@@ -90,7 +90,7 @@
      for a command the renderer knows, so {!hello} is not an escape and
      stays exactly as typed. */
   var ESC_FLAG = new RegExp("\\{!(" + FLAG_NAMES + ")\\}", "g");
-  var ESC_TAG = /\[!((?:portrait|landscape) )?(img|png)(\d{4})/g;
+  var ESC_TAG = /\[!((?:portrait|landscape) )?(img|png)([0-9a-z]\d{3})/g;
   /* Taken off LAST, once nothing is looking for a command any more. Undo it
      earlier and the thing the mark was protecting would be obeyed. */
   function unmark(s) {
@@ -111,7 +111,7 @@
     pipe: /^\s*\|.*\|\s*$/,
     delim: /^\s*\|(\s*:?-+:?\s*\|)+\s*$/,
     /* a line that is nothing but image tags */
-    tagRun: /^(?:\s*\[(?:(?:portrait|landscape) )?(?:img|png)\d{4}(?:,[^\]|]*)?(?:\|[^\]]*)?\])+\s*$/,
+    tagRun: /^(?:\s*\[(?:(?:portrait|landscape) )?(?:img|png)[0-9a-z]\d{3}(?:,[^\]|]*)?(?:\|[^\]]*)?\])+\s*$/,
     flag: new RegExp("^\\{(" + FLAGS.map(function (f) { return f.name; }).join("|") + ")\\}\\s*$"),
     html: /^<[a-zA-Z\/!]/,
     blank: /^\s*$/
@@ -120,7 +120,7 @@
      the caption, the alt. blog.js names the same tag as AMH.blog.TAG; this
      is a copy, because this file also loads on the home page, where blog.js
      does not, and the harness runs one list of tags through both. */
-  var TAG_G = /\[(?:(portrait|landscape) )?(img|png)(\d{4})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
+  var TAG_G = /\[(?:(portrait|landscape) )?(img|png)([0-9a-z]\d{3})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
   /* a link: text, then a url that may hold one level of parentheses,
      which is what a javascript: url in the fixture needs to be caught whole */
   var LINK_G = /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;

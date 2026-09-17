@@ -155,10 +155,12 @@ here before they exist on disk.
 | `site.css` | All page style. Replaces the inline style block. |
 | `site.js` | Shared page behavior for every page. |
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
-| `imagesengine.js` | The image engine: what an upload becomes, the photos held until a save, the markup an image carries, and orphans. Every page. |
+| `imagesengine.js` | The image engine: what an upload becomes, the photos held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
 | `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
+| `images.js` | GENERATED. The image index: every image the site holds, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
+| `superdeleted.js` | GENERATED. The log of every Super Delete: when, the three paths, the entry as it was, and when it was restored. Written by the Images box, loaded by it only. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
@@ -192,6 +194,13 @@ other section reads the page it is on.
   difference that the user commits.
 - A machine-owned region is written again at each publish. Do not edit a
   machine-owned region by hand.
+- A file the image engine wrote stays until Super Delete moves it. No save,
+  publish, delete or rebuild moves an image file or names one as a file to
+  delete. Super Delete, in the Images box, is the only move: into
+  `deletethese/`, with a line in `superdeleted.js` that names the files.
+- A delete never leaves a page naming a file the site does not hold. An
+  image still in use comes out of every place that uses it first, and the
+  files move only after those places are written.
 
 ### Project Conventions
 

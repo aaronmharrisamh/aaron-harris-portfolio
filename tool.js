@@ -1955,6 +1955,36 @@
     "@media (max-width:640px){.ced-photo{grid-template-columns:96px minmax(0,1fr);}" +
     ".ced-photo__n{display:none;}.ced-photo__pic{width:96px;}" +
     ".ced-photo__acts{grid-column:1 / -1;justify-content:flex-start;flex-wrap:wrap;}}" +
+    /* IMAGES. Every image the site holds, one row each: its picture, its
+       name, its facts and where it is used, and its moves. The trash can
+       is orange, because Super Delete is the one move that takes a file
+       off the site. */
+    ".ced-images{width:min(880px,94vw);}" +
+    ".ced-images__note{font-size:.72rem;font-weight:400;color:var(--muted);}" +
+    ".ced-images__filters{display:flex;flex-wrap:wrap;gap:.3rem;padding:.7rem 1.1rem 0;}" +
+    ".ced-images__filters .ced-btn[aria-pressed=true]{border-color:var(--accent);color:var(--accent-bright);" +
+    "background:rgba(74,165,232,.14);}" +
+    ".ced-images__body{flex:1 1 auto;min-height:0;overflow:auto;padding:.8rem 1.1rem .4rem;}" +
+    ".ced-images__list{list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}" +
+    ".ced-image{display:grid;grid-template-columns:132px minmax(0,1fr) auto;gap:.75rem;align-items:start;" +
+    "padding:.6rem;border:1px solid var(--line);border-radius:10px;background:var(--bg-deep);}" +
+    ".ced-image__pic{display:block;width:132px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;" +
+    "border:1px solid var(--line);background:var(--panel);}" +
+    ".ced-image__pic--none{display:grid;place-items:center;font:11px Consolas,'Courier New',monospace;" +
+    "color:var(--dim);text-align:center;}" +
+    ".ced-image__words{display:grid;gap:.3rem;min-width:0;}" +
+    ".ced-image__name{font:700 12px Consolas,'Courier New',monospace;color:var(--text);}" +
+    ".ced-image__facts,.ced-image__paths{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
+    ".ced-image__paths{display:grid;gap:.15rem;}" +
+    ".ced-image__used{font-size:.78rem;line-height:1.5;color:var(--text-soft);}" +
+    ".ced-image__used a{color:var(--accent-bright);}" +
+    ".ced-image__acts{display:flex;justify-content:flex-end;gap:.3rem;}" +
+    ".ced-image__acts .ced-tool--icon svg{width:14px;height:14px;display:block;}" +
+    ".ced-superdel{border-color:var(--c-orange);color:var(--c-orange);}" +
+    ".ced-superdel:hover{border-color:var(--c-orange);background:var(--c-orange);color:var(--bg-deep);}" +
+    "@media (max-width:640px){.ced-image{grid-template-columns:96px minmax(0,1fr);}" +
+    ".ced-image__pic{width:96px;}" +
+    ".ced-image__acts{grid-column:1 / -1;justify-content:flex-start;flex-wrap:wrap;}}" +
     /* THE MARKDOWN TOOLBAR.
        The sprite is in the page and drawn from, never seen. A name is kept
        for a screen reader on every icon button, because a mark says nothing
@@ -2569,7 +2599,11 @@
 
      The frame is the frame every other box wears: the head, the rule under
      it, running text, the rule over the buttons, and one filled move. */
-  function savedBox(written, folder, moved) {
+  function savedBox(written, folder, moved, words) {
+    /* Super Delete and Restore open this box too. Their title, their lead
+       and their sentence about the moved files are their own; the frame,
+       the lists and the line about the commit are shared. */
+    words = words || {};
     injectStyles();
     var box = doc.createElement("div");
     box.className = "ced-modal ced-modal--flow ced-saved";
@@ -2580,7 +2614,8 @@
     var headEl = doc.createElement("div");
     headEl.className = "ced-modal__head";
     headEl.innerHTML = '<span class="ced-b ced-b--y ced-saved__tick">' + CED_TICK + "SAVED</span>" +
-      '<span class="ced-slug" id="cedSavedTitle">Written into your repo folder</span>';
+      '<span class="ced-slug" id="cedSavedTitle">' +
+      escAttr(words.title || "Written into your repo folder") + "</span>";
 
     var xBtn = doc.createElement("button");
     xBtn.type = "button";
@@ -2593,8 +2628,8 @@
     body.className = "ced-saved__body";
     var lead = doc.createElement("p");
     lead.className = "ced-saved__lead";
-    lead.textContent = (written.length === 1 ? "1 file was" : written.length + " files were") +
-      " written into " + (folder ? folder : "the repo folder") + ":";
+    lead.textContent = words.lead || (wereWords(written.length) +
+      " written into " + (folder ? folder : "the repo folder") + ":");
     function fileList(paths, cls) {
       var ul = doc.createElement("ul");
       ul.className = "ced-saved__files" + (cls ? " " + cls : "");
@@ -2640,9 +2675,9 @@
     if (moved && moved.length) {
       var gone = doc.createElement("p");
       gone.className = "ced-saved__moved";
-      gone.textContent = (moved.length === 1 ? "1 file nothing uses any more was" :
+      gone.textContent = words.moved || ((moved.length === 1 ? "1 file nothing uses any more was" :
         moved.length + " files nothing uses any more were") + " moved into " +
-        engine().DELETE_DIR + ":";
+        engine().DELETE_DIR + ":");
       body.appendChild(gone);
       body.appendChild(fileList(moved, "ced-saved__files--moved"));
     }
@@ -2788,6 +2823,694 @@
       doc.body.appendChild(box);
       dialogUp(escNo);
       (o.danger ? no : yes).focus();
+    });
+  }
+
+  /* "1 file was" or "3 files were", for a sentence about a count */
+  function wereWords(n) { return n === 1 ? "1 file was" : n + " files were"; }
+
+  /* THE IMAGES BOX.
+
+     Every image the site holds, from the record and the log and never
+     from a page: the note under the title says the list is as of the last
+     save or publish, because that is when the record was written. Three
+     filters, newest first. A row copies a tag or a path to place the
+     image, and its trash can is Super Delete, the one move that takes an
+     image off the site. A super deleted row offers Restore while its
+     files are in deletethese/. */
+  var imagesOpen = null;   /* the box on screen, so a second press shows it and not a twin */
+
+  /* the name a row and an ask call an image: its number for a blog
+     image, and the last part of its base for a site image */
+  function imageName(e) { return e.num ? "img" + e.num : e.base.replace(/^.*\//, ""); }
+  function imageTag(e) { return "[img" + e.num + "]"; }
+  /* "260916" as "2026-09-16", and "260917-143205" as "2026-09-17 14:32:05" */
+  function dayWords(yymmdd) {
+    var s = String(yymmdd || "");
+    return s.length === 6 ? "20" + s.slice(0, 2) + "-" + s.slice(2, 4) + "-" + s.slice(4, 6) : s;
+  }
+  function momentWords(at) {
+    var m = /^(\d{6})-(\d{2})(\d{2})(\d{2})$/.exec(String(at || ""));
+    return m ? dayWords(m[1]) + " " + m[2] + ":" + m[3] + ":" + m[4] : String(at || "");
+  }
+  /* "a", "a and b", "a, b and c" */
+  function joinWords(list) {
+    if (list.length < 2) return list.join("");
+    return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+  }
+  /* The facts a row states: the format, the size, the bytes, the day it
+     was added, and the word for a blog image's switch when one is on. */
+  function imageFacts(e) {
+    var out = [String(e.type || "").toUpperCase()];
+    if (e.animated) out.push("animated");
+    if (e.ow && e.oh) out.push(e.ow + " x " + e.oh);
+    if (e.bytes) out.push(sizeText(e.bytes));
+    if (e.added) out.push("added " + dayWords(e.added));
+    if (e.num && e.truesize) out.push("true pixel size");
+    else if (e.num && e.uhd) out.push("UHD");
+    return out;
+  }
+  /* A region's use, as words: the page, and the name the boxes head the
+     region with when it is on this page, or its slug when it is not. A
+     post's use is its id, which the row makes a link. */
+  function placeWords(use) {
+    var hash = use.indexOf("#");
+    if (hash === -1) return use;
+    var page = use.slice(0, hash), slug = use.slice(hash + 1);
+    var g = page === currentPage() ? AMH.tool.regionFor(slug) : null;
+    return page + " · " + (g ? describeRegion(g).name : slug);
+  }
+
+  function imagesBox() {
+    if (imagesOpen) return imagesOpen;
+    injectStyles();
+    var I = engine();
+    var box = doc.createElement("div");
+    box.className = "ced-modal ced-modal--flow ced-images";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-labelledby", "cedImagesTitle");
+
+    var headEl = doc.createElement("div");
+    headEl.className = "ced-modal__head";
+    headEl.innerHTML = '<span class="ced-b">IMAGES</span>' +
+      '<span class="ced-slug" id="cedImagesTitle">Every image the site holds</span>' +
+      '<span class="ced-images__note">as of the last save or publish</span>';
+
+    var xBtn = doc.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "ced-modal__x";
+    xBtn.setAttribute("aria-label", "Close");
+    xBtn.title = "Close";
+    xBtn.innerHTML = CED_X;
+
+    /* THE FILTERS. Unused is every entry nothing uses; Super deleted is
+       the log's lines not yet restored. */
+    var filters = doc.createElement("div");
+    filters.className = "ced-images__filters";
+    filters.setAttribute("role", "group");
+    filters.setAttribute("aria-label", "Show");
+    var showing = "all";
+    var pills = [["all", "All"], ["unused", "Unused"], ["deleted", "Super deleted"]].map(function (pair) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn";
+      b.setAttribute("data-show", pair[0]);
+      b.textContent = pair[1];
+      b.addEventListener("click", function () { showing = pair[0]; draw(); });
+      filters.appendChild(b);
+      return { el: b, key: pair[0], label: pair[1] };
+    });
+
+    var body = doc.createElement("div");
+    body.className = "ced-images__body";
+    var none = doc.createElement("p");
+    none.className = "ced-empty";
+    var list = doc.createElement("ol");
+    list.className = "ced-images__list";
+    body.appendChild(none);
+    body.appendChild(list);
+
+    var note = doc.createElement("div");
+    note.className = "ced-modal__status";
+    function say(t) { note.textContent = t || ""; }
+
+    var btns = doc.createElement("div");
+    btns.className = "ced-modal__btns";
+    var sp = doc.createElement("span");
+    sp.className = "ced-spacer";
+    btns.appendChild(sp);
+    var close = doc.createElement("button");
+    close.type = "button";
+    close.className = "ced-btn ced-btn--accent";
+    close.textContent = "Close";
+    btns.appendChild(close);
+
+    /* a month page is one step below the files */
+    var at = onMonthPage() ? "../" : "";
+    var urls = [];   /* blob: URLs of pictures read from deletethese/, revoked on close */
+
+    function newestFirst(a, b) {
+      if (a.added !== b.added) return a.added < b.added ? 1 : -1;
+      return a.base < b.base ? 1 : a.base > b.base ? -1 : 0;
+    }
+    function copyText(text) {
+      var write = navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(text) : Promise.reject(new Error("no clipboard"));
+      write.then(function () { say("Copied " + text); }, function () {
+        /* the old way, for a browser that refuses a page the clipboard:
+           a selected field and the copy command */
+        var field = doc.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.style.cssText = "position:fixed;left:-9999px;top:0;";
+        doc.body.appendChild(field);
+        field.select();
+        var ok = false;
+        try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+        doc.body.removeChild(field);
+        say(ok ? "Copied " + text : "The clipboard was refused. Select and copy: " + text);
+      });
+    }
+    function usedIn(e) {
+      var el = doc.createElement("div");
+      el.className = "ced-image__used";
+      if (!e.used.length) { el.textContent = "Not used"; return el; }
+      el.appendChild(doc.createTextNode("Used in "));
+      e.used.forEach(function (u, i) {
+        if (i) el.appendChild(doc.createTextNode(i === e.used.length - 1 ? " and " : ", "));
+        if (/^p[0-9a-z]\d{3}$/.test(u)) {
+          var a = doc.createElement("a");
+          a.href = at + BLOG_PAGE + "#" + u;
+          a.textContent = u;
+          el.appendChild(a);
+        } else {
+          el.appendChild(doc.createTextNode(placeWords(u)));
+        }
+      });
+      return el;
+    }
+    /* the words of a row: the name, the facts, and where it is used; for
+       a super deleted image, when it went and the paths that went */
+    function wordsOf(e, gone) {
+      var words = doc.createElement("div");
+      words.className = "ced-image__words";
+      var name = doc.createElement("div");
+      name.className = "ced-image__name";
+      name.textContent = imageName(e);
+      words.appendChild(name);
+      var facts = doc.createElement("div");
+      facts.className = "ced-image__facts";
+      facts.textContent = imageFacts(e).join(" · ");
+      words.appendChild(facts);
+      if (!gone) { words.appendChild(usedIn(e)); return words; }
+      var when = doc.createElement("div");
+      when.className = "ced-image__used";
+      when.textContent = "Super deleted " + momentWords(gone.at);
+      words.appendChild(when);
+      var paths = doc.createElement("div");
+      paths.className = "ced-image__paths";
+      gone.paths.forEach(function (p) {
+        var c = doc.createElement("code");
+        c.textContent = p;
+        paths.appendChild(c);
+      });
+      words.appendChild(paths);
+      return words;
+    }
+    function imageRow(e) {
+      var li = doc.createElement("li");
+      li.className = "ced-image";
+      li.setAttribute("data-base", e.base);
+      var pic = doc.createElement("img");
+      pic.className = "ced-image__pic";
+      pic.alt = "";
+      pic.src = at + I.filesOf(e).sd;
+      li.appendChild(pic);
+      li.appendChild(wordsOf(e, null));
+      var acts = doc.createElement("div");
+      acts.className = "ced-image__acts";
+      var copy = doc.createElement("button");
+      copy.type = "button";
+      copy.className = "ced-tool";
+      copy.textContent = e.num ? "Copy tag" : "Copy path";
+      copy.title = e.num ? "Copy the tag that places this image in a post"
+        : "Copy the path of this image's display copy";
+      copy.addEventListener("click", function () { copyText(e.num ? imageTag(e) : I.filesOf(e).hd); });
+      acts.appendChild(copy);
+      acts.appendChild(iconTool("Super delete", CED_TRASH, function () { superDelete(e); }, "ced-superdel"));
+      li.appendChild(acts);
+      return li;
+    }
+    /* the small copy from deletethese/ when the folder is connected, and
+       an empty tile when it is not: the site no longer serves the file */
+    function gonePic(d) {
+      var tile = doc.createElement("div");
+      tile.className = "ced-image__pic ced-image__pic--none";
+      tile.textContent = "in " + I.DELETE_DIR;
+      var small = d.paths.filter(function (p) { return /_sd\.webp$/.test(p); })[0];
+      if (!repoWriteReady() || !small) return tile;
+      repoReadFile(I.DELETE_DIR + small).then(function (file) {
+        var url = URL.createObjectURL(file);
+        urls.push(url);
+        var pic = doc.createElement("img");
+        pic.className = "ced-image__pic";
+        pic.alt = "";
+        pic.src = url;
+        if (tile.parentNode) tile.parentNode.replaceChild(pic, tile);
+      }, function () {});
+      return tile;
+    }
+    function goneRow(d) {
+      var li = doc.createElement("li");
+      li.className = "ced-image ced-image--gone";
+      li.setAttribute("data-base", d.base);
+      li.appendChild(gonePic(d));
+      li.appendChild(wordsOf(d.entry, d));
+      var acts = doc.createElement("div");
+      acts.className = "ced-image__acts";
+      var back = doc.createElement("button");
+      back.type = "button";
+      back.className = "ced-tool";
+      back.textContent = "Restore";
+      back.title = "Move its files back and put it in the index again";
+      back.addEventListener("click", function () { restoreImage(d); });
+      acts.appendChild(back);
+      li.appendChild(acts);
+      return li;
+    }
+    function draw() {
+      var rec = I.index.get() || { images: [] };
+      var log = I.log.get() || { deleted: [] };
+      var images = rec.images.slice().sort(newestFirst);
+      var unused = images.filter(function (e) { return !e.used.length; });
+      var deleted = log.deleted.filter(function (d) { return !d.restored; }).sort(function (a, b) {
+        return a.at < b.at ? 1 : a.at > b.at ? -1 : 0;
+      });
+      var counts = { all: images.length, unused: unused.length, deleted: deleted.length };
+      pills.forEach(function (p) {
+        p.el.textContent = p.label + " (" + counts[p.key] + ")";
+        p.el.setAttribute("aria-pressed", String(p.key === showing));
+      });
+      list.innerHTML = "";
+      var rows = showing === "all" ? images : showing === "unused" ? unused : deleted;
+      rows.forEach(function (r) { list.appendChild(showing === "deleted" ? goneRow(r) : imageRow(r)); });
+      none.hidden = rows.length > 0;
+      none.textContent = showing === "deleted" ? "Nothing has been super deleted."
+        : showing === "unused" ? "Every image is used somewhere." : "The site holds no images yet.";
+    }
+
+    var shut = false;
+    function done() {
+      if (shut) return;
+      shut = true;
+      imagesOpen = null;
+      dialogDown(done);
+      if (scrimEl) scrimEl.removeEventListener("click", onScrim);
+      scrimDown();
+      urls.forEach(function (u) { URL.revokeObjectURL(u); });
+      if (box.parentNode) box.parentNode.removeChild(box);
+    }
+    /* the scrim closes this box, and only while this box is in front: an
+       ask over it takes the click as it takes the key */
+    function onScrim() { if (dialogStack[dialogStack.length - 1] === done) done(); }
+    close.addEventListener("click", done);
+    xBtn.addEventListener("click", done);
+
+    box.appendChild(headEl);
+    box.appendChild(xBtn);
+    box.appendChild(filters);
+    box.appendChild(body);
+    box.appendChild(note);
+    box.appendChild(btns);
+    gripAdd(box);
+    scrimUp();
+    if (scrimEl) scrimEl.addEventListener("click", onScrim);
+    doc.body.appendChild(box);
+    dialogUp(done);
+    imagesOpen = { el: box, draw: draw, say: say,
+                   show: function (key) { showing = key; draw(); } };
+    draw();
+    say("Reading the record...");
+    Promise.all([I.index.load(), I.log.load()]).then(function () {
+      if (shut) return;
+      draw();
+      say("");
+      close.focus();
+    });
+    return imagesOpen;
+  }
+
+  /* The folder, for Super Delete and Restore: the one in hand, or the
+     decision Save to repo runs. Resolves false when none was taken. */
+  function repoForImages() {
+    if (repoWriteReady()) return Promise.resolve(true);
+    if (!hasPicker()) return Promise.resolve(false);
+    return pickRepoWrite().then(function (handle) { return !!handle; }, function (err) {
+      console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
+      return false;
+    });
+  }
+  function folderName() { return repoWriteDir && repoWriteDir.name ? repoWriteDir.name : ""; }
+
+  /* The index's bytes for a record: stamped over its images and its
+     counter, so an unchanged record keeps its stamp. */
+  function indexBytes(rec) {
+    var I = engine();
+    rec.stamp = stamp(I.index.stampText(rec));
+    return new TextEncoder().encode(I.index.text(rec, rec.stamp));
+  }
+  /* One record written into the folder, and kept as the current one.
+     Resolves the paths written. */
+  function indexWrite(rec) {
+    var I = engine();
+    var files = {};
+    files[I.index.file] = indexBytes(rec);
+    return writeRepo(files).then(function (written) { I.index.set(rec); return written; });
+  }
+  /* The record without one entry. Nothing is written when it was not there. */
+  function indexWithout(base) {
+    return engine().index.load().then(function (was) {
+      var rec = JSON.parse(JSON.stringify(was));
+      var n = rec.images.length;
+      rec.images = rec.images.filter(function (e) { return e.base !== base; });
+      return rec.images.length === n ? [] : indexWrite(rec);
+    });
+  }
+  /* The record with an entry back in it, its uses empty and its added
+     day kept. */
+  function indexWith(entry) {
+    return engine().index.load().then(function (was) {
+      var rec = JSON.parse(JSON.stringify(was));
+      rec.images = rec.images.filter(function (e) { return e.base !== entry.base; });
+      var back = JSON.parse(JSON.stringify(entry));
+      back.used = [];
+      rec.images.push(back);
+      return indexWrite(rec);
+    });
+  }
+  /* The log written into the folder, and kept as the current one. */
+  function logWrite(rec) {
+    var I = engine();
+    rec.stamp = stamp(I.log.stampText(rec));
+    var files = {};
+    files[I.log.file] = new TextEncoder().encode(I.log.text(rec, rec.stamp));
+    return writeRepo(files).then(function (written) { I.log.set(rec); return written; });
+  }
+  function logAppend(entry, paths) {
+    var I = engine();
+    return I.log.load().then(function (was) {
+      var rec = JSON.parse(JSON.stringify(was));
+      rec.deleted.push({ at: I.log.now(), base: entry.base, paths: paths.slice(),
+                         entry: JSON.parse(JSON.stringify(entry)), restored: "" });
+      return logWrite(rec);
+    });
+  }
+  function logRestored(d) {
+    var I = engine();
+    return I.log.load().then(function (was) {
+      var rec = JSON.parse(JSON.stringify(was));
+      rec.deleted.forEach(function (line) {
+        if (line.at === d.at && line.base === d.base && !line.restored) line.restored = I.log.now();
+      });
+      return logWrite(rec);
+    });
+  }
+
+  /* WHERE AN IMAGE IS SHOWN, BY WHO CAN WRITE IT.
+
+     A blog image is only ever in posts, and a site image is only ever in
+     regions: the record's uses are written by two different writers and
+     never mix. So a use is one of three things: a post, a region of this
+     page, and a region of another page.
+
+     Only blog.html writes month files, and only the page a region is on
+     can serialize that region, so a Super Delete takes an image out of
+     the surface it is on and names the other surface when there is one. */
+  function superDeletePlaces(e) {
+    var out = { posts: [], here: [], away: [], pages: [] };
+    (e.used || []).forEach(function (u) {
+      if (/^p[0-9a-z]\d{3}$/.test(u)) { out.posts.push(u); return; }
+      var page = u.slice(0, u.indexOf("#"));
+      if (page === currentPage()) out.here.push(u);
+      else {
+        out.away.push(u);
+        if (out.pages.indexOf(page) === -1) out.pages.push(page);
+      }
+    });
+    return out;
+  }
+  /* This page can write month files: blog.html, with the composer on it. */
+  function blogSurface() {
+    return !onMonthPage() && !!(AMH.publish && AMH.publish.rebuild) &&
+      currentPage() === BLOG_PAGE;
+  }
+  /* The regions of this page that show an image, as the boxes name them. */
+  function regionsShowing(base) {
+    var out = [];
+    gals.forEach(function (g) {
+      if (g.model.some(function (en) { return realEntry(en) && engine().baseOf(en.src) === base; })) out.push(g);
+    });
+    return out;
+  }
+  /* What the ask calls the places on this page. The names come from the
+     record's uses and not from the page, so a record older than the page
+     still names something a reader can read: the name the boxes give a
+     region that is here, and its slug when the region is gone. */
+  function hereNames(places) {
+    return places.here.map(function (u) {
+      var slug = u.slice(u.indexOf("#") + 1);
+      var g = AMH.tool.regionFor(slug);
+      return g ? describeRegion(g).name : slug;
+    });
+  }
+
+  /* Take an image out of every region of this page that shows it, the way
+     the trash on a photo does and without its ask. The change is an
+     unsaved edit until the save that follows, so Revert all undoes it.
+     Returns how many photos went. */
+  function superDeleteHere(base) {
+    var gone = 0;
+    regionsShowing(base).forEach(function (g) {
+      var was = 0;
+      for (var i = g.model.length - 1; i >= 0; i--) {
+        var en = g.model[i];
+        if (!realEntry(en) || engine().baseOf(en.src) !== base) continue;
+        imageRegion.remove(g, i);
+        was++;
+      }
+      if (!was) return;
+      gone += was;
+      exportedClean = false;
+      renderGallery(g, null, 0);
+      pendingSyncGallery(g);
+    });
+    if (gone) refreshDirtyUI();
+    return gone;
+  }
+
+  /* The three writes a Super Delete ends with, once the site has stopped
+     naming the image: the files into deletethese/, the record without the
+     entry, and the log with a line. A file already missing is skipped and
+     named. Resolves { moved, written }. */
+  function superDeleteMove(e) {
+    var I = engine();
+    var paths = I.pathsOf(e);
+    return Promise.all(paths.map(repoHas)).then(function (there) {
+      paths.forEach(function (p, i) {
+        if (!there[i]) console.warn("[site editor] " + p + " is not in the repo folder. It was skipped.");
+      });
+      return repoMove(paths.filter(function (p, i) { return there[i]; }));
+    }).then(function (moved) {
+      return indexWithout(e.base).then(function (wrote) {
+        return logAppend(e, paths).then(function (wrote2) {
+          return { moved: moved, written: wrote.concat(wrote2) };
+        });
+      });
+    });
+  }
+
+  /* SUPER DELETE: the one move that takes an image off the site.
+
+     An image still in use comes out of the places that use it first, so
+     the site never shows a missing picture: the posts are written again
+     by a rebuild without it, and a page's regions lose it and the page is
+     saved. Then the files move.
+
+     Files last, and the site's own writes first. A write that fails after
+     the move would leave a page naming a file the site does not hold,
+     which is the one state this must never produce.
+
+     It needs the repo folder: the zip route cannot move a file. An image
+     the open composer holds as a card is refused, because the composer
+     would publish a tag for a file that is gone. */
+  var superBusy = false;
+  function superDelete(e) {
+    var I = engine();
+    var box = imagesOpen;
+    function say(t) { if (box) box.say(t); }
+    var name = imageName(e);
+    if (superBusy) { say("A super delete is already running."); return Promise.resolve(false); }
+    if (e.num && AMH.publish && AMH.publish.holds && AMH.publish.holds().indexOf(e.num) !== -1) {
+      say("Close the composer first.");
+      return Promise.resolve(false);
+    }
+    if (AMH.publish && AMH.publish.busy && AMH.publish.busy()) {
+      say("Wait for the publish to finish.");
+      return Promise.resolve(false);
+    }
+    /* Each surface is asked for on the surface itself. The refusal names
+       the page to open, and nothing has happened yet. */
+    var places = superDeletePlaces(e);
+    if (places.posts.length && !blogSurface()) {
+      say(name + " is also used on " + BLOG_PAGE + ". Open " + BLOG_PAGE +
+        " to take it out there first.");
+      return Promise.resolve(false);
+    }
+    if (places.away.length) {
+      say(name + " is also used on " + places.pages[0] + ". Open " + places.pages[0] +
+        " to take it out there first.");
+      return Promise.resolve(false);
+    }
+    return repoForImages().then(function (got) {
+      if (!got) { say("Super delete needs the repo folder."); return false; }
+      var lines = ["Its three files move into " + I.DELETE_DIR +
+        ", and it leaves the index. Nothing on the site shows it after this."];
+      if (places.posts.length) {
+        lines.push("It is taken out of " + joinWords(places.posts) + ", and " +
+          (places.posts.length === 1 ? "that post is" : "those posts are") + " written again.");
+      } else if (places.here.length) {
+        var shown = regionsShowing(e.base);
+        lines.push("It is taken out of " + joinWords(hereNames(places)) + ", and this page is saved.");
+        /* a carousel left with no photographs says what it falls back to */
+        shown.forEach(function (g) {
+          if (g.model.filter(realEntry).length > 1) return;
+          var note = g.kind.lastImageNote ? g.kind.lastImageNote(g).trim() : "";
+          if (note && lines.indexOf(note) === -1) lines.push(note);
+        });
+        if (changedPages().indexOf(currentPage()) !== -1) {
+          lines.push("Your unsaved changes on this page are saved with it.");
+        }
+      }
+      lines.push("Commit and push, then empty " + I.DELETE_DIR + " when you are sure.");
+      return askBox({
+        tag: "SUPER DELETE", title: "Super delete " + name + "?", danger: true,
+        thumb: (onMonthPage() ? "../" : "") + I.filesOf(e).sd, code: e.base,
+        lines: lines, yes: "Super delete"
+      }).then(function (yes) {
+        if (!yes) return false;
+        superBusy = true;
+        /* THE POSTS, THROUGH A REBUILD.
+           The rebuild writes every month file without the image, and the
+           files move between its write and its Done step, so one box says
+           the posts were written and the files were moved. */
+        if (places.posts.length) {
+          say("Rebuilding " + BLOG_PAGE + " without " + name + "...");
+          return AMH.publish.rebuild({
+            without: e.num,
+            after: function (rec) {
+              if (!rec.wrote || !rec.wrote.length) return null;
+              return superDeleteMove(e).then(function (out) {
+                rec.superDeleted = { name: name, moved: out.moved, wrote: out.written };
+              });
+            }
+          }).then(function (rec) {
+            if (!rec || !rec.wrote || !rec.wrote.length) {
+              say("Nothing was written, so nothing moved.");
+              return false;
+            }
+            if (box) { box.show("deleted"); box.say("Super deleted " + name + "."); }
+            return true;
+          });
+        }
+        /* THE REGIONS, THEN THE SAVE.
+           A record older than the page can name a region that no longer
+           shows the image. Then there is nothing to take out and nothing
+           to save, and the files move as they do for an image nothing
+           uses. */
+        if (places.here.length && superDeleteHere(e.base)) {
+          say("Saving this page without " + name + "...");
+          return saveToFolder().then(function (out) {
+            if (out.fellBack || !out.wrote.length) {
+              say(out.fellBack || "The page was not written, so nothing moved.");
+              return false;
+            }
+            return superDeleteMove(e).then(function (res) {
+              /* the save and the delete both write the record, so the box
+                 names each file once */
+              var written = out.wrote.concat(res.written).filter(function (p, i, all) {
+                return all.indexOf(p) === i;
+              }).sort();
+              savedBox(written, folderName(), res.moved, {
+                title: "Super deleted " + name,
+                lead: name + " left this page and the index. " + wereWords(written.length) +
+                  " written into " + (folderName() || "the repo folder") + ":",
+                moved: wereWords(res.moved.length) + " moved into " + I.DELETE_DIR +
+                  ", to empty when you are sure:"
+              });
+              if (box) { box.show("deleted"); box.say("Super deleted " + name + "."); }
+              return true;
+            });
+          });
+        }
+        /* NOTHING USES IT: the files, the record and the log alone. */
+        say("Super deleting " + name + "...");
+        return superDeleteMove(e).then(function (res) {
+          savedBox(res.written, folderName(), res.moved, {
+            title: "Super deleted " + name,
+            lead: name + " left the index. " + wereWords(res.written.length) +
+              " written into " + (folderName() || "the repo folder") + ":",
+            moved: wereWords(res.moved.length) + " moved into " + I.DELETE_DIR +
+              ", to empty when you are sure:"
+          });
+          if (box) { box.show("deleted"); box.say("Super deleted " + name + "."); }
+          return true;
+        });
+      });
+    }).then(function (done) {
+      superBusy = false;
+      return done;
+    }, function (err) {
+      superBusy = false;
+      var why = err && err.message ? err.message : String(err);
+      console.warn("[site editor] super delete: " + why);
+      say(why);
+      return false;
+    });
+  }
+
+  /* RESTORE: a Super Delete undone while the files are in deletethese/.
+     Each source and each destination is checked first, so a missing file
+     or a file already at its place stops the move before it starts, with
+     the file named. The entry goes back with its uses empty; placing the
+     image is the author's, with Copy tag or a photo box. */
+  function restoreImage(d) {
+    var I = engine();
+    var box = imagesOpen;
+    function say(t) { if (box) box.say(t); }
+    var name = imageName(d.entry);
+    var paths = d.paths.slice();
+    return repoForImages().then(function (got) {
+      if (!got) { say("Restore needs the repo folder."); return false; }
+      return Promise.all(paths.map(function (p) { return repoHas(I.DELETE_DIR + p); })).then(function (there) {
+        var missing = paths.filter(function (p, i) { return !there[i]; });
+        if (missing.length) {
+          say(missing[0] + " is not in " + I.DELETE_DIR + ". Add the image again instead.");
+          return false;
+        }
+        return Promise.all(paths.map(repoHas)).then(function (taken) {
+          var blocked = paths.filter(function (p, i) { return taken[i]; });
+          if (blocked.length) {
+            say(blocked[0] + " is already on the site. Nothing was moved.");
+            return false;
+          }
+          say("Restoring " + name + "...");
+          return repoMoveBack(paths).then(function (moved) {
+            if (moved.length !== paths.length) {
+              say(paths[moved.length] + " could not be moved back. See the console.");
+              return false;
+            }
+            return indexWith(d.entry).then(function (wrote) {
+              return logRestored(d).then(function (wrote2) {
+                var written = wrote.concat(wrote2);
+                savedBox(written, folderName(), moved, {
+                  title: "Restored " + name,
+                  lead: name + " is in the index again, used nowhere yet. " + wereWords(written.length) +
+                    " written into " + (folderName() || "the repo folder") + ":",
+                  moved: wereWords(moved.length) + " moved back from " + I.DELETE_DIR + ":"
+                });
+                if (box) { box.show("unused"); box.say("Restored " + name + ". Copy its tag or its path to place it."); }
+                return true;
+              });
+            });
+          });
+        });
+      });
+    }).then(null, function (err) {
+      var why = err && err.message ? err.message : String(err);
+      console.warn("[site editor] restore: " + why);
+      say(why);
+      return false;
     });
   }
 
@@ -2957,6 +3680,10 @@
       rebuildBtn = footBtn("Rebuild", "", function () { api.blog.rebuild(); });
       armRebuildSay(rebuildBtn);
     }
+    /* Images is on every page, because the record it shows is the site's
+       and not a page's. It sits before New post: the box is about what
+       the site holds, and the composer is about adding to it. */
+    footBtn("Images", "", function () { api.images(); });
     footBtn("New post", "", function () { api.blog(); });
     footBtn("Revert all", "", function () { api.revertAll(); });
     footBtn("Exit", "", function () { api(); });
@@ -7452,91 +8179,71 @@
     });
   }
 
-  /* One text file of the repo folder. Rejects when it cannot be read. */
-  function repoReadText(path) {
+  /* One file of the repo folder, as a File. Rejects when it is not there. */
+  function repoReadFile(path) {
     var parts = path.split("/");
     var name = parts.pop();
     return repoDirAt(parts)
       .then(function (d) { return d.getFileHandle(name); })
-      .then(function (fh) { return fh.getFile(); })
-      .then(function (file) { return file.text(); });
+      .then(function (fh) { return fh.getFile(); });
+  }
+  /* One text file of the repo folder. Rejects when it cannot be read. */
+  function repoReadText(path) {
+    return repoReadFile(path).then(function (file) { return file.text(); });
+  }
+  /* Whether the folder holds a file at a path. */
+  function repoHas(path) {
+    return repoReadFile(path).then(function () { return true; }, function () { return false; });
   }
 
-  /* Move files into deletethese/, each at its own path. A move is a copy
-     and then a removal: a folder handle has no rename that crosses folders.
-     The first failure stops the run and names its file, so the folder is
-     left in a state that can be described. Resolves the paths moved. */
-  function repoMove(paths) {
+  /* Move files one at a time, each from fromOf(path) to toOf(path). A
+     move is a copy and then a removal: a folder handle has no rename that
+     crosses folders. The first failure stops the run and names its file,
+     so the folder is left in a state that can be described. Resolves the
+     paths moved. */
+  function repoMoveEach(paths, fromOf, toOf) {
     var moved = [];
     return (paths || []).reduce(function (chain, path) {
       return chain.then(function (stopped) {
         if (stopped) return true;
-        var parts = path.split("/");
+        var parts = fromOf(path).split("/");
         var name = parts.pop();
         return repoDirAt(parts).then(function (d) {
           return d.getFileHandle(name)
             .then(function (fh) { return fh.getFile(); })
             .then(function (file) { return file.arrayBuffer(); })
-            .then(function (buf) { return writeOne(engine().DELETE_DIR + path, new Uint8Array(buf)); })
+            .then(function (buf) { return writeOne(toOf(path), new Uint8Array(buf)); })
             .then(function () { return d.removeEntry(name); });
         }).then(function () {
           moved.push(path);
           return false;
         }, function (err) {
-          console.warn("[site editor] " + path + " could not be moved into " +
-            engine().DELETE_DIR + " (" + (err && err.message ? err.message : err) +
-            "). It is still where it was.");
+          console.warn("[site editor] " + fromOf(path) + " could not be moved to " + toOf(path) +
+            " (" + (err && err.message ? err.message : err) + "). It is still where it was.");
           return true;
         });
       });
     }, Promise.resolve(false)).then(function () { return moved; });
   }
-
-  /* THE IMAGE FILES NOTHING NAMES, MOVED ASIDE.
-
-     After a save, the folder is read back: every file in img/work/ and in
-     blog/, and every managed page and month file that could name one. A
-     file the image engine named that no page names any more is moved into
-     deletethese/. A file named any other way is never touched.
-
-     A read that fails cancels the scan for this save, with a console line,
-     and moves nothing: a page that could not be read may be the one that
-     names a file. Resolves the paths moved, and never rejects, because the
-     save itself has already succeeded. */
-  function moveOrphans() {
-    if (!AMH.images) return Promise.resolve([]);
-    var listing = [];
-    return Promise.all([repoList("img/work"), repoList("blog")]).then(function (both) {
-      listing = both[0].concat(both[1]);
-      var pages = MANAGED_PAGES.map(function (pg) { return pg.path; })
-        .concat(both[1].filter(function (p) { return /\.html$/.test(p); }));
-      return Promise.all(pages.map(repoReadText));
-    }).then(function (texts) {
-      return repoMove(engine().orphans(listing, texts));
-    }).then(null, function (err) {
-      console.warn("[site editor] the scan for image files nothing uses was skipped " +
-        "for this save (" + (err && err.message ? err.message : err) + "). Nothing was moved.");
-      return [];
-    });
+  /* Files into deletethese/, each at its own path. */
+  function repoMove(paths) {
+    var to = engine().DELETE_DIR;
+    return repoMoveEach(paths, function (p) { return p; }, function (p) { return to + p; });
+  }
+  /* The reverse: each file from deletethese/<path> back to <path>. */
+  function repoMoveBack(paths) {
+    var from = engine().DELETE_DIR;
+    return repoMoveEach(paths, function (p) { return from + p; }, function (p) { return p; });
   }
 
-  /* The image files the pages being written stop naming, found from the
-     pages themselves, before and after, so it needs no folder. A route
-     that cannot move a file names them in the console instead. Another
-     page may still name one, which is why the words say "these pages". */
-  function sayDropped(built) {
-    if (!AMH.images) return;
-    var listing = [], texts = [];
-    built.forEach(function (b) {
-      listing = listing.concat(engine().named(b.before || ""));
-      texts.push(b.text);
-    });
-    var gone = engine().orphans(listing, texts);
-    if (!gone.length) return;
-    console.info("[site editor] these pages no longer name " + gone.length +
-      " image file(s):\n  " + gone.join("\n  ") + "\n\nSave to repo moves such files into " +
-      engine().DELETE_DIR + ". From a download, move them there yourself before you commit.");
-  }
+  /* A FILE THE ENGINE WROTE STAYS.
+
+     No save moves an image file. An image a page stops using keeps its
+     three files, so a tag or a photo box can bring it back with no upload.
+     The one move out of the repo is Super Delete, in the Images box, and
+     the engine's finder for files nothing uses (AMH.images.unused) is
+     there for that box. */
+
   /* THE FOLDER DECISION, WRITTEN ONCE.
 
      The same question is asked in two places: a box of its own, and
@@ -8144,9 +8851,10 @@
   AMH.tool.repoRecall = repoRecall;
   AMH.tool.repoForget = repoForget;
   AMH.tool.repoVerify = repoVerify;
-  /* The image files nothing names any more, moved into deletethese/. The
-     blog's publish runs it after a folder write, the way a site save does. */
-  AMH.tool.moveOrphans = moveOrphans;
+  /* Files the repo holds, moved into deletethese/, each at its own path.
+     The blog's publish moves what a publish itself leaves behind: a month
+     file it emptied, and the old-date files of a post it moved. */
+  AMH.tool.moveFiles = repoMove;
   AMH.tool.takeFiles = takeFiles;
   AMH.tool.takeFolder = takeFolder;
   AMH.tool.fileState = function (path) {
@@ -8571,18 +9279,65 @@
     return files;
   }
 
+  /* THE IMAGE INDEX, WRITTEN WITH A SAVE.
+
+     images.js records every image the site holds. A save adds an entry
+     for each held photo it writes, and records where each page it writes
+     shows the site's images, region by region. The file joins the bundle
+     when an entry or a usage changed. Resolves { files, rec }: the file
+     to add, or none, and the record the write leaves, which the caller
+     sets once the write is done. */
+  function dayStamp() {
+    var d = new Date();
+    return String(d.getFullYear()).slice(2) + ("0" + (d.getMonth() + 1)).slice(-2) + ("0" + d.getDate()).slice(-2);
+  }
+  function indexFiles(built, held) {
+    var I = engine();
+    if (!I.index) return Promise.resolve({ files: {}, rec: null });
+    return I.index.load().then(function (was) {
+      var rec = JSON.parse(JSON.stringify(was));
+      Object.keys(held || {}).forEach(function (path) {
+        var base = I.baseOf(path);
+        var photo = I.photo(base);
+        if (!photo) return;
+        var had = null;
+        rec.images.forEach(function (e) { if (e.base === base) had = e; });
+        var entry = I.index.fromPhoto(photo, base, had ? had.added : dayStamp());
+        if (had) { entry.used = had.used; rec.images[rec.images.indexOf(had)] = entry; }
+        else rec.images.push(entry);
+      });
+      built.forEach(function (b) {
+        var uses = I.usageOf(b.text, b.path);
+        rec.images.forEach(function (e) {
+          e.used = e.used.filter(function (u) { return u.indexOf(b.path + "#") !== 0; })
+            .concat(uses[e.base] || []);
+        });
+      });
+      var before = I.index.stampText(was), after = I.index.stampText(rec);
+      /* unchanged, or nothing to record on a site with no file yet */
+      if (before === after && (was.stamp || !rec.images.length)) return { files: {}, rec: null };
+      var files = {};
+      files[I.index.file] = indexBytes(rec);
+      return { files: files, rec: rec };
+    });
+  }
+
   /* A page on its own downloads as itself, so the common case is
      unchanged. Anything more travels as one zip laid out the way the repo
-     is, because the pages and their photos were edited together. */
+     is, because the pages and their photos were edited together. The
+     index rides in a zip only: a page alone stays a page, and the index
+     waits for the next save that writes into the folder. */
   function downloadBundle(built, files) {
     var names = Object.keys(files).sort();
-    if (names.length === 1 && built.length === 1) {
+    var pages = names.filter(function (n) { return n !== engine().index.file; });
+    if (pages.length === 1 && built.length === 1) {
       downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
-      return;
+      return false;
     }
     downloadFile("publish.zip", zipStore(names.map(function (name) {
       return { name: name, bytes: files[name] };
     })));
+    return true;
   }
 
   function downloadFile(name, data, type) {
@@ -8657,6 +9412,9 @@
     active = !active;
     if (active) {
       buildUI();
+      /* the image index, for the boxes, the composer and the save: it is
+         loaded here and nowhere sooner, so a reader never fetches it */
+      if (AMH.images && AMH.images.index) AMH.images.index.load();
       /* the blog stream renders an Edit button on each post while this is set */
       /* AMH.tool.editPost(id)
          blog.js renders an Edit button on each streamed post while this is
@@ -8847,13 +9605,18 @@
     Promise.all(pages.map(buildPage))
       .then(function (built) {
         return photoFiles(pages).then(function (held) {
-          var files = bundleFiles(built, held);
-          downloadBundle(built, files);
-          exportedClean = true;
-          sayDropped(built);
-          console.info("[site editor] exported " + Object.keys(files).sort().join(", ") +
-            " with " + edited.length + " text region(s) and " + editedGals.length +
-            " gallery/ies spliced in.");
+          return indexFiles(built, held).then(function (ix) {
+            var files = bundleFiles(built, held);
+            Object.keys(ix.files).forEach(function (n) { files[n] = ix.files[n]; });
+            var zipped = downloadBundle(built, files);
+            /* a zip carried the index; a page alone did not, and the record
+               stays what the file holds */
+            if (zipped && ix.rec) engine().index.set(ix.rec);
+            exportedClean = true;
+            console.info("[site editor] exported " + Object.keys(files).sort().join(", ") +
+              " with " + edited.length + " text region(s) and " + editedGals.length +
+              " gallery/ies spliced in.");
+          });
         });
       })
       .catch(function (err) {
@@ -8886,8 +9649,8 @@
      img/work/ comes before index.html: a failed photo stops the save
      before a page can point at a file that is not there.
 
-     After a folder write, the image files nothing names any more move into
-     deletethese/. See moveOrphans.
+     A folder write moves no file. An image the page stops using keeps
+     its files, and the one move out of the repo is Super Delete.
      ------------------------------------------------------------ */
 
   /* What the save did, for the caller that draws it. Resolves with
@@ -8901,15 +9664,19 @@
     if (!pages.length) return Promise.reject(new Error("no edits to save."));
     return Promise.all(pages.map(buildPage)).then(function (built) {
       return photoFiles(pages).then(function (held) {
-        return { built: built, files: bundleFiles(built, held) };
+        return indexFiles(built, held).then(function (ix) {
+          var files = bundleFiles(built, held);
+          Object.keys(ix.files).forEach(function (n) { files[n] = ix.files[n]; });
+          return { built: built, files: files, ix: ix };
+        });
       });
     }).then(function (bundle) {
-      var built = bundle.built, files = bundle.files;
+      var built = bundle.built, files = bundle.files, ix = bundle.ix;
       /* the download, for a browser with no picker and for a refused folder */
       function asZip(why) {
-        downloadBundle(built, files);
+        var zipped = downloadBundle(built, files);
         AMH.tool.markExported();
-        sayDropped(built);
+        if (zipped && ix.rec) engine().index.set(ix.rec);
         return { wrote: [], moved: [], fellBack: why };
       }
       if (!hasPicker()) {
@@ -8924,16 +9691,13 @@
         return writeRepo(files).then(function (written) {
           AMH.tool.savedPages(written);
           if (AMH.images) AMH.images.saved(written);
-          return moveOrphans().then(function (moved) {
-            console.info("[site editor] written into the repo folder:\n  " +
-              written.join("\n  ") +
-              (moved.length ? "\n\nmoved into " + engine().DELETE_DIR + ", because nothing " +
-                "names them any more:\n  " + moved.join("\n  ") : "") +
-              "\n\nThe files are on disk and not live yet: the commit and the push " +
-              "are still yours to make.");
-            return { wrote: written, moved: moved, fellBack: null,
-                     folder: repoWriteDir && repoWriteDir.name ? repoWriteDir.name : "" };
-          });
+          if (ix.rec) engine().index.set(ix.rec);
+          console.info("[site editor] written into the repo folder:\n  " +
+            written.join("\n  ") +
+            "\n\nThe files are on disk and not live yet: the commit and the push " +
+            "are still yours to make.");
+          return { wrote: written, moved: [], fellBack: null,
+                   folder: repoWriteDir && repoWriteDir.name ? repoWriteDir.name : "" };
         });
       }, function (err) {
         var why = (err && err.message ? err.message : String(err));
@@ -8951,6 +9715,13 @@
       console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
     });
     return "save started";
+  };
+
+  /* edit.images() - every image the site holds, in one box */
+  api.images = function () {
+    injectStyles();
+    imagesBox();
+    return "images box open";
   };
 
   /* The composer is publish.js, and it needs the manifest and the reading
@@ -9010,7 +9781,10 @@
   /* re-render all month files with current chrome */
   api.blog.rebuild = function () {
     if (!blogHere()) return BLOG_ELSEWHERE;
-    return AMH.publish.rebuild();
+    /* the engine answers with the record its bundle left, which is for the
+       Images box and not for a person reading the console */
+    AMH.publish.rebuild();
+    return "rebuilding: choose where the bundle should land";
   };
   /* edit.blog.trace(true) prints a line for every read, splice and write of
      the next publish. The wizard's own steps are printed either way. */
@@ -9025,6 +9799,7 @@
       "edit.list()       table of all editable regions\n" +
       "edit.export()     download this page with your edits\n" +
       "edit.save()       write every changed page into the repo folder\n" +
+      "edit.images()     every image the site holds: copy a tag or a path, super delete, restore\n" +
       "edit.blog()       open the blog composer (publishes a zip bundle)\n" +
       "edit.blog.edit(id) edit a published post (also: panel/stream buttons)\n" +
       "edit.blog.rebuild() re-render all month files with current chrome\n" +

@@ -35,6 +35,13 @@
    Display True Pixel Size is the second switch. It shows the original at
    its own size, never enlarged, and a small image keeps hard pixel edges.
    A GIF and a small PNG start with it on.
+
+   images.js, at the repo root, is the one record of every image the site
+   holds, either scheme: what each is, when it was added, and where it is
+   used. This engine reads it and gives its text; tool.js and publish.js
+   write the file. It loads on demand, only for the editor, so a reader
+   never fetches it. superdeleted.js, beside it, is the log of every
+   Super Delete, and it loads the same way.
    ============================================================ */
 /* ==========================================================
    1. SETUP
@@ -100,10 +107,11 @@
      A blog display copy named .png is an image from before the engine.
      That is the one reason the blog's rule still takes .png. */
   var SITE_NAME = /^img\/work\/[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-z]{6}(?:_sd\.webp|\.jpg|_original\.(?:jpg|png|webp|gif))$/;
-  var BLOG_NAME = /^blog\/\d{6}_img\d{4}(?:_sd\.webp|\.(?:jpg|png)|_original\.(?:jpg|png|webp|gif))$/;
+  var BLOG_NAME = /^blog\/\d{6}_img[0-9a-z]\d{3}(?:_sd\.webp|\.(?:jpg|png)|_original\.(?:jpg|png|webp|gif))$/;
   /* Either scheme, found inside a page's text. Each match is tested
-     against the two rules above before it counts. */
-  var NAMED_IN_TEXT = /(?:img\/work\/[a-z0-9-]+|blog\/\d{6}_img\d{4})(?:_sd\.webp|_original\.(?:jpg|png|webp|gif)|\.(?:jpg|png))/g;
+     against the two rules above before it counts. A blog number's first
+     place counts in base 36, so the ten-thousandth image is imga000. */
+  var NAMED_IN_TEXT = /(?:img\/work\/[a-z0-9-]+|blog\/\d{6}_img[0-9a-z]\d{3})(?:_sd\.webp|_original\.(?:jpg|png|webp|gif)|\.(?:jpg|png))/g;
 
   /* A JPG has no transparent pixel, so every drawn copy is painted on the
      page's own ground. The small copy is painted too: a browser swaps one
@@ -983,6 +991,225 @@
     return String(path || "").replace(/(?:_sd|_original)?\.[a-z0-9]+$/i, "");
   }
 
+  /* ---------------- the image index ----------------
+
+     One record of every image the site holds, in images.js:
+
+       window.AMH_IMAGES = { v: 1, stamp, nextImg, images: [ entry ] }
+
+     An entry: base, the three files' base path; type, ow, oh, bytes and
+     animated, the original's facts; added, the day it was first written,
+     YYMMDD; used, where it is shown, "pNNNN" for a post and "page#slug"
+     for a region, as of the last write of that post or page. A blog image
+     adds num, date, uhd and truesize, which its manifest line used to
+     carry. nextImg is the blog's counter, as an id, and never goes down.
+
+     It loads by a script tag and not a fetch, so a page opened from disk
+     reads it, and only when something asks: the editor turning on, the
+     composer, a save or a publish. A reader never loads it. */
+  var INDEX_FILE = "images.js";
+  var indexRec = null;        /* the record, once loaded */
+  var indexLoading = null;    /* the one load, cached as its promise */
+
+  function indexEmpty() { return { v: 1, stamp: "", nextImg: "0001", images: [] }; }
+  /* the record with every field present and typed, so a reader never
+     asks whether a field is there */
+  function indexNormal(rec) {
+    var out = indexEmpty();
+    if (rec && typeof rec === "object") {
+      out.stamp = String(rec.stamp || "");
+      out.nextImg = String(rec.nextImg || "0001");
+      out.images = (rec.images || []).map(function (e) {
+        var n = { base: String(e.base || ""), type: String(e.type || ""), ow: +e.ow || 0, oh: +e.oh || 0,
+                  bytes: +e.bytes || 0, animated: !!e.animated, added: String(e.added || ""),
+                  used: (e.used || []).map(String) };
+        if (e.num) { n.num = String(e.num); n.date = String(e.date || ""); n.uhd = !!e.uhd; n.truesize = !!e.truesize; }
+        return n;
+      });
+    }
+    return out;
+  }
+  /* A generated file, loaded by a script tag: its one statement sets a
+     window global, read once the tag has run. A page from disk can load a
+     tag where it cannot fetch. Resolves false when the site has no such
+     file yet.
+
+     A month page sits in blog/, one step below the file. Over HTTP the
+     address carries the moment, so a browser never answers with a cached
+     copy: the counter in an old copy would number a photo twice. From
+     disk there is no cache to fool, and a query would be a different file
+     name to some systems. */
+  function loadTag(file) {
+    return new Promise(function (resolve) {
+      var at = doc.body && doc.body.classList.contains("blog-month") ? "../" : "";
+      var el = doc.createElement("script");
+      el.src = at + file + (location.protocol === "file:" ? "" : "?t=" + Date.now());
+      el.onload = function () { resolve(true); };
+      el.onerror = function () { resolve(false); };
+      doc.head.appendChild(el);
+    });
+  }
+  function indexLoad() {
+    if (!indexLoading) {
+      indexLoading = (window.AMH_IMAGES ? Promise.resolve(true) : loadTag(INDEX_FILE)).then(function (found) {
+        if (!found) console.info("[images] no " + INDEX_FILE + " on this site yet. The next save or publish writes it.");
+        indexRec = indexNormal(window.AMH_IMAGES);
+      });
+    }
+    /* the record as it stands, and not as the load found it: a write since
+       then replaced it, and the next write builds on that one */
+    return indexLoading.then(function () { return indexRec; });
+  }
+  function indexGet() { return indexRec; }
+  /* the record a write leaves, kept as the current one so the next write
+     builds on it */
+  function indexSet(rec) { indexRec = indexNormal(rec); window.AMH_IMAGES = indexRec; return indexRec; }
+  function indexEntry(base) {
+    var hit = null;
+    (indexRec ? indexRec.images : []).forEach(function (e) { if (e.base === base) hit = e; });
+    return hit;
+  }
+  function indexBlog(num) {
+    var hit = null;
+    (indexRec ? indexRec.images : []).forEach(function (e) { if (e.num === num) hit = e; });
+    return hit;
+  }
+  /* the { num: entry } map the blog's renderer and composer take */
+  function indexBlogMap() {
+    var out = {};
+    (indexRec ? indexRec.images : []).forEach(function (e) { if (e.num) out[e.num] = e; });
+    return out;
+  }
+  /* an entry for a photo the engine made, at its base path */
+  function indexFromPhoto(photo, base, added) {
+    return { base: base, type: photo.type, ow: photo.ow, oh: photo.oh, bytes: photo.bytes,
+             animated: !!photo.animated, added: added, used: [] };
+  }
+  /* The text a stamp is taken over: the images and the counter, and not
+     the date or the stamp itself, so an unchanged record keeps its stamp
+     and an unchanged file makes no diff. */
+  function indexStampText(rec) {
+    var r = indexNormal(rec);
+    return r.nextImg + "\n" + r.images.map(function (e) { return JSON.stringify(e); }).join("\n");
+  }
+  /* The first line of a generated file: the day, the stamp and the rule. */
+  function genHeader(stamp) {
+    var day = new Date();
+    var when = day.getFullYear() + "-" + ("0" + (day.getMonth() + 1)).slice(-2) + "-" + ("0" + day.getDate()).slice(-2);
+    return "/* GENERATED by the site editor on " + when + "; stamp:" + stamp +
+      "; hand edits are overwritten */\n";
+  }
+  /* The file's text: a header, then one statement with one image a line,
+     so a diff moves one line when one image changes. */
+  function indexText(rec, stamp) {
+    var r = indexNormal(rec);
+    r.stamp = String(stamp || "");
+    var lines = r.images.map(function (e) { return JSON.stringify(e); });
+    return genHeader(r.stamp) +
+      "window.AMH_IMAGES = {\"v\":1,\"stamp\":" + JSON.stringify(r.stamp) +
+      ",\"nextImg\":" + JSON.stringify(r.nextImg) + ",\"images\":[" +
+      (lines.length ? "\n" + lines.join(",\n") + "\n" : "") + "]};\n";
+  }
+  /* An entry's three files, keyed as a photo's are, and as the paths in
+     the order the renditions are made. The display copy is always a JPG,
+     and the original keeps its type. */
+  function filesOf(entry) {
+    var out = {};
+    RENDITIONS.forEach(function (r) {
+      out[r.key] = entry.base + r.suffix + "." + (r.type ? TYPES[r.type] : entry.type);
+    });
+    return out;
+  }
+  function pathsOf(entry) {
+    var files = filesOf(entry);
+    return RENDITIONS.map(function (r) { return files[r.key]; });
+  }
+  /* Where a page's regions show the site's images: { base: ["path#slug"] }.
+     Read from the page's text, region by region, so a page that is not on
+     screen can answer. An image inside a nested region is the innermost
+     region's. Only the site scheme counts: a blog image's use is its post,
+     which the publish records, and the stream on blog.html is a copy. */
+  function usageOf(pageText, path) {
+    var text = String(pageText || "");
+    var regions = [];
+    var re = /<!--\[edit:([\w-]+)\]-->([\s\S]*?)<!--\[\/edit:\1\]-->/g, m;
+    while ((m = re.exec(text))) {
+      regions.push({ slug: m[1], start: m.index, end: m.index + m[0].length });
+      re.lastIndex = m.index + 1;   /* a region inside this one starts inside it */
+    }
+    var out = {};
+    var im = /<img\b[^>]*?\bdata-original="([^"]*)"/g, i;
+    while ((i = im.exec(text))) {
+      var base = baseOf(i[1]);
+      if (base.indexOf(SITE_DIR) !== 0) continue;
+      var best = null;
+      regions.forEach(function (r) {
+        if (i.index >= r.start && i.index < r.end && (!best || r.end - r.start < best.end - best.start)) best = r;
+      });
+      if (!best) continue;
+      var where = path + "#" + best.slug;
+      if (!out[base]) out[base] = [];
+      if (out[base].indexOf(where) === -1) out[base].push(where);
+    }
+    return out;
+  }
+
+  /* THE LOG OF SUPER DELETES.
+
+     superdeleted.js, at the repo root, is committed with the site. It
+     holds one line for each image Super Delete moved out: when, the base,
+     the three paths, the entry as it was, and when it was restored, or
+     "". A line is appended and never removed, so the log is the history,
+     and each line names the files to purge from git history if that is
+     ever wanted. Restore reads the entry back from it. It loads as the
+     index does, on demand, by a script tag. */
+  var LOG_FILE = "superdeleted.js";
+  var logRec = null;
+  var logLoading = null;
+
+  function logEmpty() { return { v: 1, stamp: "", deleted: [] }; }
+  function logNormal(rec) {
+    var out = logEmpty();
+    if (rec && typeof rec === "object") {
+      out.stamp = String(rec.stamp || "");
+      out.deleted = (rec.deleted || []).map(function (d) {
+        return { at: String(d.at || ""), base: String(d.base || ""),
+                 paths: (d.paths || []).map(String),
+                 entry: indexNormal({ images: [d.entry || {}] }).images[0],
+                 restored: String(d.restored || "") };
+      });
+    }
+    return out;
+  }
+  function logLoad() {
+    if (!logLoading) {
+      logLoading = (window.AMH_SUPERDELETED ? Promise.resolve(true) : loadTag(LOG_FILE)).then(function () {
+        logRec = logNormal(window.AMH_SUPERDELETED);
+      });
+    }
+    return logLoading.then(function () { return logRec; });
+  }
+  function logGet() { return logRec; }
+  function logSet(rec) { logRec = logNormal(rec); window.AMH_SUPERDELETED = logRec; return logRec; }
+  /* the moment a line records: local time, YYMMDD-HHMMSS */
+  function logNow() {
+    var d = new Date();
+    function two(n) { return ("0" + n).slice(-2); }
+    return String(d.getFullYear()).slice(2) + two(d.getMonth() + 1) + two(d.getDate()) + "-" +
+      two(d.getHours()) + two(d.getMinutes()) + two(d.getSeconds());
+  }
+  function logStampText(rec) {
+    return logNormal(rec).deleted.map(function (d) { return JSON.stringify(d); }).join("\n");
+  }
+  function logText(rec, stamp) {
+    var r = logNormal(rec);
+    r.stamp = String(stamp || "");
+    var lines = r.deleted.map(function (d) { return JSON.stringify(d); });
+    return genHeader(r.stamp) +
+      "window.AMH_SUPERDELETED = {\"v\":1,\"stamp\":" + JSON.stringify(r.stamp) + ",\"deleted\":[" +
+      (lines.length ? "\n" + lines.join(",\n") + "\n" : "") + "]};\n";
+  }
+
   /* ==========================================================
      6. CLEANUP
      ========================================================== */
@@ -1029,14 +1256,15 @@
     return Object.keys(seen).sort();
   }
 
-  /* The files nothing uses any more.
+  /* The files nothing uses.
 
      listing is every path to consider, and texts is every page and month
-     file that could point at one. A path is an orphan when its name is one
+     file that could point at one. A path is unused when its name is one
      the engine gives and no text contains it. A file with any other name is
-     never an orphan, whatever its folder: that rule is the reason the names
-     carry a hash. */
-  function orphans(listing, texts) {
+     never counted, whatever its folder: that rule is the reason the names
+     carry a hash. This finds and never moves: a file the engine wrote stays
+     until Super Delete moves it. */
+  function unused(listing, texts) {
     texts = texts || [];
     return (listing || []).filter(function (path) {
       if (!isEngineName(path)) return false;
@@ -1081,8 +1309,36 @@
     preview: previewOf,        /* the same, on blob: URLs */
     baseOf: baseOf,            /* a file path, as its photo's base path */
     copySize: copySize,        /* the size a copy is drawn at, from the original's */
+    /* the image index: images.js, loaded on demand and written by a save
+       or a publish. See the index above for the record's shape. */
+    index: {
+      file: INDEX_FILE,
+      load: indexLoad,         /* the record, as a promise; loads the file once */
+      get: indexGet,           /* the record, or null before load() settled */
+      set: indexSet,           /* the record a write left */
+      entry: indexEntry,       /* one entry by base path */
+      blog: indexBlog,         /* one blog entry by number */
+      blogMap: indexBlogMap,   /* { num: entry }, the map the blog takes */
+      fromPhoto: indexFromPhoto,
+      text: indexText,         /* the file's text, for a stamp */
+      stampText: indexStampText
+    },
+    /* the log of super deletes: superdeleted.js, loaded on demand and
+       written by Super Delete and Restore. See the log above. */
+    log: {
+      file: LOG_FILE,
+      load: logLoad,           /* the log, as a promise; loads the file once */
+      get: logGet,             /* the log, or null before load() settled */
+      set: logSet,             /* the log a write left */
+      text: logText,           /* the file's text, for a stamp */
+      stampText: logStampText,
+      now: logNow              /* the moment a line records */
+    },
+    filesOf: filesOf,          /* an entry's three files, keyed */
+    pathsOf: pathsOf,          /* an entry's three paths, in order */
+    usageOf: usageOf,          /* where a page's regions show the site's images */
     named: named,              /* the engine's file names in a text */
-    orphans: orphans,          /* the engine's files that nothing names */
+    unused: unused,            /* the engine's files that nothing uses */
     slug: slugOf,
     hash: hashBytes,
     cut: cutMeta               /* bytes, with the metadata cut */
