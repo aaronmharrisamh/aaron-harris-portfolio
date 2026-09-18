@@ -13,13 +13,14 @@
    passes through untouched, which is the escape hatch for the one thing
    Markdown cannot say; the tag check before a publish still balances it.
 
-   Image tags, [img0001,Caption|Alt], are not Markdown. A run of them is
-   one block, passed on as it is, and AMH.blog.renderBody turns the run
-   into a carousel, so the two never diverge: render(source, {date}) runs
-   that expansion when a date is given and leaves the tags in place when
-   it is not. Two runs with a blank line between them keep that blank
-   line, because it is what makes them two carousels. Inside code a tag
-   is code: its bracket is escaped, so the tag renderer cannot see it.
+   Tags, [img0001,Caption|Alt] and [nocarousel video0012,Caption], are
+   not Markdown. A run of them is one block, passed on as it is, and
+   AMH.blog.renderBody turns the run into a carousel, so the two never
+   diverge: render(source, {date}) runs that expansion when a date is
+   given and leaves the tags in place when it is not. Two runs with a
+   blank line between them keep that blank line, because it is what makes
+   them two carousels. Inside code a tag is code: its bracket is escaped,
+   so the tag renderer cannot see it.
 
    Loaded by blog.html, before tool.js and publish.js, and by the home
    page for its deep dives. It reads no page and touches no DOM.
@@ -85,12 +86,18 @@
      and is read before a paragraph is gathered. This one finds the rest. */
   var FLAG_NAMES = FLAGS.map(function (f) { return f.name; }).join("|");
   var FLAG_ANY = new RegExp("\\{(" + FLAG_NAMES + ")\\}", "g");
+  /* THE TAG'S WORDS: the options a tag can open with, and each kind's
+     word. blog.js names the same words beside AMH.blog.TAG; these are a
+     copy, for the reason TAG_G gives. */
+  var TAG_OPTION = "(?:portrait1:1|portrait|landscape|nocarousel|noborders|nocontrols|autoplay|muted|unmuted|loop)";
+  var TAG_OPTIONS = TAG_OPTION + "(?: " + TAG_OPTION + ")*";
+  var TAG_KIND = "img|png|video|audio|midi";
   /* THE ESCAPES. {!name} writes a flag as text, and [!img0001] and
-     [!portrait img0001] write an image tag as text. The mark answers only
+     [!nocarousel video0012] write a tag as text. The mark answers only
      for a command the renderer knows, so {!hello} is not an escape and
      stays exactly as typed. */
   var ESC_FLAG = new RegExp("\\{!(" + FLAG_NAMES + ")\\}", "g");
-  var ESC_TAG = /\[!((?:portrait|landscape) )?(img|png)([0-9a-z]\d{3})/g;
+  var ESC_TAG = new RegExp("\\[!((?:" + TAG_OPTIONS + ") )?(" + TAG_KIND + ")([0-9a-z]\\d{3})", "g");
   /* Taken off LAST, once nothing is looking for a command any more. Undo it
      earlier and the thing the mark was protecting would be obeyed. */
   function unmark(s) {
@@ -110,17 +117,19 @@
     number: /^( *)\d+\. +(.*)$/,
     pipe: /^\s*\|.*\|\s*$/,
     delim: /^\s*\|(\s*:?-+:?\s*\|)+\s*$/,
-    /* a line that is nothing but image tags */
-    tagRun: /^(?:\s*\[(?:(?:portrait|landscape) )?(?:img|png)[0-9a-z]\d{3}(?:,[^\]|]*)?(?:\|[^\]]*)?\])+\s*$/,
+    /* a line that is nothing but tags */
+    tagRun: new RegExp("^(?:\\s*\\[(?:(?:" + TAG_OPTIONS + ") )?(?:" + TAG_KIND + ")[0-9a-z]\\d{3}" +
+      "(?:,[^\\]|]*)?(?:\\|[^\\]]*)?\\])+\\s*$"),
     flag: new RegExp("^\\{(" + FLAGS.map(function (f) { return f.name; }).join("|") + ")\\}\\s*$"),
     html: /^<[a-zA-Z\/!]/,
     blank: /^\s*$/
   };
-  /* One image tag, with its groups: the frame word, img or png, the number,
+  /* One tag, with its groups: the options, the kind's word, the number,
      the caption, the alt. blog.js names the same tag as AMH.blog.TAG; this
      is a copy, because this file also loads on the home page, where blog.js
      does not, and the harness runs one list of tags through both. */
-  var TAG_G = /\[(?:(portrait|landscape) )?(img|png)([0-9a-z]\d{3})(?:,([^\]|]*))?(?:\|([^\]]*))?\]/g;
+  var TAG_G = new RegExp("\\[(?:(" + TAG_OPTIONS + ") )?(" + TAG_KIND + ")([0-9a-z]\\d{3})" +
+    "(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]", "g");
   /* a link: text, then a url that may hold one level of parentheses,
      which is what a javascript: url in the fixture needs to be caught whole */
   var LINK_G = /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
@@ -304,9 +313,17 @@
       RE.tagRun.test(l) || RE.html.test(l);
   }
   /* render(source, opts) -> HTML
-       opts.date  the post date; with it, each run of image tags becomes a
-                  carousel through AMH.blog.renderBody, as an HTML post's
-                  does, with paths for a month page */
+       opts.date    the post date; with it, each run of tags becomes a
+                    carousel through AMH.blog.renderBody, as an HTML post's
+                    does
+       opts.prefix  what renderBody makes a path relative to: "" for the
+                    stream and the preview; a month page's "../" when it
+                    is not given
+       opts.images  the site's { num: entry }, which renderBody draws from
+
+     A caller that draws a post's tags passes these, and never calls
+     renderBody on what comes back: the escapes are off by then, so an
+     escaped tag would be drawn after all. */
   function render(source, opts) {
     var lines = String(source).replace(/\r\n?/g, "\n").split("\n");
     var out = [];
@@ -370,9 +387,23 @@
     /* renderBody is what turns an image tag into an image, so the tag's
        escape has to survive until after it has run. */
     if (opts && opts.date && AMH.blog && AMH.blog.renderBody) {
-      html = AMH.blog.renderBody(html, opts.date);
+      html = AMH.blog.renderBody(html, opts.date, opts.prefix, opts.images);
     }
     return unmark(html);
+  }
+
+  /* A source with its code filled in, fences and inline spans alike, for a
+     reader that looks for commands: a tag written in code is text, and the
+     renderer never draws it. Each line keeps its length. A fence becomes an
+     empty line, as the block it is, and a span becomes marks and not
+     spaces, so tags on either side of it stay two runs, as they render. */
+  function withoutCode(source) {
+    var inFence = false;
+    return String(source).replace(/\r\n?/g, "\n").split("\n").map(function (l) {
+      if (RE.fence.test(l)) { inFence = !inFence; return ""; }
+      if (inFence) return "";
+      return l.replace(CODE_G, function (m) { return new Array(m.length + 1).join("#"); });
+    }).join("\n");
   }
 
   /* ==========================================================
@@ -426,8 +457,10 @@
      AMH.markdown
        render(source, opts) -> HTML, blocks joined by one newline
        text(source)         -> the words, marks removed, whitespace collapsed
+       withoutCode(source)  -> the source with its code filled in, for a
+                               reader that looks for commands
      ========================================================== */
   /* flags is the list above. The composer reads it for the two buttons that
      write a flag and for the panel that says what every one of them does. */
-  AMH.markdown = { render: render, text: text, flags: FLAGS };
+  AMH.markdown = { render: render, text: text, withoutCode: withoutCode, flags: FLAGS };
 })();

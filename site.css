@@ -2598,6 +2598,21 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 .bs-post__body .gallery { margin: 1.1rem 0 0; }
 .bp-cut { display: none; }
 
+/* A tag on its own line with nocarousel, and a video, a sound or a MIDI
+   file, is a figure. The browser's own player does the work, and it works
+   with no script, so these rules only keep each one inside the column: no
+   picture or video wider than the post, or taller than most of the
+   screen, and the caption and the file link under it. They draw no frame:
+   data-shape and data-noborders on a figure are data only here. */
+.bs-post__body .bp-media { margin: 1.1rem 0 0; }
+.bp-media > img, .bp-media > video {
+  display: block; max-width: 100%; height: auto; max-height: 85vh; margin: 0 auto;
+}
+.bp-media > video { width: 100%; background: #000; }
+.bp-media > audio { display: block; width: 100%; }
+.bp-media__cap { margin-top: .45rem; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.bp-media__file { display: inline-block; margin-top: .35rem; font-size: .8rem; }
+
 /* The editor's New post pills: one at the end of the bar, after the month
    picker, and one centered under the last post. Two classes, because the
    editor's pill paint is injected after this file and sets its display. */

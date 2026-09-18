@@ -2795,7 +2795,8 @@
      each. o.yes names the move and o.no the way out, "Cancel" when none
      is given. o.danger paints the move orange and puts the focus on the
      way out, so a reader who presses Enter without reading keeps the
-     photo.
+     photo. o.only leaves the way out off, for news with nothing to
+     decide: its one button closes the box.
 
      Resolves true for the move and false for the X, Escape and the way
      out. It never rejects. */
@@ -2862,7 +2863,7 @@
       no.type = "button";
       no.className = "ced-btn";
       no.textContent = o.no || "Cancel";
-      btns.appendChild(no);
+      if (!o.only) btns.appendChild(no);
       var yes = doc.createElement("button");
       yes.type = "button";
       yes.className = "ced-btn " + (o.danger ? "ced-btn--fill-danger" : "ced-btn--accent");
@@ -2890,7 +2891,7 @@
       scrimUp();
       doc.body.appendChild(box);
       dialogUp(escNo);
-      (o.danger ? no : yes).focus();
+      (o.danger && !o.only ? no : yes).focus();
     });
   }
 
@@ -2979,10 +2980,16 @@
     });
   }
 
-  /* the name a row and an ask call an image: its number for a blog
-     image, and the last part of its base for a site image */
-  function imageName(e) { return e.num ? "img" + e.num : e.base.replace(/^.*\//, ""); }
-  function imageTag(e) { return "[img" + e.num + "]"; }
+  /* the name a row and an ask call an image: its tag's word and number
+     for a blog file, img0006 or video0012, and the last part of its base
+     for a site image */
+  function imageName(e) {
+    return e.num ? engine().tagWordOf(e.kind || "image") + e.num : e.base.replace(/^.*\//, "");
+  }
+  function imageTag(e) { return "[" + imageName(e) + "]"; }
+  /* A media file has no small copy to show: its row shows a plain tile
+     with its kind, and the file itself is never fetched for a row. */
+  function isMediaEntry(e) { return !!(e && e.kind && e.kind !== "image"); }
   /* "260916" as "2026-09-16", and "260917-143205" as "2026-09-17 14:32:05" */
   function dayWords(yymmdd) {
     var s = String(yymmdd || "");
@@ -3326,6 +3333,14 @@
       pic.src = src;
       return pic;
     }
+    /* an entry's picture: its small copy, or the tile of a media file */
+    function picOf(e) {
+      if (!isMediaEntry(e)) return thumb(at + I.filesOf(e).sd);
+      var tile = doc.createElement("div");
+      tile.className = "ced-image__pic ced-image__pic--none";
+      tile.textContent = e.kind === "midi" ? "MIDI" : e.kind;
+      return tile;
+    }
     /* the words of a row: the name, the facts, and where it is used; for
        a super deleted image, when it went and the paths that went */
     function wordsOf(e, gone) {
@@ -3386,7 +3401,7 @@
       var li = doc.createElement("li");
       li.className = "ced-image";
       li.setAttribute("data-base", e.base);
-      li.appendChild(thumb(at + I.filesOf(e).sd));
+      li.appendChild(picOf(e));
       li.appendChild(wordsOf(e, null));
       li.appendChild(imageActs(e));
       return li;
@@ -3441,7 +3456,7 @@
       var tr = doc.createElement("tr");
       tr.className = "ced-image-line";
       tr.setAttribute("data-base", e.base);
-      lineFacts(tr, e, thumb(at + I.filesOf(e).sd), said);
+      lineFacts(tr, e, picOf(e), said);
       tr.appendChild(lineCell("added", null, dayWords(e.added)));
       tr.appendChild(lineCell("used", usedIn(e)));
       tr.appendChild(lineCell("words", null, said, said));
@@ -3777,6 +3792,11 @@
       say("Wait for the publish to finish.");
       return Promise.resolve(false);
     }
+    /* An index or a log the editor must not write stops this before a
+       file moves: the files would leave, and the index would still name
+       them. The box loaded both before it drew this row. */
+    var refused = I.index.problem() || I.log.problem();
+    if (refused) { say(refused); return Promise.resolve(false); }
     /* Each surface is asked for on the surface itself. The refusal names
        the page to open, and nothing has happened yet. */
     var places = superDeletePlaces(e);
@@ -3792,7 +3812,7 @@
     }
     return repoForImages().then(function (got) {
       if (!got) { say("Super delete needs the repo folder."); return false; }
-      var lines = ["Its three files move into " + I.DELETE_DIR +
+      var lines = [(isMediaEntry(e) ? "Its file moves" : "Its three files move") + " into " + I.DELETE_DIR +
         ", and it leaves the index. Nothing on the site shows it after this."];
       if (places.posts.length) {
         lines.push("It is taken out of " + joinWords(places.posts) + ", and " +
@@ -3813,7 +3833,7 @@
       lines.push("Commit and push, then empty " + I.DELETE_DIR + " when you are sure.");
       return askBox({
         tag: "SUPER DELETE", title: "Super delete " + name + "?", danger: true,
-        thumb: (onMonthPage() ? "../" : "") + I.filesOf(e).sd, code: e.base,
+        thumb: isMediaEntry(e) ? "" : (onMonthPage() ? "../" : "") + I.filesOf(e).sd, code: e.base,
         lines: lines, yes: "Super delete"
       }).then(function (yes) {
         if (!yes) return false;
@@ -3826,6 +3846,7 @@
           say("Rebuilding " + BLOG_PAGE + " without " + name + "...");
           return AMH.publish.rebuild({
             without: e.num,
+            name: name,
             after: function (rec) {
               if (!rec.wrote || !rec.wrote.length) return null;
               return superDeleteMove(e).then(function (out) {
@@ -3908,6 +3929,10 @@
     function say(t) { if (box) box.say(t); }
     var name = imageName(d.entry);
     var paths = d.paths.slice();
+    /* as for Super Delete: no file moves back into an index that cannot
+       be written to name it */
+    var refused = I.index.problem() || I.log.problem();
+    if (refused) { say(refused); return Promise.resolve(false); }
     return repoForImages().then(function (got) {
       if (!got) { say("Restore needs the repo folder."); return false; }
       return Promise.all(paths.map(function (p) { return repoHas(I.DELETE_DIR + p); })).then(function (there) {
@@ -3970,8 +3995,13 @@
       btn.textContent = SAVE_LABEL;
       savedBox(out.wrote, out.folder, out.moved);
     }, function (err) {
-      say("Nothing to save", SAVE_SAY_MS);
-      console.warn("[site editor] " + (err && err.message ? err.message : String(err)));
+      var why = err && err.message ? err.message : String(err);
+      console.warn("[site editor] " + why);
+      if (!changedPages().length) { say("Nothing to save", SAVE_SAY_MS); return; }
+      /* there were edits, and something stopped their save: the author
+         reads why, and what fixes it, and the edits stay on the page */
+      say("Not saved", SAVE_SAY_MS);
+      askBox({ tag: "NOT SAVED", title: "The save stopped", lines: [why], yes: "OK", only: true });
     });
   }
 

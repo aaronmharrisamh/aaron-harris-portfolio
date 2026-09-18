@@ -127,8 +127,9 @@
   /* the line under the body that names text which is almost a tag, and a
      number no image on the site has */
   var bcTagNoteEl = null;
-  /* the manifest's images, read once per composer: bcSyncCards runs on
-     each keystroke, and a keystroke is not the time to parse the manifest */
+  /* the site's images and media files, from the index and the lines of a
+     manifest from before it, read once per composer: bcSyncCards runs on
+     each keystroke, and a keystroke is not the time to build the map */
   var bcManImages = null;
   var bcTagMenu = null, bcTagsKnown = null;   /* the blog's tags, with counts */
   var bcDrop = null, bcCloseBtn = null;
@@ -271,7 +272,7 @@
     m[1].split("\n").map(function (l) { return l.trim(); }).forEach(function (l) {
       if (!l) return;
       if (l.indexOf("next-post:") === 0) out.nextPost = bcIdNum(l.slice(10)) || 1;
-      else if (l.indexOf("next-img:") === 0) out.nextImg = bcIdNum(l.slice(9)) || 1;
+      else if (l.indexOf("next-img:") === 0) out.nextImg = AMH.blog.counterNum(l.slice(9)) || 1;
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
@@ -370,9 +371,10 @@
              payload: bcManifestPayload(nextPost, entries, { publish: publish, months: months }) };
   }
 
-  /* Every image the site holds, by number: the index's blog entries, and
-     the lines a manifest from before the index still carries. The map is
-     what the renderer, the cards and the search index take. */
+  /* Every image and media file the site holds, by number: the index's
+     blog entries, and the lines a manifest from before the index still
+     carries, which are images. The map is what the renderer, the cards
+     and the search index take. */
   function bcSiteMap() {
     var out = {};
     var man = AMH.blog ? AMH.blog.parseManifest() : { images: {} };
@@ -382,35 +384,47 @@
     return out;
   }
   /* The next image number: the index's counter, and the manifest's where
-     a manifest from before the index still carries one. Never goes down. */
+     a manifest from before the index still carries one. Never goes down.
+     Images and media files take their ids from this one counter. The
+     number AMH.blog.ID_COUNT says that no id is left. */
   function bcNextImg() {
     var rec = AMH.images.index.get();
     var man = AMH.blog ? AMH.blog.parseManifest() : { nextImg: 1 };
-    return Math.max(rec ? bcIdNum(rec.nextImg) : 1, man.nextImg || 1);
+    return Math.max(rec ? AMH.blog.counterNum(rec.nextImg) : 1, man.nextImg || 1);
   }
   /* The index after a publish, a delete or a rebuild.
 
-     images is the map of every blog image the site holds after the write:
-     each gets an entry with its facts and its switches, kept where it had
-     one and added where it had none. postId and refs say where this post's
-     tags name images, and gone is a post whose uses leave, for a delete.
-     nextImg is the counter after this write, as a number. site is a map of
-     site entries by base, for the migration, and pages the usage the pages
-     gave, both optional. Returns { rec, text }, or null when nothing
-     changed and the file exists. */
+     images is the map of every blog image and media file the site holds
+     after the write: each gets an entry with its facts and its switches,
+     kept where it had one and added where it had none. postId and refs
+     say where this post's tags name files, and gone is a post whose uses
+     leave, for a delete. nextImg is the counter after this write, as a
+     number. site is a map of site entries by base, for the migration, and
+     pages the usage the pages gave, both optional. Returns { rec, text },
+     or null when nothing changed and the file exists.
+
+     An image's files are named for its date, so its base follows the
+     date its line gives. A media file's base and date are its record's
+     and never move, whatever date a line brings: its path is fixed once
+     it is on the site. */
   function bcIndexNext(o) {
     var I = AMH.images.index;
     var was = I.get() || I.set({});
     var rec = JSON.parse(JSON.stringify(was));
     Object.keys(o.images || {}).forEach(function (num) {
       var line = o.images[num];
-      var base = bcImgBase(line.date, num);
       var had = null;
       rec.images.forEach(function (e) { if (e.num === num) had = e; });
-      var entry = { base: base, num: num, date: line.date, type: line.type, ow: line.ow, oh: line.oh,
-                    bytes: line.bytes, uhd: !!line.uhd, truesize: !!line.truesize, animated: !!line.animated,
-                    added: had ? had.added : (line.added || line.date), used: had ? had.used : (line.used || []),
-                    words: had ? had.words : {} };
+      var kind = line.kind || "image";
+      var entry = kind === "image"
+        ? { base: bcImgBase(line.date, num), kind: kind, type: line.type, from: line.from || (had && had.from) || "",
+            ow: line.ow, oh: line.oh, bytes: line.bytes, animated: !!line.animated,
+            num: num, date: line.date, uhd: !!line.uhd, truesize: !!line.truesize }
+        : { base: had ? had.base : line.base, kind: kind, type: line.type, mime: line.mime, from: line.from || "",
+            ow: line.ow, oh: line.oh, bytes: line.bytes, num: num, date: had ? had.date : line.date };
+      entry.added = had ? had.added : (line.added || line.date);
+      entry.used = had ? had.used : (line.used || []);
+      entry.words = had ? had.words : {};
       if (had) rec.images[rec.images.indexOf(had)] = entry; else rec.images.push(entry);
     });
     Object.keys(o.site || {}).forEach(function (base) {
@@ -453,7 +467,18 @@
         e.words = o.words && o.words[e.num] ? JSON.parse(JSON.stringify(o.words[e.num])) : {};
       }
     });
-    if (o.nextImg) rec.nextImg = bcIdOf(Math.max(bcIdNum(rec.nextImg), o.nextImg));
+    /* The counter after this write: the highest of what the record says,
+       what this write numbered, and one past every id that the record and
+       the log hold, so a counter that fell behind catches up and none
+       goes down. Past z999 it says "exhausted", through counterText, so
+       no id function is asked for an id that does not exist. */
+    var next = Math.max(AMH.blog.counterNum(rec.nextImg), o.nextImg || 0);
+    rec.images.forEach(function (e) { if (e.num) next = Math.max(next, bcIdNum(e.num) + 1); });
+    var log = AMH.images.log.get();
+    (log ? log.deleted : []).forEach(function (d) {
+      if (d.entry && d.entry.num) next = Math.max(next, bcIdNum(d.entry.num) + 1);
+    });
+    rec.nextImg = AMH.blog.counterText(next);
     var before = I.stampText(was), after = I.stampText(rec);
     if (before === after && was.stamp && !o.always) return null;
     rec.stamp = TOOL.stamp(after);
@@ -509,18 +534,28 @@
   var bcKeepMeta = false;
 
   /* A file, taken and held. The number comes from the manifest's counter
-     plus this session's offset, so numbers follow drop order. */
+     plus this session's offset, so numbers follow drop order.
+
+     A file is refused before it is read when the index must not be
+     written, or when no id is left for it: the last id, z999, counts this
+     session's files too. A refused file costs no number. */
+  var BC_NO_ID = "The site has no id left for a new file. Every id up to z999 is taken.";
   function bcTakePhoto(file) {
     var date = bcDateNow();
     var num = "";
     return AMH.images.index.load().then(function () {
+      if (AMH.images.index.problem()) throw new Error(AMH.images.index.problem());
+      if (bcNextImg() + bcImgCounter >= AMH.blog.ID_COUNT) throw new Error(BC_NO_ID);
       return AMH.images.intake(file, {
         keepMeta: bcKeepMeta,
         /* The number is taken HERE and nowhere earlier. The engine calls this
            once the photo is made, so a file it refuses never burns a number,
            and the numbers still follow the order the files were taken in. */
         name: function () {
-          num = bcIdOf(bcNextImg() + bcImgCounter++);
+          var n = bcNextImg() + bcImgCounter;
+          if (n >= AMH.blog.ID_COUNT) throw new Error(BC_NO_ID);
+          bcImgCounter++;
+          num = bcIdOf(n);
           return bcImgBase(date, num);
         }
       });
@@ -539,7 +574,7 @@
   }
 
   /* What one image says about itself, whether it is held or published.
-     A published image knows what the manifest's line says. */
+     A published image knows what its index entry says. */
   function bcImFacts(im) {
     var out = [];
     if (im.published) out.push({ text: "published" });
@@ -549,7 +584,7 @@
       return out;
     }
     /* a held photo says everything about itself; a published one says what
-       the manifest's line for it says */
+       its index entry says */
     var from = im.photo || im;
     if (from.type) out.push({ text: from.type.toUpperCase() + " original" });
     if (from.type === "gif" && from.animated) out.push({ text: "animated" });
@@ -572,21 +607,20 @@
     return im.photo ? im.photo.urls.sd : (im.sd || im.src || "");
   }
 
-  /* The entry the renderer and the manifest both work from. A held photo
-     answers from itself; a published one from its manifest line. */
   /* ---------------- tags in the body ---------------- */
-  /* Always img, and never a frame word of its own. A tag written before the
-     engine may say png, and every reader still takes it as a synonym, but
-     nothing writes one: what a page shows is a fact in the manifest now,
-     not a format baked into a file name. The frame word is the author's to
-     type, and a rewrite keeps the one a tag already has. */
-  function bcBuildTag(im, word) {
-    return "[" + (word ? word + " " : "") + "img" + im.num +
+  /* A card's tag, written with no options of its own. A tag written before
+     the engine may say png, and every reader still takes it as a synonym,
+     but nothing writes one: what a page shows is a fact in the index now,
+     not a format baked into a file name. The options are the author's to
+     type, and a rewrite keeps the ones a tag already has, and its kind's
+     word, so a rewrite never changes what the author asked for. */
+  function bcBuildTag(im, options, word) {
+    return "[" + (options ? options + " " : "") + (word && word !== "png" ? word : "img") + im.num +
       (im.caption || im.alt ? "," + im.caption : "") +
       (im.alt ? "|" + im.alt : "") + "]";
   }
   /* The tags for one number, from the tag's one pattern in blog.js, with its
-     groups: the word, img or png, the number, the caption, the alt. */
+     groups: the options, the kind's word, the number, the caption, the alt. */
   function bcTagRe(num, global) {
     /* global flag for rewrites (a tag can be duplicated in the body);
        plain for .test - a /g regex's lastIndex makes repeated tests lie */
@@ -610,11 +644,18 @@
     if (m[5] !== undefined) im.alt = m[5];
   }
   function bcRewriteTag(im) {
-    bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), function (tag, word) {
-      return bcBuildTag(im, word);
+    bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), function (tag, options, word) {
+      return bcBuildTag(im, options, word);
     });
   }
   function bcClean(s) { return s.replace(/[\]|]/g, "").trim(); }
+  /* The text a post's tags are checked in. In a Markdown post a tag in
+     code is text, which the page never draws, so it is no problem of its
+     own. An HTML post draws every tag in it, code or not. */
+  function bcTagText(source, format) {
+    return format === "md" && AMH.markdown && AMH.markdown.withoutCode
+      ? AMH.markdown.withoutCode(source) : String(source || "");
+  }
 
   /* ==========================================================
      4. COMPOSER UI
@@ -1102,16 +1143,16 @@
     return card;
   }
 
-  /* One image's manifest line, from a card. A held photo answers from
-     itself; a published one keeps what the manifest said, with the switch
-     the author may have flipped. */
+  /* One image's line for the index and the renderer, from a card. A held
+     photo answers from itself; a published one keeps what its entry said,
+     with the switch the author may have flipped. */
   function bcImLine(im, date) {
     if (im.photo) {
-      return { num: im.num, date: date, type: im.photo.type,
+      return { num: im.num, date: date, kind: "image", type: im.photo.type, from: im.photo.from || "",
                ow: im.photo.ow, oh: im.photo.oh, bytes: im.photo.bytes,
                uhd: !!(im.uhd || im.truesize), truesize: !!im.truesize, animated: !!im.photo.animated };
     }
-    return { num: im.num, date: date, type: im.type, ow: im.ow, oh: im.oh,
+    return { num: im.num, date: date, kind: "image", type: im.type, ow: im.ow, oh: im.oh,
              bytes: im.bytes, uhd: !!(im.uhd || im.truesize), truesize: !!im.truesize,
              animated: !!im.animated };
   }
@@ -1203,8 +1244,7 @@
     var body = box.querySelector(".bs-post__body");
     /* the deployed manifest plus what this composer is holding, so a card's
        switch shows in the preview before anything is published */
-    body.innerHTML = B.renderBody(bcMode === "md" ? AMH.markdown.render(src) : src,
-                                  date, "", bcPreviewImages(date));
+    body.innerHTML = bcBodyHtml(src, bcMode, date, "", bcPreviewImages(date));
     /* A held photo is not on the server yet, so the preview paints it from
        its blobs. Every path it carries is swapped, the small copy included:
        the carousel builds its blurred backdrop from data-sd, and a path to
@@ -1435,13 +1475,17 @@
       c.words.toLocaleString("en-US") + (c.words === 1 ? " word" : " words");
     bcTagNote(bcSyncCards() || []);
   }
-  /* The line under the body: a number no image on the site has, and text
-     that is almost a tag. Both are warnings, and neither is a refusal
-     here: the publish asks. A long piece of text is cut, so the line stays
-     a line. */
+  /* The line under the body: a number no image on the site has, text
+     that is almost a tag, a tag that asks for what cannot be shown, and a
+     word a carousel's first tag already decides. All are warnings, and
+     none is a refusal here: the publish refuses or asks. A long piece of
+     text is cut, so the line stays a line. */
   function bcTagNote(unknown) {
     if (!bcTagNoteEl) return;
     var near = AMH.blog && AMH.blog.nearTags ? AMH.blog.nearTags(bcBody.value) : [];
+    var issues = AMH.blog && AMH.blog.tagIssues
+      ? AMH.blog.tagIssues(bcTagText(bcBody.value, bcMode), AMH.images.index.get() ? bcPreviewImages(bcDateNow()) : null)
+      : { problems: [], notices: [] };
     var cut = function (s) { return s.length > 48 ? s.slice(0, 47) + "..." : s; };
     var parts = [];
     if (unknown.length) {
@@ -1451,6 +1495,7 @@
       parts.push(near.length + (near.length === 1 ? " tag is not a tag: " : " tags are not tags: ") +
         near.map(cut).join("  "));
     }
+    issues.problems.concat(issues.notices).forEach(function (s) { parts.push(s); });
     bcTagNoteEl.textContent = parts.join(" ");
     bcTagNoteEl.hidden = !parts.length;
   }
@@ -1488,6 +1533,9 @@
     out.push({ write: "[portrait img0001,caption|alt]", where: "the first tag of a carousel",
                does: "On the first tag of a carousel, portrait or landscape fixes its frame. " +
                      "With no word the frame follows the photos." });
+    out.push({ write: "[nocarousel img0001,caption|alt]", where: "on its own line",
+               does: "Shows the image on its own, with its caption under it, outside any " +
+                     "carousel. The carousel before it ends there, and the tags after it start a new one." });
     if (md) {
       out.push({ write: "# A heading", where: "the first line of the post",
                  does: "Becomes the post's name in the stream, the month list and the " +
@@ -3612,13 +3660,10 @@
 
   /* image tags in a published post become locked cards: thumbnail from the
      server, number/format fixed, caption/alt editable, Remove orphans the file */
-  /* A card for each image the post already uses. Its facts come from the
-     manifest's line for that number, which is where the site records what
-     an image is. A number with no line is an image from before the engine:
-     its card says so, and Remove is all it offers. */
   /* A card for one published image. m is the tag's match, for the words
-     it carries; line is the manifest's line, or nothing for an image from
-     before the engine, whose card says so and offers Remove alone. */
+     it carries; line is the image's index entry, which is where the site
+     records what an image is, or nothing for an image from before the
+     engine, whose card says so and offers Remove alone. */
   function bcPublishedCard(m, line, date0) {
     var im = {
       num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
@@ -3642,6 +3687,12 @@
     bcCards.appendChild(bcRenderCard(im, null));
     return im;
   }
+  /* An image card is made for an image: a media file's entry, and a media
+     tag with no entry, get none, because an image card would name image
+     files that such an id never had. */
+  function bcImageCardFor(m, line) {
+    return line ? (line.kind || "image") === "image" : AMH.blog.KINDS[m[2]] === "image";
+  }
   function bcLoadPublishedImages(source, date0) {
     var re = new RegExp(AMH.blog.TAG, "g"), m;
     var map = bcSiteMap();
@@ -3652,16 +3703,17 @@
     while ((m = re.exec(source))) {
       if (seen[m[3]]) continue;
       seen[m[3]] = true;
-      bcPublishedCard(m, map[m[3]], date0);
+      if (bcImageCardFor(m, map[m[3]])) bcPublishedCard(m, map[m[3]], date0);
     }
   }
   /* A TAG RECONNECTS BY ITS NUMBER.
 
      A tag typed after the composer opened, pasted from another post, or
      fixed after a typo names an image the site holds: it gets a card here,
-     from the manifest's line, with no upload. A number the site does not
+     from its index entry, with no upload. A media file the index holds gets
+     no card, and is still a number the site has. A number the site does not
      have gets no card, and the caller says so. Runs on each input, on the
-     Preview view and at publish. Returns the numbers with no image. */
+     Preview view and at publish. Returns the numbers with no entry. */
   function bcSyncCards() {
     if (!bcBody || !bcCards) return [];
     /* the map waits for the index; the refresh that follows the load runs
@@ -3679,8 +3731,8 @@
       if (known[m[3]]) continue;
       known[m[3]] = true;
       var line = bcManImages[m[3]];
-      if (line) bcPublishedCard(m, line, line.date);
-      else unknown.push(m[3]);
+      if (!line) unknown.push(m[3]);
+      else if (bcImageCardFor(m, line)) bcPublishedCard(m, line, line.date);
     }
     return unknown;
   }
@@ -3754,12 +3806,19 @@
     month: { id: "p", img: "../", tag: "../blog.html?t=",
              when: function (p) { return AMH.blog.postUrl(p.date, p.id, "month", true); } }
   };
+  /* A post's body as a page shows it. A Markdown post draws its tags
+     inside the renderer, which takes the escapes off only after, so an
+     escaped tag stays text; an HTML post draws them here. */
+  function bcBodyHtml(source, format, date, prefix, images) {
+    return format === "md"
+      ? AMH.markdown.render(source, { date: date, prefix: prefix, images: images })
+      : AMH.blog.renderBody(source, date, prefix, images);
+  }
   function bcPostMarkup(post, indent, brand, where, tail) {
     var B = AMH.blog;
     var esc = TOOL.escAttr;
     var body = post.source === null ? post.staticBody
-      : B.renderBody(post.format === "md" ? AMH.markdown.render(post.source) : post.source,
-                     post.date, where.img, bcSiteImages);
+      : bcBodyHtml(post.source, post.format, post.date, where.img, bcSiteImages);
     /* a carried body was rendered for a page in blog/; in the stream the
        one step up comes off its paths */
     if (post.source === null && where.img === "") body = bcStreamStatic(body);
@@ -3914,8 +3973,8 @@
 
      A post's thumbnail is the PATH of its first image's small copy, which
      the engine already wrote and the manifest already names. Nothing is
-     drawn, and nothing is fetched: an entry is remade from a source and a
-     manifest line, which is what lets a rebuild work from disk.
+     drawn, and nothing is fetched: an entry is remade from a source and an
+     index entry, which is what lets a rebuild work from disk.
 
      blog.js owns the unpacker, and this file reads the deployed index
      through it, so the writer and the reader cannot disagree. */
@@ -3970,14 +4029,20 @@
      is already on the site and already small, so the index names it. That
      also makes a rebuild able to remake every entry from a source and the
      manifest, with nothing to fetch, from disk as well as over http. */
+  /* The first IMAGE, that is: a media file has no small copy, and a video
+     or a sound is never an <img>, so its tag is passed over. */
   function bcFirstImage(post, images) {
-    var m = new RegExp(BC_TAG_RE_G.source).exec(String(post.source || ""));
-    if (!m) return "";
-    var line = images && images[m[3]];
-    if (line) return bcImagePaths(line).sd;
-    /* an image from before the engine has no small copy: the entry carries
-       the one file it has, which is what an <img> could always take */
-    return "blog/" + post.date + "_img" + m[3] + (m[2] === "png" ? ".png" : ".jpg");
+    var tags = AMH.blog.tagsOf(post.source);
+    for (var i = 0; i < tags.length; i++) {
+      var t = tags[i];
+      var line = images && images[t.num];
+      if (t.kind !== "image" || (line && (line.kind || "image") !== "image")) continue;
+      if (line) return bcImagePaths(line).sd;
+      /* an image from before the engine has no small copy: the entry carries
+         the one file it has, which is what an <img> could always take */
+      return "blog/" + post.date + "_img" + t.num + (t.word === "png" ? ".png" : ".jpg");
+    }
+    return "";
   }
 
   /* Read a deployed file that is not a page and not a month. Same shape
@@ -4652,11 +4717,27 @@
     }
     var known = {};
     bcImages.forEach(function (im) { known[im.num] = im; });
+    /* a media file the site holds is known by its entry, because the
+       composer makes it no card */
+    var siteMap = bcPreviewImages(date);
+    Object.keys(refs).forEach(function (n) {
+      if (siteMap[n] && (siteMap[n].kind || "image") !== "image") known[n] = siteMap[n];
+    });
     var dangling = Object.keys(refs).filter(function (n) { return !known[n]; });
     if (dangling.length) {
       bcSetStatus("No image on this site has the number " + dangling.join(", ") +
         ". Add it on the Images tab, or fix the tag."); return;
     }
+    /* a tag that asks for what cannot be shown is fixed before it is
+       published: the page would have to guess what it means */
+    var issues = AMH.blog.tagIssues(bcTagText(source, format), siteMap);
+    if (issues.problems.length) {
+      bcSetStatus("Not published. " + issues.problems[0] + (issues.problems.length > 1
+        ? " " + (issues.problems.length - 1) + " more in the line under the body." : "")); return;
+    }
+    /* every publish writes the index, so an index the editor must not
+       write stops it here, before anything is built */
+    if (AMH.images.index.problem()) { bcSetStatus("Not published. " + AMH.images.index.problem()); return; }
     /* text that is almost a tag is published as text, and the composer
        says so once. Nothing is lost by it: the image it failed to name
        stays on the site. */
@@ -5017,18 +5098,19 @@
   /* ---------------- delete: remove a published post ---------------- */
   function bcDeletePost() {
     if (!bcEditing) return;
+    if (AMH.images.index.problem()) { bcSetStatus("Not deleted. " + AMH.images.index.problem()); return; }
     var id = bcEditing.id;
-    /* The post's images stay on the site, with their lines and their
-       files. The ask names them, so the reader knows they are not lost. */
+    /* The post's files stay on the site, with their entries. The ask names
+       them as their tags do, so the reader knows they are not lost. */
     var kept = [];
-    var re = new RegExp(AMH.blog.TAG, "g"), m;
-    while ((m = re.exec(bcEditing.source0))) {
-      if (kept.indexOf(m[3]) === -1) kept.push(m[3]);
-    }
+    AMH.blog.tagsOf(bcEditing.source0).forEach(function (t) {
+      var name = (t.word === "png" ? "img" : t.word) + t.num;
+      if (kept.indexOf(name) === -1) kept.push(name);
+    });
     if (!window.confirm("Delete post p" + id + " (\"" + (bcEditing.title0 || bcDerivedTitle(bcEditing.source0, bcMode)) + "\")?\n\n" +
         "Its manifest entry is removed. Its month file is written again without it." +
         (kept.length
-          ? "\nIts images stay on the site: img" + kept.join(", img") + "."
+          ? "\nIts files stay on the site: " + kept.join(", ") + "."
           : "") +
         "\n\nThis builds a publish bundle. The post stays live until you upload the bundle.")) {
       return;
@@ -5155,11 +5237,12 @@
   }
   /* A REBUILD, AND A REBUILD WITHOUT ONE IMAGE.
 
-     opts.without is an image number. Every tag for it leaves each post's
-     source, so the month files, the stream, the search index and the feed
-     are all written without it, and the record's uses for it are empty by
-     construction. The site stops naming the image before the Images box
-     moves its files.
+     opts.without is an image or media file's number, and opts.name the
+     name its tag gives it, img0006 or video0012. Every tag for the number
+     leaves each post's source, so the month files, the stream, the search
+     index and the feed are all written without it, and the record's uses
+     for it are empty by construction. The site stops naming the file
+     before the Images box moves it.
 
      opts.after runs once the bundle is written and before the Done step,
      so one box says both what was written and what was moved. It is given
@@ -5174,8 +5257,9 @@
     opts = opts || {};
     TOOL.injectStyles();
     bcWithout = opts.without ? String(opts.without) : "";
+    var leftOut = opts.name ? String(opts.name) : "img" + bcWithout;
     bcJobAfter = opts.after || null;
-    bcWizJob("REBUILD", bcWithout ? "Every month file, without img" + bcWithout
+    bcWizJob("REBUILD", bcWithout ? "Every month file, without " + leftOut
       : bcMigrating() ? "Every month file, and the image index" : "Every month file, current design");
     return new Promise(function (resolve) {
       var done = false;
@@ -5188,7 +5272,7 @@
         resolve(rec || null);
       };
       bcWizRoutePick("Where should the rebuild bundle land?",
-        bcWithout ? "Every month file is written again, without img" + bcWithout + "."
+        bcWithout ? "Every month file is written again, without " + leftOut + "."
           : "Every month file is written again with the current design.")
         .then(function (route) {
           if (route) bcRebuildBuild(route);
@@ -5217,7 +5301,14 @@
     var wordless = false, siteWords = {};
     bcIndexPending = null;
     bcDeadTags = [];
-    AMH.images.index.load().then(function () { return TOOL.pristine(); })
+    /* the log too: an id Super Delete moved out is still taken, and the
+       counter the rebuild writes stays past it */
+    Promise.all([AMH.images.index.load(), AMH.images.log.load()]).then(function () {
+      /* an index the editor must not write stops the rebuild before it
+         reads a month: every rebuild writes the index */
+      if (AMH.images.index.problem()) throw new Error(AMH.images.index.problem());
+      return TOOL.pristine();
+    })
       .then(function (src) {
         var man = bcManifestFrom(src);
         if (!man.entries.length) throw new Error("The manifest is empty. There is nothing to rebuild.");
@@ -5335,11 +5426,15 @@
           carried.forEach(function (c) { carriedIds["p" + c.id] = true; });
           found.forEach(function (p) {
             var said = bcPhrasesOf(p.source);
+            var named = {};
+            AMH.blog.tagsOf(p.source).forEach(function (t) {
+              if (!named[t.num]) named[t.num] = t.word === "png" ? "img" : t.word;
+            });
             Object.keys(bcRefsOf(p.source)).forEach(function (num) {
               if (!uses[num]) uses[num] = [];
               uses[num].push("p" + p.id);
               if (said[num]) (wordsBy[num] = wordsBy[num] || {})["p" + p.id] = said[num];
-              if (!bcSiteImages[num]) bcDeadTags.push("img" + num + " in p" + p.id);
+              if (!bcSiteImages[num]) bcDeadTags.push(named[num] + num + " in p" + p.id);
             });
           });
           /* a post carried verbatim has no source to read: its uses and
@@ -5553,6 +5648,10 @@
        building a bundle for each */
     indexNext: bcIndexNext,
     phrasesOf: bcPhrasesOf,
+    /* the counter a new file is numbered from, and the small copy a
+       search entry shows, so the suite can try both on a known record */
+    nextImg: bcNextImg,
+    firstImage: bcFirstImage,
     tick: bcTickTime,
     timeParse: bcTimeParse,
     timeLabel: bcTimeLabel

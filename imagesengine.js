@@ -36,11 +36,16 @@
    its own size, never enlarged, and a small image keeps hard pixel edges.
    A GIF and a small PNG start with it on.
 
-   images.js, at the repo root, is the one record of every image the site
-   holds, either scheme: what each is, when it was added, and where it is
-   used. This engine reads it and gives its text; tool.js and publish.js
-   write the file. It loads on demand, only for the editor, so a reader
-   never fetches it. superdeleted.js, beside it, is the log of every
+   A MEDIA FILE is a video, a sound or a MIDI file. It is not made into
+   copies: it is one file, kept byte for byte as it came, and a blog names
+   it blog/<date>_media<num>.<ext>. FORMATS, in section 2, is every
+   extension the engine takes and the kinds each one can be.
+
+   images.js, at the repo root, is the one record of every image and media
+   file the site holds, either scheme: what each is, when it was added, and
+   where it is used. This engine reads it and gives its text; tool.js and
+   publish.js write the file. It loads on demand, only for the editor, so a
+   reader never fetches it. superdeleted.js, beside it, is the log of every
    Super Delete, and it loads the same way.
    ============================================================ */
 /* ==========================================================
@@ -93,25 +98,71 @@
      390 px phone at its own size. */
   var SMALL_IMAGE_PX = 480;
 
-  /* The formats the engine reads, and the extension each is written with. */
-  var TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+  /* THE FORMATS, NAMED ONCE.
+
+     Every file the engine takes, by its extension: the kinds a file with
+     that extension can be, and the MIME type each kind is served as. An
+     image is made into three files. A video, a sound and a MIDI file are
+     each kept as one file, byte for byte.
+
+     An extension is not proof of what a file holds. MP4, WebM and Ogg
+     each carry video or sound, so the kind is decided when the file is
+     taken, and its record says it from then on. MIDI is notes for a
+     synthesizer and not sound, so a page offers it as a file to download.
+
+     The list is the whole list. A new extension needs a line here, and a
+     test file that proves it. */
+  var FORMATS = {
+    jpg:  { image: "image/jpeg" },
+    png:  { image: "image/png" },
+    webp: { image: "image/webp" },
+    gif:  { image: "image/gif" },
+    mp4:  { video: "video/mp4", audio: "audio/mp4" },
+    webm: { video: "video/webm", audio: "audio/webm" },
+    weba: { audio: "audio/webm" },
+    mp3:  { audio: "audio/mpeg" },
+    wav:  { audio: "audio/wav" },
+    ogg:  { audio: "audio/ogg", video: "video/ogg" },
+    mid:  { midi: "audio/midi" },
+    midi: { midi: "audio/midi" }
+  };
+  /* The word a blog tag names each kind with: [img0001], [video0012].
+     png is the older name of img. A tag is read with it and never written
+     with it. */
+  var TAG_WORDS = { image: "img", video: "video", audio: "audio", midi: "midi" };
+
+  /* The image formats the engine reads, by MIME type, and the extension
+     each is written with: the image lines of FORMATS, turned round. */
+  var TYPES = {};
+  Object.keys(FORMATS).forEach(function (ext) {
+    if (FORMATS[ext].image) TYPES[FORMATS[ext].image] = ext;
+  });
 
   /* Where the site pages keep their images, and where an orphan goes. */
   var SITE_DIR = "img/work/";
   var DELETE_DIR = "deletethese/";
 
-  /* The two name schemes the engine gives, each with the extensions its
-     renditions can have. A file named any other way is never an orphan,
-     however it got into the folder.
+  /* The name schemes the engine gives, each with the extensions its files
+     can have. A file named any other way is never an orphan, however it
+     got into the folder.
 
      A blog display copy named .png is an image from before the engine.
-     That is the one reason the blog's rule still takes .png. */
+     That is the one reason the blog's rule still takes .png.
+
+     A media file is the third scheme, for the blog only. The longest
+     extension is tried first, so a .midi file is never read as .mid. */
   var SITE_NAME = /^img\/work\/[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-z]{6}(?:_sd\.webp|\.jpg|_original\.(?:jpg|png|webp|gif))$/;
   var BLOG_NAME = /^blog\/\d{6}_img[0-9a-z]\d{3}(?:_sd\.webp|\.(?:jpg|png)|_original\.(?:jpg|png|webp|gif))$/;
-  /* Either scheme, found inside a page's text. Each match is tested
-     against the two rules above before it counts. A blog number's first
-     place counts in base 36, so the ten-thousandth image is imga000. */
-  var NAMED_IN_TEXT = /(?:img\/work\/[a-z0-9-]+|blog\/\d{6}_img[0-9a-z]\d{3})(?:_sd\.webp|_original\.(?:jpg|png|webp|gif)|\.(?:jpg|png))/g;
+  var MEDIA_EXT = "(?:" + Object.keys(FORMATS).filter(function (ext) { return !FORMATS[ext].image; })
+    .sort(function (a, b) { return b.length - a.length; }).join("|") + ")";
+  var MEDIA_BASE = /^blog\/\d{6}_media[0-9a-z]\d{3}$/;
+  var MEDIA_NAME = new RegExp("^blog\\/\\d{6}_media[0-9a-z]\\d{3}\\." + MEDIA_EXT + "$");
+  /* Any scheme, found inside a page's text. Each match is tested against
+     the rules above before it counts. A blog number's first place counts
+     in base 36, so the ten-thousandth image is imga000. */
+  var NAMED_IN_TEXT = new RegExp("(?:img\\/work\\/[a-z0-9-]+|blog\\/\\d{6}_img[0-9a-z]\\d{3})" +
+    "(?:_sd\\.webp|_original\\.(?:jpg|png|webp|gif)|\\.(?:jpg|png))" +
+    "|blog\\/\\d{6}_media[0-9a-z]\\d{3}\\." + MEDIA_EXT, "g");
 
   /* A JPG has no transparent pixel, so every drawn copy is painted on the
      page's own ground. The small copy is painted too: a browser swaps one
@@ -170,7 +221,33 @@
   }
 
   function isEngineName(path) {
-    return SITE_NAME.test(path) || BLOG_NAME.test(path);
+    return SITE_NAME.test(path) || BLOG_NAME.test(path) || MEDIA_NAME.test(path);
+  }
+
+  /* ---------------- formats ---------------- */
+
+  /* A table's own value for a key, or null. A key read from a file can be
+     any text, and "constructor" must not find what every object has. */
+  function own(table, key) {
+    return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
+  }
+  /* The kinds a file with this extension can be, in FORMATS' order, or []
+     for an extension the engine does not take. An extension is read in
+     any case and written in lower case. */
+  function kindsOf(ext) {
+    var line = own(FORMATS, String(ext || "").toLowerCase());
+    return line ? Object.keys(line) : [];
+  }
+  /* The MIME type a file of this extension is served as when it is of
+     this kind, or "" when the extension and the kind do not go together. */
+  function mimeOf(ext, kind) {
+    var line = own(FORMATS, String(ext || "").toLowerCase());
+    return (line && own(line, kind)) || "";
+  }
+  /* The word a blog tag names a kind with, or "" for a kind that is not
+     one. */
+  function tagWordOf(kind) {
+    return own(TAG_WORDS, kind) || "";
   }
 
   /* ---------------- bytes ---------------- */
@@ -614,7 +691,10 @@
        w, h        the display copy's size
        sdw, sdh    the small copy's size
        ow, oh      the original's size, upright
+       kind        "image"; a media file held the same way says "video",
+                   "audio" or "midi", and has one file, keyed source
        type        the original's format: "jpg", "png", "webp" or "gif"
+       mime        the MIME type FORMATS gives that format and kind
        animated    true for a GIF of more than one frame
        bytes       the original's size as it is written
        from        the name the file had
@@ -664,7 +744,7 @@
       var photo = {
         base: base, files: {}, blobs: {}, urls: {},
         w: made.hd.w, h: made.hd.h, sdw: made.sd.w, sdh: made.sd.h, ow: ow, oh: oh,
-        type: ext, animated: original.frames > 1,
+        kind: "image", type: ext, mime: mimeOf(ext, "image"), animated: original.frames > 1,
         bytes: original.bytes.length, from: file.name || "photo",
         meta: original.meta,
         overLimit: original.bytes.length > api.GIT_FILE_LIMIT_MB * 1024 * 1024,
@@ -690,15 +770,23 @@
      does not lose it. A record keys on the photo's base path. */
   var held = {};
 
+  /* A held file's kind and MIME type. A record from before the engine
+     took media files has neither: it is an image, and its type gives the
+     rest. */
+  function kindOfRow(row) { return (row && row.kind) || "image"; }
+  function mimeOfRow(row) { return (row && row.mime) || mimeOf(row && row.type, kindOfRow(row)); }
+
   function toRecord(photo) {
-    return { base: photo.base, files: photo.files, blobs: photo.blobs, tab: tab(),
+    return { base: photo.base, kind: kindOfRow(photo), mime: mimeOfRow(photo),
+             files: photo.files, blobs: photo.blobs, tab: tab(),
              at: Date.now(), w: photo.w, h: photo.h, sdw: photo.sdw, sdh: photo.sdh,
              ow: photo.ow, oh: photo.oh, type: photo.type, animated: photo.animated,
              bytes: photo.bytes, from: photo.from, meta: photo.meta,
              overLimit: photo.overLimit };
   }
   function fromRecord(row) {
-    var photo = { base: row.base, files: row.files, blobs: row.blobs, urls: {},
+    var photo = { base: row.base, kind: kindOfRow(row), mime: mimeOfRow(row),
+                  files: row.files, blobs: row.blobs, urls: {},
                   w: row.w, h: row.h, sdw: row.sdw, sdh: row.sdh, ow: row.ow, oh: row.oh,
                   type: row.type, animated: !!row.animated, bytes: row.bytes,
                   from: row.from, meta: row.meta, overLimit: row.overLimit, saved: false };
@@ -706,12 +794,13 @@
     return photo;
   }
 
-  /* One held photo under another name.
+  /* One held file under another name.
 
-     The blog names a photo for the date it will be published under, and
+     The blog names a file for the date it will be published under, and
      that date can change before it is. Renaming re-keys the record and
-     rewrites the three paths; the bytes and the blob: URLs a page is
-     painting are untouched, so nothing on screen flickers.
+     rewrites its paths, the three of an image or the one of a media file;
+     the bytes and the blob: URLs a page is painting are untouched, so
+     nothing on screen flickers.
 
      Returns the photo, or null when it is not held or the new name is
      taken. A name that is already this photo's is a no-op. */
@@ -721,11 +810,7 @@
     if (held[newBase]) return null;
     delete held[base];
     photo.base = newBase;
-    RENDITIONS.forEach(function (r) {
-      var was = photo.files[r.key];
-      var ext = (/\.([a-z0-9]+)$/i.exec(was) || ["", ""])[1];
-      photo.files[r.key] = newBase + r.suffix + "." + ext;
-    });
+    photo.files = filesOf({ base: newBase, kind: kindOfRow(photo), type: photo.type });
     held[newBase] = photo;
     /* both writes in the one transaction, so a record can never be under
        two names at once or under none */
@@ -745,7 +830,7 @@
     idb("readwrite", function (st) {
       return st.put(toRecord(photo), recordKey(photo.base));
     }).then(null, function (err) {
-      console.warn("[images] " + photo.files.hd + " is held on this page only (" +
+      console.warn("[images] " + (photo.files.hd || photo.files.source || photo.base) + " is held on this page only (" +
         (err && err.message ? err.message : "no storage") + "). Save before you " +
         "leave the page, or the photo has to be added again.");
     });
@@ -810,7 +895,8 @@
   function list() {
     return Object.keys(held).sort().map(function (base) {
       var p = held[base];
-      return { base: base, files: p.files, w: p.w, h: p.h, sdw: p.sdw, sdh: p.sdh,
+      return { base: base, kind: kindOfRow(p), mime: mimeOfRow(p), files: p.files,
+               w: p.w, h: p.h, sdw: p.sdw, sdh: p.sdh,
                ow: p.ow, oh: p.oh, type: p.type, animated: p.animated, bytes: p.bytes,
                from: p.from, meta: p.meta, overLimit: p.overLimit, saved: p.saved };
     });
@@ -986,32 +1072,60 @@
     return { w: Math.max(1, Math.round(ow * scale)), h: Math.max(1, Math.round(oh * scale)) };
   }
 
-  /* The base path of any of a photo's three files. */
+  /* The base path of any file the engine names: one of an image's three,
+     or a media file's one. */
   function baseOf(path) {
     return String(path || "").replace(/(?:_sd|_original)?\.[a-z0-9]+$/i, "");
   }
 
   /* ---------------- the image index ----------------
 
-     One record of every image the site holds, in images.js:
+     One record of every image and media file the site holds, in images.js:
 
-       window.AMH_IMAGES = { v: 1, stamp, nextImg, images: [ entry ] }
+       window.AMH_IMAGES = { v: 2, stamp, nextImg, images: [ entry ] }
 
-     An entry: base, the three files' base path; type, ow, oh, bytes and
-     animated, the original's facts; added, the day it was first written,
-     YYMMDD; used, where it is shown, "pNNNN" for a post and "page#slug"
-     for a region, as of the last write of that post or page. A blog image
-     adds num, date, uhd and truesize, which its manifest line used to
-     carry. nextImg is the blog's counter, as an id, and never goes down.
+     An entry: base, the base path of its files; kind, "image", "video",
+     "audio" or "midi"; type, the original's extension; mime, the MIME type
+     FORMATS gives that extension and kind; from, the name the file had
+     when it was added, or "" when that is not known; ow, oh and bytes, the
+     original's facts; added, the day it was first written, YYMMDD; used,
+     where it is shown, "pNNNN" for a post and "page#slug" for a region, as
+     of the last write of that post or page; words, what each of those
+     places says about it.
+
+     An image adds animated. A blog entry adds num and date, and a blog
+     image adds uhd and truesize, which its manifest line used to carry. A
+     media file has none of the three switches, because they are an
+     image's. It has no size either when it is a sound: ow and oh are 0.
+
+     nextImg is the blog's counter, for images and media files together:
+     the id the next file takes. It never goes down. Once z999, the last
+     id, is taken, it says "exhausted", which no tag or file can be named.
+
+     A VERSION 1 FILE has no kind, no mime and no from. It is read as
+     images, each with an empty from and the MIME type its extension
+     gives, and the next write makes it version 2. A version this editor
+     does not know is never written: the fields it cannot read would be
+     lost. An older editor cannot read version 2 either, so the editor and
+     the file are committed together.
 
      It loads by a script tag and not a fetch, so a page opened from disk
      reads it, and only when something asks: the editor turning on, the
      composer, a save or a publish. A reader never loads it. */
   var INDEX_FILE = "images.js";
+  var INDEX_V = 2;
   var indexRec = null;        /* the record, once loaded */
   var indexLoading = null;    /* the one load, cached as its promise */
+  var indexProblem = "";      /* why the file on the site must not be written, or "" */
+  /* a counter's text: an id, or the word it says once the last id is taken */
+  var COUNTER_TEXT = /^(?:[0-9a-z]\d{3}|exhausted)$/;
 
-  function indexEmpty() { return { v: 1, stamp: "", nextImg: "0001", images: [] }; }
+  function indexEmpty() { return { v: INDEX_V, stamp: "", nextImg: "0001", images: [] }; }
+
+  /* "an image", "a video", "an audio file" or "a MIDI file", for a
+     sentence about a kind */
+  var KIND_WORDS = { image: "an image", video: "a video", audio: "an audio file", midi: "a MIDI file" };
+  function kindWords(kind) { return own(KIND_WORDS, kind) || "a file of the kind \"" + kind + "\""; }
 
   /* AN IMAGE'S WORDS.
 
@@ -1046,6 +1160,48 @@
     return out;
   }
 
+  /* ONE ENTRY, TYPED. Every entry of the index and every entry the log
+     keeps comes through here, so the two can never keep different fields.
+     The fields come out in one order, so a line of the file changes only
+     when a fact does.
+
+     An entry with no kind is an image: version 1 knew no other kind. A
+     kind that is there is kept as it is, a wrong one too, so entryProblem
+     can name it. Nothing writes a wrong kind back as an image. */
+  function entryNormal(e) {
+    var s = e && typeof e === "object" ? e : {};
+    var kind = s.kind == null || s.kind === "" ? "image" : String(s.kind);
+    var type = String(s.type || "").toLowerCase();
+    var n = { base: String(s.base || ""), kind: kind, type: type,
+              mime: s.mime ? String(s.mime) : mimeOf(type, kind), from: String(s.from || ""),
+              ow: +s.ow || 0, oh: +s.oh || 0, bytes: +s.bytes || 0 };
+    if (kind === "image") n.animated = !!s.animated;
+    n.added = String(s.added || "");
+    n.used = (Array.isArray(s.used) ? s.used : []).map(String);
+    n.words = wordsNormal(s.words, n.used);
+    if (s.num) {
+      n.num = String(s.num);
+      n.date = String(s.date || "");
+      if (kind === "image") { n.uhd = !!s.uhd; n.truesize = !!s.truesize; }
+    }
+    return n;
+  }
+  /* What is wrong with a typed entry, as a sentence, or "". The kind is
+     one the engine knows, the extension is one that kind can have, and
+     the MIME type is the one FORMATS gives the two. A media file is only
+     ever a blog file, named by the blog's media scheme. */
+  function entryProblem(n) {
+    var name = n.base || "An entry with no base";
+    if (!own(TAG_WORDS, n.kind)) return name + " is of the kind \"" + n.kind + "\", which this editor does not know.";
+    var mime = mimeOf(n.type, n.kind);
+    if (!mime) return name + " is " + kindWords(n.kind) + " with the extension \"" + n.type + "\", which the editor does not take for it.";
+    if (n.mime !== mime) return name + " says " + n.mime + ", and " + kindWords(n.kind) + " with the extension ." + n.type + " is " + mime + ".";
+    if (n.kind !== "image" && !(MEDIA_BASE.test(n.base) && n.num && n.base.slice(-4) === n.num)) {
+      return name + " is " + kindWords(n.kind) + " without a blog media name, blog/YYMMDD_mediaNNNN.";
+    }
+    return "";
+  }
+
   /* the record with every field present and typed, so a reader never
      asks whether a field is there */
   function indexNormal(rec) {
@@ -1053,16 +1209,44 @@
     if (rec && typeof rec === "object") {
       out.stamp = String(rec.stamp || "");
       out.nextImg = String(rec.nextImg || "0001");
-      out.images = (rec.images || []).map(function (e) {
-        var n = { base: String(e.base || ""), type: String(e.type || ""), ow: +e.ow || 0, oh: +e.oh || 0,
-                  bytes: +e.bytes || 0, animated: !!e.animated, added: String(e.added || ""),
-                  used: (e.used || []).map(String) };
-        n.words = wordsNormal(e.words, n.used);
-        if (e.num) { n.num = String(e.num); n.date = String(e.date || ""); n.uhd = !!e.uhd; n.truesize = !!e.truesize; }
-        return n;
-      });
+      out.images = (Array.isArray(rec.images) ? rec.images : []).map(entryNormal);
     }
     return out;
+  }
+  /* What a record must be before it is written: a counter the editor can
+     read, and every entry right. The first thing wrong, or "". */
+  function recordProblem(r) {
+    if (!COUNTER_TEXT.test(r.nextImg)) {
+      return INDEX_FILE + " says the next id is \"" + r.nextImg + "\", which is not an id.";
+    }
+    for (var i = 0; i < r.images.length; i++) {
+      var problem = entryProblem(r.images[i]);
+      if (problem) return problem;
+    }
+    return "";
+  }
+  /* Whether the record a load found may be written again: "" when it may,
+     or the reason it may not, written for the author. A file that set no
+     record could not be read. A version above INDEX_V comes from a newer
+     editor. A version 2 entry says its kind, and every entry is one the
+     engine can serve. */
+  function indexCheck(raw) {
+    var never = " Nothing writes " + INDEX_FILE + " until it is fixed.";
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.images)) {
+      return INDEX_FILE + " is on the site and could not be read." + never + " Restore it from git.";
+    }
+    var v = raw.v == null ? 1 : Number(raw.v);
+    if (!(v >= 1 && v % 1 === 0)) return INDEX_FILE + " says it is version \"" + raw.v + "\", which is not a version." + never;
+    if (v > INDEX_V) {
+      return INDEX_FILE + " is version " + v + ", and this editor reads versions 1 to " + INDEX_V + "." +
+        " Nothing writes it until the editor is updated.";
+    }
+    for (var i = 0; i < raw.images.length; i++) {
+      var e = raw.images[i];
+      if (v >= 2 && !(e && e.kind)) return ((e && e.base) || "An entry") + " in " + INDEX_FILE + " does not say its kind." + never;
+    }
+    var problem = recordProblem(indexNormal(raw));
+    return problem ? problem + never : "";
   }
   /* A generated file, loaded by a script tag: its one statement sets a
      window global, read once the tag has run. A page from disk can load a
@@ -1084,10 +1268,15 @@
       doc.head.appendChild(el);
     });
   }
+  /* A file the tag found and could not read still loads: a script with a
+     fault fires load and sets nothing. The check names that, so it never
+     becomes an empty index that the next write would put on the site. */
   function indexLoad() {
     if (!indexLoading) {
       indexLoading = (window.AMH_IMAGES ? Promise.resolve(true) : loadTag(INDEX_FILE)).then(function (found) {
         if (!found) console.info("[images] no " + INDEX_FILE + " on this site yet. The next save or publish writes it.");
+        indexProblem = found ? indexCheck(window.AMH_IMAGES) : "";
+        if (indexProblem) console.warn("[images] " + indexProblem);
         indexRec = indexNormal(window.AMH_IMAGES);
       });
     }
@@ -1095,6 +1284,9 @@
        then replaced it, and the next write builds on that one */
     return indexLoading.then(function () { return indexRec; });
   }
+  /* Why no write may replace the file on the site, or "". A writer asks
+     before it builds, and indexText refuses in any case. */
+  function indexProblemNow() { return indexProblem; }
   function indexGet() { return indexRec; }
   /* the record a write leaves, kept as the current one so the next write
      builds on it */
@@ -1115,10 +1307,11 @@
     (indexRec ? indexRec.images : []).forEach(function (e) { if (e.num) out[e.num] = e; });
     return out;
   }
-  /* an entry for a photo the engine made, at its base path */
+  /* an entry for a file the engine took, at its base path */
   function indexFromPhoto(photo, base, added) {
-    return { base: base, type: photo.type, ow: photo.ow, oh: photo.oh, bytes: photo.bytes,
-             animated: !!photo.animated, added: added, used: [], words: {} };
+    return entryNormal({ base: base, kind: kindOfRow(photo), type: photo.type, mime: mimeOfRow(photo),
+                         from: photo.from || "", ow: photo.ow, oh: photo.oh, bytes: photo.bytes,
+                         animated: !!photo.animated, added: added, used: [], words: {} });
   }
   /* An entry's words as one string: every place's, each phrase once. */
   function indexWords(entry) {
@@ -1143,21 +1336,32 @@
     return "/* GENERATED by the site editor on " + when + "; stamp:" + stamp +
       "; hand edits are overwritten */\n";
   }
-  /* The file's text: a header, then one statement with one image a line,
-     so a diff moves one line when one image changes. */
+  /* The file's text: a header, then one statement with one entry a line,
+     so a diff moves one line when one file changes. It throws, and writes
+     nothing, for a file on the site that must not be replaced and for a
+     record that is wrong: every writer builds its text here, so no writer
+     can put either on the site. */
   function indexText(rec, stamp) {
+    if (indexProblem) throw new Error(indexProblem);
     var r = indexNormal(rec);
+    var problem = recordProblem(r);
+    if (problem) throw new Error(problem + " Nothing was written.");
     r.stamp = String(stamp || "");
     var lines = r.images.map(function (e) { return JSON.stringify(e); });
     return genHeader(r.stamp) +
-      "window.AMH_IMAGES = {\"v\":1,\"stamp\":" + JSON.stringify(r.stamp) +
+      "window.AMH_IMAGES = {\"v\":" + INDEX_V + ",\"stamp\":" + JSON.stringify(r.stamp) +
       ",\"nextImg\":" + JSON.stringify(r.nextImg) + ",\"images\":[" +
       (lines.length ? "\n" + lines.join(",\n") + "\n" : "") + "]};\n";
   }
-  /* An entry's three files, keyed as a photo's are, and as the paths in
-     the order the renditions are made. The display copy is always a JPG,
-     and the original keeps its type. */
+  /* AN ENTRY'S FILES, keyed as a held photo's are: an image's three, from
+     the renditions, or a media file's one, keyed source. The display copy
+     is always a JPG, and an original keeps its type. pathsOf gives the
+     same paths as a list, in that order.
+
+     Every path a save, a bundle, a Super Delete or a Restore names comes
+     from here, so no path is made up for a kind that has no such file. */
   function filesOf(entry) {
+    if (entry && entry.kind && entry.kind !== "image") return { source: entry.base + "." + entry.type };
     var out = {};
     RENDITIONS.forEach(function (r) {
       out[r.key] = entry.base + r.suffix + "." + (r.type ? TYPES[r.type] : entry.type);
@@ -1166,7 +1370,7 @@
   }
   function pathsOf(entry) {
     var files = filesOf(entry);
-    return RENDITIONS.map(function (r) { return files[r.key]; });
+    return Object.keys(files).map(function (k) { return files[k]; });
   }
   /* Every site image a page's regions show, in the order the page shows
      them: { base, where, tag }, where is "path#slug" and tag is the whole
@@ -1240,38 +1444,78 @@
   /* THE LOG OF SUPER DELETES.
 
      superdeleted.js, at the repo root, is committed with the site. It
-     holds one line for each image Super Delete moved out: when, the base,
-     the three paths, the entry as it was, and when it was restored, or
-     "". A line is appended and never removed, so the log is the history,
-     and each line names the files to purge from git history if that is
-     ever wanted. Restore reads the entry back from it. It loads as the
-     index does, on demand, by a script tag. */
+     holds one line for each file Super Delete moved out: when, the base,
+     the paths, the entry as it was, and when it was restored, or "". An
+     image's line names its three files and a media file's line its one.
+     A line is appended and never removed, so the log is the history, and
+     each line names the files to purge from git history if that is ever
+     wanted. Restore reads the entry back from it. It loads as the index
+     does, on demand, by a script tag.
+
+       window.AMH_SUPERDELETED = { v: 2, stamp, deleted: [ line ] }
+
+     Its versions follow the index's. A version 1 line is an image, and
+     a version this editor does not know is never written. */
   var LOG_FILE = "superdeleted.js";
+  var LOG_V = 2;
   var logRec = null;
   var logLoading = null;
+  var logProblem = "";
 
-  function logEmpty() { return { v: 1, stamp: "", deleted: [] }; }
+  function logEmpty() { return { v: LOG_V, stamp: "", deleted: [] }; }
   function logNormal(rec) {
     var out = logEmpty();
     if (rec && typeof rec === "object") {
       out.stamp = String(rec.stamp || "");
-      out.deleted = (rec.deleted || []).map(function (d) {
-        return { at: String(d.at || ""), base: String(d.base || ""),
-                 paths: (d.paths || []).map(String),
-                 entry: indexNormal({ images: [d.entry || {}] }).images[0],
-                 restored: String(d.restored || "") };
+      out.deleted = (Array.isArray(rec.deleted) ? rec.deleted : []).map(function (d) {
+        var s = d && typeof d === "object" ? d : {};
+        return { at: String(s.at || ""), base: String(s.base || ""),
+                 paths: (Array.isArray(s.paths) ? s.paths : []).map(String),
+                 entry: entryNormal(s.entry),
+                 restored: String(s.restored || "") };
       });
     }
     return out;
   }
+  /* The first entry of the log that is wrong, as a sentence, or "". */
+  function logEntriesProblem(r) {
+    for (var i = 0; i < r.deleted.length; i++) {
+      var problem = entryProblem(r.deleted[i].entry);
+      if (problem) return problem;
+    }
+    return "";
+  }
+  /* Whether the log a load found may be written again, by the index's
+     rules: "" when it may, or the reason it may not. */
+  function logCheck(raw) {
+    var never = " Nothing writes " + LOG_FILE + " until it is fixed.";
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.deleted)) {
+      return LOG_FILE + " is on the site and could not be read." + never + " Restore it from git.";
+    }
+    var v = raw.v == null ? 1 : Number(raw.v);
+    if (!(v >= 1 && v % 1 === 0)) return LOG_FILE + " says it is version \"" + raw.v + "\", which is not a version." + never;
+    if (v > LOG_V) {
+      return LOG_FILE + " is version " + v + ", and this editor reads versions 1 to " + LOG_V + "." +
+        " Nothing writes it until the editor is updated.";
+    }
+    for (var i = 0; i < raw.deleted.length; i++) {
+      var d = raw.deleted[i];
+      if (v >= 2 && !(d && d.entry && d.entry.kind)) return "A line in " + LOG_FILE + " does not say its kind." + never;
+    }
+    var problem = logEntriesProblem(logNormal(raw));
+    return problem ? problem + never : "";
+  }
   function logLoad() {
     if (!logLoading) {
-      logLoading = (window.AMH_SUPERDELETED ? Promise.resolve(true) : loadTag(LOG_FILE)).then(function () {
+      logLoading = (window.AMH_SUPERDELETED ? Promise.resolve(true) : loadTag(LOG_FILE)).then(function (found) {
+        logProblem = found ? logCheck(window.AMH_SUPERDELETED) : "";
+        if (logProblem) console.warn("[images] " + logProblem);
         logRec = logNormal(window.AMH_SUPERDELETED);
       });
     }
     return logLoading.then(function () { return logRec; });
   }
+  function logProblemNow() { return logProblem; }
   function logGet() { return logRec; }
   function logSet(rec) { logRec = logNormal(rec); window.AMH_SUPERDELETED = logRec; return logRec; }
   /* the moment a line records: local time, YYMMDD-HHMMSS */
@@ -1284,12 +1528,16 @@
   function logStampText(rec) {
     return logNormal(rec).deleted.map(function (d) { return JSON.stringify(d); }).join("\n");
   }
+  /* The file's text. It throws, and writes nothing, on the index's terms. */
   function logText(rec, stamp) {
+    if (logProblem) throw new Error(logProblem);
     var r = logNormal(rec);
+    var problem = logEntriesProblem(r);
+    if (problem) throw new Error(problem + " Nothing was written.");
     r.stamp = String(stamp || "");
     var lines = r.deleted.map(function (d) { return JSON.stringify(d); });
     return genHeader(r.stamp) +
-      "window.AMH_SUPERDELETED = {\"v\":1,\"stamp\":" + JSON.stringify(r.stamp) + ",\"deleted\":[" +
+      "window.AMH_SUPERDELETED = {\"v\":" + LOG_V + ",\"stamp\":" + JSON.stringify(r.stamp) + ",\"deleted\":[" +
       (lines.length ? "\n" + lines.join(",\n") + "\n" : "") + "]};\n";
   }
 
@@ -1371,8 +1619,16 @@
     GIT_FILE_LIMIT_MB: GIT_FILE_LIMIT_MB,
     SMALL_IMAGE_PX: SMALL_IMAGE_PX,
     MAX_SIDE: MAX_SIDE,
+    /* the image formats a picker takes; a media file is the blog's alone */
     ACCEPT: Object.keys(TYPES).join(","),
     DELETE_DIR: DELETE_DIR,
+    /* every extension the engine takes, and the kinds each can be. See
+       FORMATS in section 2. */
+    FORMATS: FORMATS,
+    kindsOf: kindsOf,          /* the kinds an extension can be */
+    mimeOf: mimeOf,            /* the MIME type of an extension as a kind, or "" */
+    tagWordOf: tagWordOf,      /* the word a blog tag names a kind with */
+    kindWords: kindWords,      /* "a video", for a sentence about a kind */
 
     intake: intake,            /* a file, made into a photo */
     hold: hold,                /* a page shows it: keep it until a save */
@@ -1399,11 +1655,15 @@
       load: indexLoad,         /* the record, as a promise; loads the file once */
       get: indexGet,           /* the record, or null before load() settled */
       set: indexSet,           /* the record a write left */
+      problem: indexProblemNow, /* why the file on the site must not be written, or "" */
+      check: indexCheck,       /* the same answer for any record, as a file holds it */
       entry: indexEntry,       /* one entry by base path */
       blog: indexBlog,         /* one blog entry by number */
       blogMap: indexBlogMap,   /* { num: entry }, the map the blog takes */
       fromPhoto: indexFromPhoto,
-      text: indexText,         /* the file's text, for a stamp */
+      typed: entryNormal,      /* one entry with every field, typed */
+      entryProblem: entryProblem, /* what is wrong with a typed entry, or "" */
+      text: indexText,         /* the file's text, for a stamp; throws for a refused write */
       stampText: indexStampText,
       words: indexWords        /* an entry's words, as one string */
     },
@@ -1416,12 +1676,14 @@
       load: logLoad,           /* the log, as a promise; loads the file once */
       get: logGet,             /* the log, or null before load() settled */
       set: logSet,             /* the log a write left */
-      text: logText,           /* the file's text, for a stamp */
+      problem: logProblemNow,  /* why the file on the site must not be written, or "" */
+      check: logCheck,         /* the same answer for any log, as a file holds it */
+      text: logText,           /* the file's text, for a stamp; throws for a refused write */
       stampText: logStampText,
       now: logNow              /* the moment a line records */
     },
-    filesOf: filesOf,          /* an entry's three files, keyed */
-    pathsOf: pathsOf,          /* an entry's three paths, in order */
+    filesOf: filesOf,          /* an entry's files, keyed: an image's three, a media file's source */
+    pathsOf: pathsOf,          /* the same paths, in order */
     usageOf: usageOf,          /* where a page's regions show the site's images */
     named: named,              /* the engine's file names in a text */
     unused: unused,            /* the engine's files that nothing uses */

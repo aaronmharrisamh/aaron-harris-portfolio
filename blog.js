@@ -126,6 +126,34 @@
     return ID_DIGITS.indexOf(s.charAt(0)) * 1000 + parseInt(s.slice(1), 10);
   }
 
+  /* THE IMAGE COUNTER: the id the next image or media file takes. It never
+     goes down. Once z999, the last id, is taken, the counter says
+     "exhausted": a word no tag and no file name can be, so it can never
+     be read as an id and handed out again.
+
+     These two are the one way between a counter's text and a number.
+     Every other way loses the end: an id function throws at 36,000, and
+     "exhausted" read as an id is 0, which a fallback of 1 turns into 0001.
+     A counter that is not a counter reads as 0, so a caller can take a
+     larger value from elsewhere and never believe this one. */
+  var BLOG_ID_COUNT = 36000;
+  var BLOG_COUNTER_DONE = "exhausted";
+  /* the next number a counter names: 1 to 36000, where 36000 is
+     "exhausted", or 0 for text that is not a counter. New numbers start
+     at 0001, so a counter of 0000 names 1. */
+  function blogCounterNum(text) {
+    var s = String(text == null ? "" : text).trim();
+    if (s === BLOG_COUNTER_DONE) return BLOG_ID_COUNT;
+    if (!/^[0-9a-z]\d{3}$/.test(s)) return 0;
+    return Math.max(1, blogIdNum(s));
+  }
+  /* a number as a counter's text: an id, or "exhausted" from 36000 up */
+  function blogCounterText(n) {
+    n = Math.floor(Number(n)) || 0;
+    if (n >= BLOG_ID_COUNT) return BLOG_COUNTER_DONE;
+    return blogIdOf(Math.max(1, n));
+  }
+
   function blogParseManifest() {
     var el = doc.getElementById("blogManifest");
     var out = { nextPost: 1, nextImg: 1, entries: [], months: [], stamp: "",
@@ -135,7 +163,7 @@
       .filter(function (l) { return l !== ""; });
     lines.forEach(function (l) {
       if (l.indexOf("next-post:") === 0) out.nextPost = blogIdNum(l.slice(10)) || 1;
-      else if (l.indexOf("next-img:") === 0) out.nextImg = blogIdNum(l.slice(9)) || 1;
+      else if (l.indexOf("next-img:") === 0) out.nextImg = blogCounterNum(l.slice(9)) || 1;
       else if (l.indexOf("stamp:") === 0) out.stamp = l.slice(6).trim();
       else if (l.indexOf("months:") === 0) out.months = l.slice(7).split(/\s+/).filter(Boolean);
       else if (/^month:\d{4}=/.test(l)) out.monthStamps[l.slice(6, 10)] = l.slice(11).trim();
@@ -209,9 +237,11 @@
   /* ==========================================================
      3. BODY RENDERING
      ----------------------------------------------------------
-     A post body is plain HTML plus image tags of the form
-     [img0001,caption|alt]. Each run of tags becomes one carousel, which
-     work.js builds on the page the way it builds the home page's.
+     A post body is plain HTML plus tags of the form
+     [img0001,caption|alt] and [video0012,caption|description]. Each run
+     of tags becomes one carousel, which work.js builds on the page the
+     way it builds the home page's. A tag that says nocarousel is a block
+     of its own.
      ========================================================== */
   /* How wide a blog image is drawn, which the browser has to be told before
      it picks a copy.
@@ -227,29 +257,131 @@
   var BLOG_SIZES = "(max-width: 700px) 80vw, 520px";
   var BLOG_SLOT = { sizes: BLOG_SIZES, widest: 560 };
 
-  /* THE IMAGE TAG, NAMED ONCE.
+  /* THE TAG, NAMED ONCE.
 
        [portrait img0001,caption|alt]
+       [nocarousel noborders video0012,caption|description]
 
-     An optional frame word and one space, img and four digits, an optional
-     comma and caption, an optional pipe and alt. The word is portrait or
-     landscape, in lower case, and png is the older name of img. The groups,
-     in order: the word, img or png, the number, the caption, the alt.
+     Options first, in any order, each one followed by one space; then the
+     kind's word and a four-character id; then an optional comma and
+     caption, and an optional pipe and a description, which is an image's
+     alt text. The options and the kind are lower case, and png is the
+     older name of img.
+
+     The groups, in order: the options as one string, or nothing when a
+     tag has none; the kind's word; the number; the caption; the alt. A tag
+     with one frame word has that word alone in the first group, as it
+     always had.
 
      publish.js builds every tag reader it has from this source, so a tag
      means one thing to the composer and to the page. markdown.js keeps a
      copy of its own, because it also loads on the home page, where this
      file does not; the harness runs one list of tags through both. */
-  var BLOG_TAG = "\\[(?:(portrait|landscape) )?(img|png)(" + BLOG_ID + ")(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+  var BLOG_OPTIONS = ["portrait1:1", "portrait", "landscape", "nocarousel", "noborders",
+                      "nocontrols", "autoplay", "muted", "unmuted", "loop"];
+  /* portrait1:1 is before portrait, so the longer word is tried first */
+  var BLOG_OPTION = "(?:" + BLOG_OPTIONS.join("|") + ")";
+  /* each kind's word, and the kind it names */
+  var BLOG_KINDS = { img: "image", png: "image", video: "video", audio: "audio", midi: "midi" };
+  var BLOG_TAG = "\\[(?:(" + BLOG_OPTION + "(?: " + BLOG_OPTION + ")*) )?(" +
+    Object.keys(BLOG_KINDS).join("|") + ")(" + BLOG_ID + ")(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+
+  /* "a", "a and b", "a, b and c" */
+  function blogAnd(list) {
+    if (list.length < 2) return list.join("");
+    return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+  }
+
+  /* A TAG'S OPTIONS, BY NAME.
+
+       shape       the frame word: portrait, landscape, or portrait1:1 for
+                   a square; "" for none
+       nocarousel  a block of its own, outside any carousel
+       noborders   a frame with no border, background, shadow or inset
+       nocontrols  the player's own controls hidden
+       autoplay    play, once the player can be seen and the browser lets it
+       sound       "muted", "unmuted", or "" for the default, which is sound
+       loop        play again from the start at the end
+
+     The first frame word is the tag's. A second, different one is a
+     problem, and so is a tag that says both muted and unmuted. A word
+     written twice is read once. problems lists each as a short phrase. */
+  var BLOG_SHAPES = ["portrait1:1", "portrait", "landscape"];
+  function blogTagOptions(text) {
+    var o = { shape: "", nocarousel: false, noborders: false, nocontrols: false,
+              autoplay: false, sound: "", loop: false, problems: [] };
+    var said = function (p) { if (o.problems.indexOf(p) === -1) o.problems.push(p); };
+    String(text || "").split(" ").forEach(function (w) {
+      if (!w) return;
+      if (BLOG_SHAPES.indexOf(w) !== -1) {
+        if (!o.shape) o.shape = w;
+        else if (o.shape !== w) said("two frame words, " + o.shape + " and " + w);
+      } else if (w === "muted" || w === "unmuted") {
+        if (!o.sound) o.sound = w;
+        else if (o.sound !== w) said("both muted and unmuted");
+      } else if (BLOG_OPTIONS.indexOf(w) !== -1) {
+        o[w] = true;
+      }
+    });
+    return o;
+  }
+  /* The options as a tag writes them: each one once, in one order. A tag
+     the composer writes says the same thing in the same words each time. */
+  function blogOptionsText(o) {
+    var out = [];
+    if (o.nocarousel) out.push("nocarousel");
+    if (o.shape) out.push(o.shape);
+    if (o.noborders) out.push("noborders");
+    if (o.nocontrols) out.push("nocontrols");
+    if (o.autoplay) out.push("autoplay");
+    if (o.sound) out.push(o.sound);
+    if (o.loop) out.push("loop");
+    return out.join(" ");
+  }
+
+  /* ONE TAG, READ: a match of BLOG_TAG as the options above, and
+
+       text      the tag as it is written
+       at        where it starts in the text it was found in
+       word      the kind's word as written: img, png, video, audio or midi
+       kind      "image", "video", "audio" or "midi"
+       num       the id
+       caption   the caption, trimmed; "" for none
+       alt       the alt text or the description, trimmed; "" for none
+
+     A playback option on a picture or a MIDI file is a problem too: it
+     asks for a player that the page never draws. */
+  var BLOG_PLAYBACK = ["nocontrols", "autoplay", "loop"];
+  function blogTagRead(m) {
+    var o = blogTagOptions(m[1]);
+    o.text = m[0]; o.at = m.index; o.word = m[2]; o.kind = BLOG_KINDS[m[2]]; o.num = m[3];
+    o.caption = (m[4] || "").trim(); o.alt = (m[5] || "").trim();
+    if (o.kind !== "video" && o.kind !== "audio") {
+      var asks = BLOG_PLAYBACK.filter(function (w) { return o[w]; });
+      if (o.sound) asks.push(o.sound);
+      if (asks.length) o.problems.push(blogAnd(asks) + (asks.length === 1 ? " is" : " are") + " for audio and video only");
+    }
+    return o;
+  }
+  /* every tag in a text, read, in the order they are written */
+  function blogTagsOf(source) {
+    var re = new RegExp(BLOG_TAG, "g");
+    var out = [], m;
+    while ((m = re.exec(String(source || "")))) out.push(blogTagRead(m));
+    return out;
+  }
 
   /* TEXT THAT IS ALMOST A TAG.
 
-     A bracketed run that holds img or png and an id, and that the tag
-     rule does not match whole: [portrait1:1 img0005,...], [Portrait
-     img0005], [img 0005]. The composer names such text while it is typed
-     and once more at publish, because a typo here used to cost the image.
-     The escape [!img0005] is a deliberate non-tag and is never named. */
-  var NEAR_TAG = /\[(?!!)[^\]\n]*\b(?:img|png)\s?[0-9a-z]\d{3}\b[^\]\n]*\]/g;
+     A bracketed run that holds a kind's word and an id, and that the tag
+     rule does not match whole: [unsupportedshape img0005,...], [Portrait
+     img0005], [img 0005], [Video0012]. The kind's word is found in any
+     case, because a capital is the likeliest slip. A link's text, the
+     brackets before "(", is never one. The composer names such text while
+     it is typed and once more at publish, because a typo here used to cost
+     the image. The escape [!img0005] is a deliberate non-tag and is never
+     named. */
+  var NEAR_TAG = /\[(?!!)[^\]\n]*\b(?:img|png|video|audio|midi)\s?[0-9a-z]\d{3}\b[^\]\n]*\](?!\()/gi;
   function blogNearTags(source) {
     var whole = new RegExp("^" + BLOG_TAG + "$");
     var out = [], m;
@@ -296,39 +428,199 @@
     }
     return runs;
   }
+  /* A run's carousels, each a list of read tags: the run cut at each tag
+     that says nocarousel, which belongs to none of them. */
+  function blogStretches(tags) {
+    var out = [], stretch = [];
+    tags.forEach(function (t) {
+      if (!t.nocarousel) { stretch.push(t); return; }
+      if (stretch.length) out.push(stretch);
+      stretch = [];
+    });
+    if (stretch.length) out.push(stretch);
+    return out;
+  }
 
-  /* A post body with each run of image tags written as one carousel: a
-     .gallery for the run, and an <img> for each tag with the markup
-     contract on it.
+  /* WHAT THE COMPOSER SAYS ABOUT A BODY'S TAGS: { problems, notices }.
+
+     A problem stops a publish, because the tag cannot be shown as it is
+     written: two frame words, both muted and unmuted, a playback option on
+     a picture or a MIDI file, or an id that names a file of another kind.
+     A notice does not: a word in a carousel's later tag that the first
+     tag already decides, so the page does not use it.
+
+     map is the site's { num: entry }. Without one, no kind is compared.
+     Each message starts with the tag as it is written. */
+  function blogTagIssues(source, map) {
+    var problems = [], notices = [];
+    var add = function (list, s) { if (list.indexOf(s) === -1) list.push(s); };
+    blogTagRuns(String(source || "")).forEach(function (run) {
+      var tags = run.tags.map(blogTagRead);
+      tags.forEach(function (t) {
+        t.problems.forEach(function (p) { add(problems, t.text + ": " + p + "."); });
+        var rec = map ? map[t.num] : null;
+        var kind = rec ? rec.kind || "image" : "";
+        if (rec && kind !== t.kind) {
+          add(problems, t.text + ": " + t.num + " is " + AMH.images.kindWords(kind) + ". Write " +
+            AMH.images.tagWordOf(kind) + t.num + ".");
+        }
+      });
+      blogStretches(tags).forEach(function (stretch) {
+        var shape = "";
+        stretch.forEach(function (t, i) {
+          if (t.shape && !shape) shape = t.shape;
+          else if (t.shape && t.shape !== shape) {
+            add(notices, t.text + ": " + t.shape + " is not used. The carousel's first frame word, " +
+              shape + ", sets its frame.");
+          }
+          if (i > 0 && t.noborders && !stretch[0].noborders) {
+            add(notices, t.text + ": noborders is not used. The carousel's first tag sets its borders.");
+          }
+        });
+      });
+    });
+    return { problems: problems, notices: notices };
+  }
+
+  /* An attribute's value, and the text of an element, escaped. */
+  function blogAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  /* A path under the page's prefix. A blob: URL, a rooted path and an
+     address with a scheme are already whole. AMH.images.attrs follows the
+     same rule for an image's paths. */
+  function blogPut(prefix, path) {
+    return path && prefix && path.indexOf("blob:") !== 0 && path.indexOf("/") !== 0 &&
+      !/^[a-z]+:/i.test(path) ? prefix + path : path;
+  }
+
+  /* The entry a tag is drawn from, or null when the tag stays as its own
+     text. An image tag with no entry is an image from before the engine,
+     which blogImageEntry still names. A media tag never is: with no entry
+     of its own kind there is no file to play, and a guessed path would be
+     a player for nothing. An image tag that names a media file is the same
+     slip the other way round. */
+  function blogEntryFor(t, postDate, images) {
+    var rec = images ? images[t.num] : null;
+    var kind = rec ? rec.kind || "image" : "";
+    if (t.kind === "image") return rec && kind !== "image" ? null : blogImageEntry(t.num, postDate, t.word, images);
+    return rec && kind === t.kind ? rec : null;
+  }
+
+  /* One image, as the <img> a carousel shows, with the markup contract on it. */
+  function blogImgHtml(t, opts) {
+    var attrs = AMH.images.attrs(t.entry, BLOG_SLOT, opts)
+      .map(function (a) { return " " + a[0] + '="' + blogAttr(a[1]) + '"'; }).join("");
+    return "<img" + attrs + ' loading="lazy" alt="' + blogAttr(t.alt || t.caption || ("Blog image " + t.num)) + '"' +
+      (t.caption ? ' data-caption="' + blogAttr(t.caption) + '"' : "") + " />";
+  }
+  /* One image on its own, outside any carousel: a figure, with its caption
+     under the picture. */
+  function blogAloneImageHtml(t, opts) {
+    return '<figure class="bp-media bp-media--alone" data-kind="image"' +
+      (t.shape ? ' data-shape="' + t.shape + '"' : "") + (t.noborders ? ' data-noborders="1"' : "") + ">" +
+      blogImgHtml(t, opts) +
+      (t.caption ? '<figcaption class="bp-media__cap">' + blogAttr(t.caption) + "</figcaption>" : "") + "</figure>";
+  }
+
+  /* THE MEDIA PLACEMENT, NAMED ONCE: one video, sound or MIDI file as a
+     figure that works with no script. A video or a sound is the browser's
+     own player, with its controls, paused, and loading nothing until it is
+     played. A MIDI file is a link to the file, because a browser has no
+     player for one. Every figure carries a link that downloads the file
+     under the name it was added with.
+
+     What the tag asks for rides on the figure as data, for work.js:
+     data-nocontrols, data-autoplay, data-sound and data-loop, and, on a
+     figure of its own, data-shape and data-noborders. muted and loop are
+     the player's own attributes too, which work with no script. autoplay
+     is data only: a page must not start by itself, so the script decides
+     when it may ask. The controls stay in the markup for nocontrols as
+     well; they come off only once something else can play and pause. */
+  var BLOG_KIND_NAMES = { video: "video", audio: "audio", midi: "MIDI file" };
+  function blogMediaHtml(t, opts, alone) {
+    var e = t.entry;
+    var src = blogPut(opts.prefix, AMH.images.filesOf(e).source);
+    var name = e.from || src.replace(/^.*\//, "");
+    var said = t.alt || t.caption || ("Blog " + BLOG_KIND_NAMES[t.kind] + " " + t.num);
+    var size = e.bytes && AMH.work && AMH.work.sizeText ? " (" + AMH.work.sizeText(e.bytes) + ")" : "";
+    var plays = t.kind === "video" || t.kind === "audio";
+    var player = !plays ? "" : "<" + t.kind + ' controls preload="none"' +
+      (t.kind === "video" ? " playsinline" : "") + (t.sound === "muted" ? " muted" : "") + (t.loop ? " loop" : "") +
+      (t.kind === "video" && e.ow && e.oh ? ' width="' + e.ow + '" height="' + e.oh + '"' : "") +
+      ' aria-label="' + blogAttr(said) + '"><source src="' + blogAttr(src) + '" type="' + blogAttr(e.mime) + '" />' +
+      "</" + t.kind + ">";
+    return '<figure class="bp-media' + (alone ? " bp-media--alone" : "") + '" data-kind="' + t.kind + '"' +
+      (alone && t.shape ? ' data-shape="' + t.shape + '"' : "") +
+      (alone && t.noborders ? ' data-noborders="1"' : "") +
+      (plays && t.nocontrols ? ' data-nocontrols="1"' : "") + (plays && t.autoplay ? ' data-autoplay="1"' : "") +
+      (plays && t.sound ? ' data-sound="' + t.sound + '"' : "") + (plays && t.loop ? ' data-loop="1"' : "") +
+      (t.caption ? ' data-caption="' + blogAttr(t.caption) + '"' : "") + ">" + player +
+      (t.caption ? '<figcaption class="bp-media__cap">' + blogAttr(t.caption) + "</figcaption>" : "") +
+      '<a class="bp-media__file" href="' + blogAttr(src) + '" download="' + blogAttr(name) + '" type="' +
+      blogAttr(e.mime) + '">Download ' + blogAttr(name) + size + "</a></figure>";
+  }
+
+  /* One carousel: a .gallery for a stretch of tags, with an <img> for each
+     image and a figure for each media file, in the order they are written.
+     The first frame word in the stretch becomes its data-shape; with none,
+     work.js takes the frame's shape from the pictures. The first tag's
+     noborders is the carousel's, so the frame does not change from one
+     slide to the next. */
+  function blogCarouselHtml(tags, opts) {
+    var shape = "";
+    var items = tags.map(function (t) {
+      if (!shape && t.shape) shape = t.shape;
+      return t.kind === "image" ? blogImgHtml(t, opts) : blogMediaHtml(t, opts, false);
+    });
+    return '<div class="gallery"' + (shape ? ' data-shape="' + shape + '"' : "") +
+      (tags[0].noborders ? ' data-noborders="1"' : "") + ">" + items.join("") + "</div>";
+  }
+  /* One run of tags as the blocks it makes. The tags of a run are one
+     carousel until a tag says nocarousel: that tag is a block of its own,
+     and the tags after it start the next carousel, so two such tags side
+     by side are two blocks. A tag with no entry to draw from stays as the
+     text it is, with the space before it, and ends the carousel before it
+     the same way. text is the whole text the run was found in. */
+  function blogRunHtml(text, tags, postDate, images, opts) {
+    var html = "", stretch = [];
+    function close() {
+      if (stretch.length) html += blogCarouselHtml(stretch, opts);
+      stretch = [];
+    }
+    tags.forEach(function (t, i) {
+      t.entry = blogEntryFor(t, postDate, images);
+      if (!t.entry) {
+        close();
+        html += (i ? text.slice(tags[i - 1].at + tags[i - 1].text.length, t.at) : "") + t.text;
+        return;
+      }
+      if (!t.nocarousel) { stretch.push(t); return; }
+      close();
+      html += t.kind === "image" ? blogAloneImageHtml(t, opts) : blogMediaHtml(t, opts, true);
+    });
+    close();
+    return html;
+  }
+
+  /* A post body with each run of tags written as the blocks it makes: a
+     .gallery for a carousel, and a figure for a tag on its own.
 
        source    the body's HTML; a Markdown post's is rendered first
        postDate  its YYMMDD, for an image from before the engine
        prefix    what a path is relative to: "" on blog.html and in the
                  preview, "../" on a month page, which sits in blog/
-       images    the manifest's map of what is on the site. Without one a
-                 tag is written as it was before the engine, with one src
+       images    the site's map of what it holds, { num: entry }. Without
+                 one an image tag is written as it was before the engine,
+                 with one src, and a media tag stays as text
 
-     The first word found in a run becomes the carousel's data-shape. With
-     none, work.js takes the frame's shape from the photos. */
+     Everything outside the runs is the source, byte for byte. */
   function blogRenderBody(source, postDate, prefix, images) {
-    var esc = function (s) {
-      return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    };
     var opts = { prefix: prefix === undefined ? "../" : prefix };
     var text = String(source);
     var out = "", at = 0;
     blogTagRuns(text).forEach(function (run) {
-      var word = "";
-      var imgs = run.tags.map(function (m) {
-        if (!word && m[1]) word = m[1];
-        var num = m[3], cap = (m[4] || "").trim(), alt = (m[5] || "").trim();
-        var attrs = AMH.images.attrs(blogImageEntry(num, postDate, m[2], images), BLOG_SLOT, opts)
-          .map(function (a) { return " " + a[0] + '="' + esc(a[1]) + '"'; }).join("");
-        return "<img" + attrs + ' loading="lazy" alt="' + esc(alt || cap || ("Blog image " + num)) + '"' +
-          (cap ? ' data-caption="' + esc(cap) + '"' : "") + " />";
-      });
-      out += text.slice(at, run.start) +
-        '<div class="gallery"' + (word ? ' data-shape="' + word + '"' : "") + ">" + imgs.join("") + "</div>";
+      out += text.slice(at, run.start) + blogRunHtml(text, run.tags.map(blogTagRead), postDate, images, opts);
       at = run.end;
     });
     return out + text.slice(at);
@@ -1931,12 +2223,21 @@
 
        parseManifest()            -> { entries, months, nextPost, nextImg, stamp }
        renderBody(src, date, prefix, images) -> HTML for one post body,
-                                  each run of image tags a carousel
-       TAG                        the image tag's pattern, as a regular
+                                  each run of tags a carousel, and each
+                                  nocarousel tag a block of its own
+       TAG                        the tag's pattern, as a regular
                                   expression's source; see section 3
+       OPTIONS / KINDS            the option words, and each kind's word
+       readTag(match)             one match of TAG, by name
+       tagsOf(source)             every tag in a text, read
+       options(text)              an options string, by name
+       optionsText(options)       the same, written the one way a tag is
+       tagIssues(source, map)     { problems, notices } about a body's tags
        ID                         an id's pattern, [0-9a-z]\d{3}
        idOf(n) / idNum(id)        the id of the n-th post or image, and
                                   the number an id stands for
+       counterNum(text) / counterText(n) -> the image counter, read and
+                                  written; "exhausted" once z999 is taken
        nearTags(source)           the pieces of a body that are almost a
                                   tag and are not one
        encodeSource(s) / decodeSource(s) -> the escaped form stored in a
@@ -1988,9 +2289,19 @@
     parseManifest: blogParseManifest,
     renderBody: blogRenderBody,
     TAG: BLOG_TAG,
+    OPTIONS: BLOG_OPTIONS,
+    KINDS: BLOG_KINDS,
+    readTag: blogTagRead,
+    tagsOf: blogTagsOf,
+    options: blogTagOptions,
+    optionsText: blogOptionsText,
+    tagIssues: blogTagIssues,
     ID: BLOG_ID,
     idOf: blogIdOf,
     idNum: blogIdNum,
+    ID_COUNT: BLOG_ID_COUNT,
+    counterNum: blogCounterNum,
+    counterText: blogCounterText,
     nearTags: blogNearTags,
     encodeSource: blogEncodeSource,
     decodeSource: blogDecodeSource,

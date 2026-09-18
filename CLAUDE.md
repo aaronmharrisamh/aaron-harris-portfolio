@@ -155,12 +155,12 @@ here before they exist on disk.
 | `site.css` | All page style. Replaces the inline style block. |
 | `site.js` | Shared page behavior for every page. |
 | `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
-| `imagesengine.js` | The image engine: what an upload becomes, the photos held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
-| `blog.js` | The blog reading engine: the stream, the cuts, the month chain and find. `blog.html` and every month page. |
+| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
+| `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
-| `images.js` | GENERATED. The image index: every image the site holds, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
-| `superdeleted.js` | GENERATED. The log of every Super Delete: when, the three paths, the entry as it was, and when it was restored. Written by the Images box, loaded by it only. Do not edit by hand. |
+| `images.js` | GENERATED. The image index: every image and media file the site holds, its kind, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
+| `superdeleted.js` | GENERATED. The log of every Super Delete: when, the paths, the typed entry as it was, and when it was restored. Written by the Images box, loaded by it and by a rebuild only. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
