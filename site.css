@@ -2480,6 +2480,26 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 }
 .bs-post__tags a:hover { border-color: var(--accent); color: var(--accent-bright); }
 
+/* THE FOLD WINS OVER THE BLOCK IT HIDES.
+
+   A cut hides each block past it with the hidden property, and the
+   browser's own rule is what draws that as display:none. Every rule in
+   this file beats a browser rule, whatever its specificity, so a block
+   that states a display of its own stayed on screen inside a folded post:
+   a carousel, which is display:block once it is ready, showed its
+   photographs under a post that was closed.
+
+   This says it once for every block a post can hold, now and later, which
+   is why it is important and why it is not written for the carousel
+   alone. The blocks a cut hides are the children of the body, so that is
+   what it covers.
+
+   A hidden image is also an image the browser does not fetch: a post
+   writes every photograph with loading="lazy", and a lazy image with no
+   box on the page is never near the viewport. So a folded post costs its
+   reader nothing until they open it. */
+.bs-post__body > [hidden] { display: none !important; }
+
 /* THE CUT CONTROLS. A long post shows to here and opens in place. */
 .bs-more {
   display: inline-flex; align-items: center; gap: .4rem;

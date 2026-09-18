@@ -9651,6 +9651,45 @@ async function main() {
       JSON.stringify(cuts.chars));
     check("cuts: every folded post was counted once", cuts.folded === 7, String(cuts.folded));
 
+    // CUT1b. A BLOCK UNDER THE CUT IS DRAWN NOWHERE.
+    // The fold hides a block with the hidden property, which the browser
+    // draws as display:none with a rule of its own. Every rule in site.css
+    // beats a browser rule, so a carousel, which states display:block once
+    // it is ready, showed its photographs under a post that was closed.
+    const cutHide = await evaluate(`(function () {
+      var stream = document.getElementById('blogStream');
+      var a = document.createElement('article');
+      a.className = 'bs-post'; a.id = 's9010'; a.setAttribute('data-id', '9010');
+      a.setAttribute('data-date', '260711');
+      a.innerHTML = '<div class="bs-post__body"><p>Above the cut.</p>' +
+        '<span class="bp-cut" data-cut="soft"></span><p>Under it.</p>' +
+        '<div class="gallery is-ready"><img alt="" loading="lazy" /></div></div>';
+      stream.appendChild(a);
+      AMH.blog.cut();
+      var body = a.querySelector('.bs-post__body');
+      var g = body.querySelector('.gallery');
+      function look() {
+        return { hidden: g.hasAttribute('hidden'), display: getComputedStyle(g).display,
+                 boxes: g.getClientRects().length, onScreen: g.offsetParent !== null };
+      }
+      var closed = look();
+      body.querySelector('.bs-more').click();
+      var open = look();
+      a.remove();
+      return { closed: closed, open: open };
+    })()`);
+    check("cuts: a carousel under the cut is drawn nowhere until the reader expands the post",
+      cutHide.closed.hidden && cutHide.closed.display === "none" &&
+      cutHide.closed.boxes === 0 && !cutHide.closed.onScreen &&
+      !cutHide.open.hidden && cutHide.open.display === "block" && cutHide.open.boxes === 1,
+      JSON.stringify(cutHide));
+    // A hidden image is also an image the browser does not fetch: a lazy
+    // image with no box on the page is never near the viewport.
+    const cutLazy = await evaluate(`AMH.blog.renderBody('Words.\\n\\n[img0001,Cap|Alt]', '260711', '', {})`);
+    check("cuts: a post writes every photograph lazy, so one under the cut costs the reader nothing",
+      /<img[^>]*loading="lazy"/.test(cutLazy) && (cutLazy.match(/<img/g) || []).length === 1,
+      String(cutLazy).slice(0, 220));
+
     // CUT2. the reveal: Expand opens as far as the hard cut and hands over
     // to Read more, which is a link away rather than a second press
     const reveal = await evaluate(`(function () {
