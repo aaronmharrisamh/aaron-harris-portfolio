@@ -1012,6 +1012,40 @@
   var indexLoading = null;    /* the one load, cached as its promise */
 
   function indexEmpty() { return { v: 1, stamp: "", nextImg: "0001", images: [] }; }
+
+  /* AN IMAGE'S WORDS.
+
+     What each place says about an image: its caption, then its alt text.
+     The words are kept by place, the way used is, because the record has
+     two writers that each see part of the site: a save sees the pages it
+     writes and a publish the post it writes. Each replaces the words of
+     the places it writes and touches no other place, so no writer has to
+     read a page it did not come to write, and the words never swing
+     between the two. A reader takes them as one string. */
+  var WORDS_JOIN = " · ";
+  /* One place's words from its parts, in order: each trimmed, an empty
+     one dropped, and a repeat written once. */
+  function phraseOf(parts) {
+    var out = [];
+    (parts || []).forEach(function (p) {
+      p = String(p == null ? "" : p).trim();
+      if (p && out.indexOf(p) === -1) out.push(p);
+    });
+    return out.join(WORDS_JOIN);
+  }
+  /* The words an entry keeps: a string for each place it is used, in the
+     order used lists them. A place it is not used any more has no words,
+     so a writer that takes a use away takes its words with it. */
+  function wordsNormal(words, used) {
+    var out = {};
+    var w = words && typeof words === "object" ? words : {};
+    used.forEach(function (u) {
+      var s = w[u] == null ? "" : String(w[u]).trim();
+      if (s) out[u] = s;
+    });
+    return out;
+  }
+
   /* the record with every field present and typed, so a reader never
      asks whether a field is there */
   function indexNormal(rec) {
@@ -1023,6 +1057,7 @@
         var n = { base: String(e.base || ""), type: String(e.type || ""), ow: +e.ow || 0, oh: +e.oh || 0,
                   bytes: +e.bytes || 0, animated: !!e.animated, added: String(e.added || ""),
                   used: (e.used || []).map(String) };
+        n.words = wordsNormal(e.words, n.used);
         if (e.num) { n.num = String(e.num); n.date = String(e.date || ""); n.uhd = !!e.uhd; n.truesize = !!e.truesize; }
         return n;
       });
@@ -1083,7 +1118,16 @@
   /* an entry for a photo the engine made, at its base path */
   function indexFromPhoto(photo, base, added) {
     return { base: base, type: photo.type, ow: photo.ow, oh: photo.oh, bytes: photo.bytes,
-             animated: !!photo.animated, added: added, used: [] };
+             animated: !!photo.animated, added: added, used: [], words: {} };
+  }
+  /* An entry's words as one string: every place's, each phrase once. */
+  function indexWords(entry) {
+    var parts = [];
+    var w = entry && entry.words ? entry.words : {};
+    ((entry && entry.used) || Object.keys(w)).forEach(function (u) {
+      if (w[u]) parts = parts.concat(String(w[u]).split(WORDS_JOIN));
+    });
+    return phraseOf(parts);
   }
   /* The text a stamp is taken over: the images and the counter, and not
      the date or the stamp itself, so an unchanged record keeps its stamp
@@ -1124,12 +1168,15 @@
     var files = filesOf(entry);
     return RENDITIONS.map(function (r) { return files[r.key]; });
   }
-  /* Where a page's regions show the site's images: { base: ["path#slug"] }.
-     Read from the page's text, region by region, so a page that is not on
-     screen can answer. An image inside a nested region is the innermost
-     region's. Only the site scheme counts: a blog image's use is its post,
-     which the publish records, and the stream on blog.html is a copy. */
-  function usageOf(pageText, path) {
+  /* Every site image a page's regions show, in the order the page shows
+     them: { base, where, tag }, where is "path#slug" and tag is the whole
+     <img> tag. Read from the page's text, region by region, so a page
+     that is not on screen can answer. An image inside a nested region is
+     the innermost region's. Only the site scheme counts: a blog image's
+     use is its post, which the publish records, and the stream on
+     blog.html is a copy. usageOf and wordsOf both read this, so the places
+     an image is used and the places its words come from cannot differ. */
+  function siteImagesOf(pageText, path) {
     var text = String(pageText || "");
     var regions = [];
     var re = /<!--\[edit:([\w-]+)\]-->([\s\S]*?)<!--\[\/edit:\1\]-->/g, m;
@@ -1137,20 +1184,56 @@
       regions.push({ slug: m[1], start: m.index, end: m.index + m[0].length });
       re.lastIndex = m.index + 1;   /* a region inside this one starts inside it */
     }
-    var out = {};
-    var im = /<img\b[^>]*?\bdata-original="([^"]*)"/g, i;
+    var out = [];
+    /* a quoted value is stepped over whole: the page writes a > in a
+       caption as it is, and it must not end the tag */
+    var im = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/g, i;
     while ((i = im.exec(text))) {
-      var base = baseOf(i[1]);
+      var orig = /\sdata-original="([^"]*)"/.exec(i[0]);
+      if (!orig) continue;
+      var base = baseOf(orig[1]);
       if (base.indexOf(SITE_DIR) !== 0) continue;
       var best = null;
       regions.forEach(function (r) {
         if (i.index >= r.start && i.index < r.end && (!best || r.end - r.start < best.end - best.start)) best = r;
       });
-      if (!best) continue;
-      var where = path + "#" + best.slug;
-      if (!out[base]) out[base] = [];
-      if (out[base].indexOf(where) === -1) out[base].push(where);
+      if (best) out.push({ base: base, where: path + "#" + best.slug, tag: i[0] });
     }
+    return out;
+  }
+  /* Where a page's regions show the site's images: { base: ["path#slug"] }. */
+  function usageOf(pageText, path) {
+    var out = {};
+    siteImagesOf(pageText, path).forEach(function (s) {
+      if (!out[s.base]) out[s.base] = [];
+      if (out[s.base].indexOf(s.where) === -1) out[s.base].push(s.where);
+    });
+    return out;
+  }
+  /* One attribute of a tag, as its text: the page escapes what it writes */
+  function attrOf(tag, name) {
+    var m = new RegExp("\\s" + name + '="([^"]*)"').exec(tag);
+    return m ? m[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
+  }
+  /* What a page's regions say about the site's images:
+     { base: { "path#slug": words } }, each place's caption and alt text.
+     An image a region shows twice gives that place the words of both. */
+  function wordsOf(pageText, path) {
+    var parts = {};
+    siteImagesOf(pageText, path).forEach(function (s) {
+      var byPlace = parts[s.base] || (parts[s.base] = {});
+      var list = byPlace[s.where] || (byPlace[s.where] = []);
+      list.push(attrOf(s.tag, "data-caption"), attrOf(s.tag, "alt"));
+    });
+    var out = {};
+    Object.keys(parts).forEach(function (base) {
+      Object.keys(parts[base]).forEach(function (where) {
+        var said = phraseOf(parts[base][where]);
+        if (!said) return;
+        (out[base] || (out[base] = {}))[where] = said;
+      });
+    });
     return out;
   }
 
@@ -1321,8 +1404,11 @@
       blogMap: indexBlogMap,   /* { num: entry }, the map the blog takes */
       fromPhoto: indexFromPhoto,
       text: indexText,         /* the file's text, for a stamp */
-      stampText: indexStampText
+      stampText: indexStampText,
+      words: indexWords        /* an entry's words, as one string */
     },
+    phrase: phraseOf,          /* one place's words, from its caption and alt */
+    wordsOf: wordsOf,          /* what a page's regions say about the site's images */
     /* the log of super deletes: superdeleted.js, loaded on demand and
        written by Super Delete and Restore. See the log above. */
     log: {

@@ -409,28 +409,48 @@
       rec.images.forEach(function (e) { if (e.num === num) had = e; });
       var entry = { base: base, num: num, date: line.date, type: line.type, ow: line.ow, oh: line.oh,
                     bytes: line.bytes, uhd: !!line.uhd, truesize: !!line.truesize, animated: !!line.animated,
-                    added: had ? had.added : (line.added || line.date), used: had ? had.used : (line.used || []) };
+                    added: had ? had.added : (line.added || line.date), used: had ? had.used : (line.used || []),
+                    words: had ? had.words : {} };
       if (had) rec.images[rec.images.indexOf(had)] = entry; else rec.images.push(entry);
     });
     Object.keys(o.site || {}).forEach(function (base) {
       var had = null;
       rec.images.forEach(function (e) { if (e.base === base) had = e; });
       var entry = o.site[base];
-      if (had) { entry.added = had.added; entry.used = had.used; rec.images[rec.images.indexOf(had)] = entry; }
+      if (had) { entry.added = had.added; entry.used = had.used; entry.words = had.words; rec.images[rec.images.indexOf(had)] = entry; }
       else rec.images.push(entry);
     });
+    /* The words follow the uses: whatever takes a place away takes its
+       words, and whatever writes a place writes its words. */
     var gone = o.gone || o.postId;
     rec.images.forEach(function (e) {
+      e.words = e.words || {};
       if (o.pages && !e.num) {
         e.used = e.used.filter(function (u) { return u.indexOf("p") === 0 && u.indexOf("#") === -1; })
           .concat(o.pages[e.base] || []);
+        /* every page use was made again, so every page's words come
+           again from the pages read, below */
+        e.words = {};
+      }
+      if (o.siteWords && !e.num) {
+        var said = o.siteWords[e.base] || {};
+        Object.keys(said).forEach(function (u) { if (e.used.indexOf(u) !== -1) e.words[u] = said[u]; });
       }
       if (!e.num) return;
-      if (gone) e.used = e.used.filter(function (u) { return u !== "p" + gone; });
-      if (o.postId && o.refs && o.refs[e.num] && e.used.indexOf("p" + o.postId) === -1) e.used.push("p" + o.postId);
+      if (gone) {
+        e.used = e.used.filter(function (u) { return u !== "p" + gone; });
+        delete e.words["p" + gone];
+      }
+      if (o.postId && o.refs && o.refs[e.num]) {
+        if (e.used.indexOf("p" + o.postId) === -1) e.used.push("p" + o.postId);
+        if (o.phrases && o.phrases[e.num]) e.words["p" + o.postId] = o.phrases[e.num];
+      }
       if (o.uses) {
         e.used = e.used.filter(function (u) { return u.indexOf("p") !== 0; });
         (o.uses[e.num] || []).forEach(function (u) { if (e.used.indexOf(u) === -1) e.used.push(u); });
+        /* a rebuild has every post's source, so an image's words are
+           made whole, and a post that stopped naming it leaves none */
+        e.words = o.words && o.words[e.num] ? JSON.parse(JSON.stringify(o.words[e.num])) : {};
       }
     });
     if (o.nextImg) rec.nextImg = bcIdOf(Math.max(bcIdNum(rec.nextImg), o.nextImg));
@@ -445,6 +465,20 @@
     var re = new RegExp(AMH.blog.TAG, "g");
     while ((m = re.exec(String(source || "")))) refs[m[3]] = true;
     return refs;
+  }
+  /* What a body's tags say about each image: the caption, then the alt
+     text, of every tag for the number, as { num: words }. The tag's own
+     pattern gives them, so the words are the ones the post shows. */
+  function bcPhrasesOf(source) {
+    var parts = {}, m;
+    var re = new RegExp(AMH.blog.TAG, "g");
+    while ((m = re.exec(String(source || "")))) (parts[m[3]] = parts[m[3]] || []).push(m[4], m[5]);
+    var out = {};
+    Object.keys(parts).forEach(function (num) {
+      var said = AMH.images.phrase(parts[num]);
+      if (said) out[num] = said;
+    });
+    return out;
   }
 
   /* ==========================================================
@@ -4896,7 +4930,7 @@
         /* the index: every image the site holds, this post's uses, and the
            counter after the photos this publish numbered */
         var ix = bcIndexNext({ images: images, postId: id, refs: bcRefsOf(source),
-                               nextImg: bcNextImg() + bcImgCounter });
+                               phrases: bcPhrasesOf(source), nextImg: bcNextImg() + bcImgCounter });
         if (ix) { files[INDEX_FILE] = enc.encode(ix.text); bcIndexPending = ix.rec; }
         bcProg.mark(3);
         /* A held photo is three files, and all three go into blog/ beside
@@ -5178,6 +5212,9 @@
     /* the migration reads the site pages the composer is not on, for the
        images they show; a page from disk is asked for at the hand-off */
     var migrating = false, sitePages = [], siteEntries = {}, pageUses = {};
+    /* a site image with places and no words yet sends the rebuild to the
+       site pages too, for the words alone */
+    var wordless = false, siteWords = {};
     bcIndexPending = null;
     bcDeadTags = [];
     AMH.images.index.load().then(function () { return TOOL.pristine(); })
@@ -5185,7 +5222,10 @@
         var man = bcManifestFrom(src);
         if (!man.entries.length) throw new Error("The manifest is empty. There is nothing to rebuild.");
         migrating = /^(next-img:|image:)/m.test(man.payload || "");
-        sitePages = migrating
+        wordless = ((AMH.images.index.get() || { images: [] }).images).some(function (e) {
+          return !e.num && e.used.length && !Object.keys(e.words || {}).length;
+        });
+        sitePages = migrating || wordless
           ? TOOL.pages.map(function (pg) { return pg.path; }).filter(function (p) { return p !== TOOL.currentPage(); })
           : [];
         /* A rebuild reads every month, and only knows which ones once the
@@ -5256,14 +5296,22 @@
         var src = TOOL.spliceRegion(rebuiltSrc, "blog-manifest", stamps.payload);
         if (src === null) throw new Error("The blog-manifest markers are not in the deployed blog.html.");
         var months2 = bcUniqueMonths(derived.entries);
-        /* the migration reads the site pages for the images they show */
+        /* the site pages, read for the images they show when migrating,
+           and for what they say about them either way */
         var read = Promise.all(sitePages.map(function (path) {
           return TOOL.pristine(path).then(function (text) {
-            var entries = bcSiteEntries(text, path);
-            Object.keys(entries).forEach(function (base) { siteEntries[base] = entries[base]; });
-            var uses = AMH.images.usageOf(text, path);
-            Object.keys(uses).forEach(function (base) {
-              pageUses[base] = (pageUses[base] || []).concat(uses[base]);
+            if (migrating) {
+              var entries = bcSiteEntries(text, path);
+              Object.keys(entries).forEach(function (base) { siteEntries[base] = entries[base]; });
+              var uses = AMH.images.usageOf(text, path);
+              Object.keys(uses).forEach(function (base) {
+                pageUses[base] = (pageUses[base] || []).concat(uses[base]);
+              });
+            }
+            var said = AMH.images.wordsOf(text, path);
+            Object.keys(said).forEach(function (base) {
+              var into = siteWords[base] || (siteWords[base] = {});
+              Object.keys(said[base]).forEach(function (u) { into[u] = said[base][u]; });
             });
           }, function (err) {
             /* a page that cannot be read is skipped and named: the rebuild
@@ -5282,23 +5330,33 @@
              counter that never goes down. A tag whose image the site does
              not hold is a dead tag, named with its post. */
           var uses = {};
+          var wordsBy = {};
           var carriedIds = {};
           carried.forEach(function (c) { carriedIds["p" + c.id] = true; });
           found.forEach(function (p) {
+            var said = bcPhrasesOf(p.source);
             Object.keys(bcRefsOf(p.source)).forEach(function (num) {
               if (!uses[num]) uses[num] = [];
               uses[num].push("p" + p.id);
+              if (said[num]) (wordsBy[num] = wordsBy[num] || {})["p" + p.id] = said[num];
               if (!bcSiteImages[num]) bcDeadTags.push("img" + num + " in p" + p.id);
             });
           });
-          /* a post carried verbatim has no source to read: its uses stay */
+          /* a post carried verbatim has no source to read: its uses and
+             its words stay as the record has them */
           var rec0 = AMH.images.index.get() || { images: [] };
           rec0.images.forEach(function (e) {
             if (!e.num) return;
-            e.used.forEach(function (u) { if (carriedIds[u]) { uses[e.num] = uses[e.num] || []; uses[e.num].push(u); } });
+            e.used.forEach(function (u) {
+              if (!carriedIds[u]) return;
+              uses[e.num] = uses[e.num] || [];
+              uses[e.num].push(u);
+              if (e.words && e.words[u]) (wordsBy[e.num] = wordsBy[e.num] || {})[u] = e.words[u];
+            });
           });
-          var ix = bcIndexNext({ images: bcSiteImages, uses: uses, nextImg: derived.nextImg,
+          var ix = bcIndexNext({ images: bcSiteImages, uses: uses, words: wordsBy, nextImg: derived.nextImg,
                                  site: migrating ? siteEntries : null, pages: migrating ? pageUses : null,
+                                 siteWords: sitePages.length ? siteWords : null,
                                  always: migrating });
           if (ix) { files[INDEX_FILE] = enc.encode(ix.text); bcIndexPending = ix.rec; }
           if (bcDeadTags.length) {
@@ -5490,6 +5548,11 @@
     },
     searchEntry: bcSearchEntry,
     searchPack: bcSearchPack,
+    /* the image index's writer and a post's words, so the suite can try a
+       publish, a republish and a delete on a known record without
+       building a bundle for each */
+    indexNext: bcIndexNext,
+    phrasesOf: bcPhrasesOf,
     tick: bcTickTime,
     timeParse: bcTimeParse,
     timeLabel: bcTimeLabel

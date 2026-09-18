@@ -1793,6 +1793,15 @@
     /* Up and Down are arrows only. The band they sit on has a title to fit. */
     ".ced-pill--icon{padding:.3rem .45rem;}" +
     ".ced-pills{display:inline-flex;align-items:center;gap:.3rem;flex:none;}" +
+    /* THE SWITCH. Two or three buttons in one pill, one of them pressed:
+       a choice of how to look at the same thing. The composer's preview
+       draws the same shape for Desktop and Mobile. */
+    ".ced-seg{display:inline-flex;flex:none;gap:2px;padding:2px;border:1px solid var(--line);border-radius:999px;}" +
+    ".ced-seg__btn{display:inline-flex;align-items:center;margin:0;padding:.22rem .8rem;border:0;" +
+    "border-radius:999px;background:transparent;color:var(--text-soft);font:600 .72rem var(--font);cursor:pointer;}" +
+    ".ced-seg__btn:hover{color:var(--text);}" +
+    ".ced-seg__btn[aria-pressed=true]{background:var(--accent);color:var(--bg-deep);}" +
+    ".ced-seg__btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
     /* The new-block control, after the list's own close marker: outside
        every item, and outside every region, so it can reach no file. */
     ".ced-listfoot{display:flex;justify-content:center;padding:1.1rem 0 .2rem;" +
@@ -1962,8 +1971,60 @@
     ".ced-images{width:min(880px,94vw);}" +
     ".ced-images__note{font-size:.72rem;font-weight:400;color:var(--muted);}" +
     ".ced-images__filters{display:flex;flex-wrap:wrap;gap:.3rem;padding:.7rem 1.1rem 0;}" +
-    ".ced-images__filters .ced-btn[aria-pressed=true]{border-color:var(--accent);color:var(--accent-bright);" +
-    "background:rgba(74,165,232,.14);}" +
+    ".ced-images__filters .ced-btn[aria-pressed=true],.ced-images__tools .ced-btn[aria-pressed=true]{" +
+    "border-color:var(--accent);color:var(--accent-bright);background:rgba(74,165,232,.14);}" +
+    /* the order and the page size, one row under the filters */
+    ".ced-images__tools{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;padding:.5rem 1.1rem 0;}" +
+    ".ced-images__find{flex:0 1 14rem;min-width:8rem;background:var(--bg-deep);color:var(--text);" +
+    "border:1px solid var(--line);border-radius:999px;padding:.3rem .75rem;font:500 .78rem var(--font);}" +
+    ".ced-images__find::placeholder{color:var(--dim);}" +
+    ".ced-images__find:hover{border-color:var(--accent);}" +
+    ".ced-images__find:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".ced-images__sort{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.3rem;}" +
+    ".ced-images__tools .ced-spacer{flex:1 1 auto;}" +
+    ".ced-images__label,.ced-images__show{font:600 .72rem var(--font);color:var(--dim);}" +
+    ".ced-images__label{margin-right:.1rem;}" +
+    ".ced-images__dir{margin-left:.3rem;}" +
+    ".ced-images__show{display:inline-flex;align-items:center;gap:.4rem;}" +
+    ".ced-images__show select{background:var(--bg-deep);color:var(--text);border:1px solid var(--line);" +
+    "border-radius:999px;padding:.28rem .5rem;font:600 .72rem var(--font);cursor:pointer;}" +
+    ".ced-images__show select:hover{border-color:var(--accent);}" +
+    ".ced-images__show select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}" +
+    ".ced-images__more{display:block;margin:.6rem auto .2rem;}" +
+    ".ced-images__more[hidden]{display:none;}" +
+    /* the two views; a rule of this file beats the browser's rule for
+       [hidden], so each says it again */
+    ".ced-images__list[hidden],.ced-images__table[hidden]{display:none;}" +
+    /* THE LIST VIEW. One line an image; the head stays on screen while the
+       body scrolls under it. */
+    ".ced-images__table{width:100%;border-collapse:collapse;font-size:.76rem;color:var(--text-soft);}" +
+    ".ced-images__table th{position:sticky;top:0;z-index:1;background:var(--panel);text-align:left;" +
+    "white-space:nowrap;font:600 .7rem var(--font);color:var(--dim);padding:.3rem .45rem;" +
+    "border-bottom:1px solid var(--line);}" +
+    ".ced-images__table td{padding:.35rem .45rem;border-bottom:1px solid var(--line);vertical-align:middle;}" +
+    ".ced-images__table .ced-image__pic{width:56px;height:36px;aspect-ratio:auto;border-radius:4px;}" +
+    ".ced-images__table .ced-image__pic--none{font-size:8px;}" +
+    ".ced-images__col--name{font:700 11px Consolas,'Courier New',monospace;color:var(--text);overflow-wrap:anywhere;}" +
+    ".ced-images__col--type,.ced-images__col--px,.ced-images__col--size,.ced-images__col--added{" +
+    "white-space:nowrap;font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
+    ".ced-images__col--words{max-width:12rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
+    ".ced-images__table .ced-image__used{font-size:.72rem;}" +
+    ".ced-images__table .ced-image__paths code{display:block;font-size:10px;overflow-wrap:anywhere;}" +
+    ".ced-images__head{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;}" +
+    ".ced-images__head:hover{color:var(--text);}" +
+    ".ced-images__head:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px;}" +
+    "th[aria-sort=ascending] .ced-images__head,th[aria-sort=descending] .ced-images__head{color:var(--accent-bright);}" +
+    /* a narrow screen keeps the picture, the name, the size, the places
+       and the tools, and never scrolls sideways: the rest goes, the tools
+       stand one above the other, and a long place may break. The words
+       are still in the name's title, and the date is still a sort. */
+    "@media (max-width:640px){.ced-images__col--type,.ced-images__col--px,.ced-images__col--words," +
+    ".ced-images__col--added{display:none;}" +
+    ".ced-images__body{padding-left:.6rem;padding-right:.6rem;}" +
+    ".ced-images__table th,.ced-images__table td{padding:.3rem .25rem;}" +
+    ".ced-images__table .ced-image__pic{width:44px;height:30px;}" +
+    ".ced-images__table .ced-image__acts{flex-direction:column;align-items:flex-end;gap:.25rem;}" +
+    ".ced-images__table .ced-image__place{overflow-wrap:anywhere;}}" +
     ".ced-images__body{flex:1 1 auto;min-height:0;overflow:auto;padding:.8rem 1.1rem .4rem;}" +
     ".ced-images__list{list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}" +
     ".ced-image{display:grid;grid-template-columns:132px minmax(0,1fr) auto;gap:.75rem;align-items:start;" +
@@ -1976,8 +2037,15 @@
     ".ced-image__name{font:700 12px Consolas,'Courier New',monospace;color:var(--text);}" +
     ".ced-image__facts,.ced-image__paths{font:11px Consolas,'Courier New',monospace;color:var(--dim);}" +
     ".ced-image__paths{display:grid;gap:.15rem;}" +
-    ".ced-image__used{font-size:.78rem;line-height:1.5;color:var(--text-soft);}" +
+    ".ced-image__used{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .35rem;" +
+    "font-size:.78rem;line-height:1.5;color:var(--text-soft);}" +
     ".ced-image__used a{color:var(--accent-bright);}" +
+    /* a place the image is used, as a tag: the shape a post's own tags
+       have on the blog */
+    ".ced-image__place{padding:.05rem .55rem;border:1px solid var(--line);border-radius:999px;" +
+    "font-size:.72rem;color:var(--text-soft);text-decoration:none;}" +
+    "a.ced-image__place{color:var(--accent-bright);}" +
+    "a.ced-image__place:hover{border-color:var(--accent);}" +
     ".ced-image__acts{display:flex;justify-content:flex-end;gap:.3rem;}" +
     ".ced-image__acts .ced-tool--icon svg{width:14px;height:14px;display:block;}" +
     ".ced-superdel{border-color:var(--c-orange);color:var(--c-orange);}" +
@@ -2840,6 +2908,77 @@
      files are in deletethese/. */
   var imagesOpen = null;   /* the box on screen, so a second press shows it and not a twin */
 
+  /* THE ORDER AND THE PAGE.
+
+     Each sort starts in the direction a reader wants from it: the newest,
+     the biggest, A to Z. Date newest first is the order the box always
+     had, so a reader who touches nothing sees nothing move. Size is the
+     file's bytes, because that is what the repo and a push pay for; the
+     row still shows the pixels. A page is 20 rows unless the reader asks
+     for more, because every row is a picture to fetch. None of this is
+     remembered: the box opens light every time. */
+  var IMAGE_SORTS = [
+    { key: "date", label: "Date", first: "desc", words: { desc: "newest first", asc: "oldest first" } },
+    { key: "size", label: "Size", first: "desc", words: { desc: "biggest first", asc: "smallest first" } },
+    { key: "name", label: "Name", first: "asc", words: { asc: "A to Z", desc: "Z to A" } }
+  ];
+  var IMAGE_PAGE_SIZES = [20, 50, 100];
+  /* The List view's columns, in order. A column with a sort is a button in
+     its head, and it sorts with the same state the pills use. */
+  var IMAGE_LIST_COLS = [
+    { key: "pic", label: "Picture" },
+    { key: "name", label: "Name", sort: "name" },
+    { key: "type", label: "Type" },
+    { key: "px", label: "Pixels" },
+    { key: "size", label: "Size", sort: "size" },
+    { key: "added", label: "Added", sort: "date" },
+    { key: "used", label: "Used in" },
+    { key: "words", label: "Words" },
+    { key: "tools", label: "Tools" }
+  ];
+
+  /* EVERYTHING A ROW SAYS, as one lowercase string to find words in: the
+     name, the base, the facts, the day in both forms, each place by its
+     id, page, slug and name, and the words. A super deleted row adds the
+     moment it went, in both forms. It is built from the helpers the row is
+     drawn with, so Find and the row cannot disagree about what is there. */
+  function rowText(r) {
+    var e = r.entry || r;
+    var I = engine();
+    var parts = [imageName(e), e.base, e.num || "", imageFacts(e).join(" "), e.added, dayWords(e.added)];
+    (e.used || []).forEach(function (u) { parts.push(u, placeWords(u)); });
+    if (I.index && I.index.words) parts.push(I.index.words(e));
+    if (r.entry) parts.push(r.at, momentWords(r.at));
+    return parts.join(" \n ").toLowerCase();
+  }
+  /* A row matches when every term is in what it says. */
+  function rowMatches(r, terms) {
+    if (!terms.length) return true;
+    var text = rowText(r);
+    return terms.every(function (t) { return text.indexOf(t) !== -1; });
+  }
+
+  /* The rows in the order a reader asked for. A row is an index entry or,
+     under Super deleted, a line of the log, which holds its entry in
+     .entry and dates by the moment it went. Ties fall to the base in the
+     same direction, so the order is the same every time it is drawn. */
+  function sortRows(rows, key, dir) {
+    function entryOf(r) { return r.entry || r; }
+    function keyOf(r) {
+      var e = entryOf(r);
+      if (key === "size") return e.bytes || 0;
+      if (key === "name") return imageName(e).toLowerCase();
+      return r.at || e.added || "";
+    }
+    var sign = dir === "asc" ? 1 : -1;
+    return rows.slice().sort(function (a, b) {
+      var ka = keyOf(a), kb = keyOf(b);
+      if (ka !== kb) return (ka < kb ? -1 : 1) * sign;
+      var ba = entryOf(a).base, bb = entryOf(b).base;
+      return ba === bb ? 0 : (ba < bb ? -1 : 1) * sign;
+    });
+  }
+
   /* the name a row and an ask call an image: its number for a blog
      image, and the last part of its base for a site image */
   function imageName(e) { return e.num ? "img" + e.num : e.base.replace(/^.*\//, ""); }
@@ -2922,14 +3061,197 @@
       return { el: b, key: pair[0], label: pair[1] };
     });
 
+    /* THE TOOLS: the order and the page size, under the filters and
+       inside them. Find goes at the left of this row, and the view switch
+       at its right. */
+    var sortKey = "date", sortDir = "desc", pageSize = IMAGE_PAGE_SIZES[0];
+    var tools = doc.createElement("div");
+    tools.className = "ced-images__tools";
+    tools.setAttribute("role", "group");
+    tools.setAttribute("aria-label", "Find, order and size");
+    /* FIND. Every term must be in what a row says, whatever its case. It
+       runs inside the filter and before the pages, and the counts on the
+       filter pills follow it, so a reader sees where the matches are. */
+    var term = "";
+    var find = doc.createElement("input");
+    find.type = "search";
+    find.className = "ced-images__find";
+    find.placeholder = "Find";
+    find.setAttribute("aria-label", "Find an image");
+    find.autocomplete = "off";
+    find.spellcheck = false;
+    find.addEventListener("input", function () {
+      term = find.value.trim();
+      draw();
+    });
+    /* Escape in a field with words in it takes the words away and keeps
+       the box. In an empty field it closes the box, as it does anywhere
+       else in the box. */
+    find.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape" || !find.value) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      find.value = "";
+      term = "";
+      draw();
+    });
+    tools.appendChild(find);
+    var sortGroup = doc.createElement("span");
+    sortGroup.className = "ced-images__sort";
+    sortGroup.setAttribute("role", "group");
+    sortGroup.setAttribute("aria-label", "Sort");
+    var sortLabel = doc.createElement("span");
+    sortLabel.className = "ced-images__label";
+    sortLabel.setAttribute("aria-hidden", "true");
+    sortLabel.textContent = "Sort";
+    sortGroup.appendChild(sortLabel);
+    /* One sort state, and one way to change it, for the pills and for the
+       List view's column heads alike. A second press on the sort in force
+       turns its direction; a press on another starts it the way that sort
+       is read. */
+    function pickSort(key) {
+      var s = IMAGE_SORTS.filter(function (x) { return x.key === key; })[0];
+      if (!s) return;
+      if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
+      else { sortKey = key; sortDir = s.first; }
+      draw();
+    }
+    var sortPills = IMAGE_SORTS.map(function (s) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-btn";
+      b.setAttribute("data-sort", s.key);
+      b.addEventListener("click", function () { pickSort(s.key); });
+      sortGroup.appendChild(b);
+      return { el: b, sort: s };
+    });
+    var toolsGap = doc.createElement("span");
+    toolsGap.className = "ced-spacer";
+    var sizeLabel = doc.createElement("label");
+    sizeLabel.className = "ced-images__show";
+    sizeLabel.appendChild(doc.createTextNode("Show"));
+    var sizeSel = doc.createElement("select");
+    IMAGE_PAGE_SIZES.forEach(function (n) {
+      var o = doc.createElement("option");
+      o.value = String(n);
+      o.textContent = String(n);
+      sizeSel.appendChild(o);
+    });
+    sizeSel.value = String(pageSize);
+    sizeSel.addEventListener("change", function () {
+      pageSize = Math.max(1, parseInt(sizeSel.value, 10) || IMAGE_PAGE_SIZES[0]);
+      draw();
+    });
+    sizeLabel.appendChild(sizeSel);
+    /* THE VIEW: the same rows as cards or as the lines of a table. A switch
+       keeps everything else as it is, the filter, the term, the sort and
+       how far the reader has paged, so the rows only change their shape. */
+    var asList = false;
+    var viewSeg = doc.createElement("span");
+    viewSeg.className = "ced-seg";
+    viewSeg.setAttribute("role", "group");
+    viewSeg.setAttribute("aria-label", "View");
+    var viewBtns = [["cards", "Cards"], ["list", "List"]].map(function (pair) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.className = "ced-seg__btn";
+      b.setAttribute("data-view", pair[0]);
+      b.textContent = pair[1];
+      b.addEventListener("click", function () {
+        var want = pair[0] === "list";
+        if (want === asList) return;
+        asList = want;
+        draw(true);
+      });
+      viewSeg.appendChild(b);
+      return { el: b, list: pair[0] === "list" };
+    });
+    tools.appendChild(sortGroup);
+    tools.appendChild(toolsGap);
+    tools.appendChild(sizeLabel);
+    tools.appendChild(viewSeg);
+    /* the sort pills say the order in force: pressed, an arrow, and the
+       direction in words for a reader who hears the button */
+    function drawSort() {
+      /* the column heads say it the way a table says it: aria-sort, and
+         the same arrow the pill shows */
+      heads.forEach(function (h) {
+        var on = h.sort === sortKey;
+        h.th.setAttribute("aria-sort", on ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+        h.el.textContent = h.label;
+        if (on) {
+          var arrow = doc.createElement("span");
+          arrow.className = "ced-images__dir";
+          arrow.setAttribute("aria-hidden", "true");
+          arrow.textContent = sortDir === "asc" ? "↑" : "↓";
+          h.el.appendChild(arrow);
+        }
+      });
+      sortPills.forEach(function (p) {
+        var on = p.sort.key === sortKey;
+        p.el.setAttribute("aria-pressed", String(on));
+        p.el.textContent = p.sort.label;
+        if (on) {
+          var arrow = doc.createElement("span");
+          arrow.className = "ced-images__dir";
+          arrow.setAttribute("aria-hidden", "true");
+          arrow.textContent = sortDir === "asc" ? "↑" : "↓";
+          p.el.appendChild(arrow);
+          p.el.setAttribute("data-dir", sortDir);
+          p.el.setAttribute("aria-label", "Sort by " + p.sort.label.toLowerCase() + ", " + p.sort.words[sortDir]);
+          p.el.title = "Press again for " + p.sort.words[sortDir === "asc" ? "desc" : "asc"];
+        } else {
+          p.el.removeAttribute("data-dir");
+          p.el.setAttribute("aria-label", "Sort by " + p.sort.label.toLowerCase());
+          p.el.title = "Sort by " + p.sort.label.toLowerCase() + ", " + p.sort.words[p.sort.first];
+        }
+      });
+    }
+
     var body = doc.createElement("div");
     body.className = "ced-images__body";
     var none = doc.createElement("p");
     none.className = "ced-empty";
     var list = doc.createElement("ol");
     list.className = "ced-images__list";
+    /* the List view: a table whose head is built once and whose body the
+       draw fills, a page at a time, as it fills the cards */
+    var table = doc.createElement("table");
+    table.className = "ced-images__table";
+    table.hidden = true;
+    var thead = doc.createElement("thead");
+    var headRow = doc.createElement("tr");
+    var heads = [];
+    IMAGE_LIST_COLS.forEach(function (c) {
+      var th = doc.createElement("th");
+      th.scope = "col";
+      th.className = "ced-images__col--" + c.key;
+      if (c.sort) {
+        var b = doc.createElement("button");
+        b.type = "button";
+        b.className = "ced-images__head";
+        b.setAttribute("data-sort", c.sort);
+        b.addEventListener("click", function () { pickSort(c.sort); });
+        th.appendChild(b);
+        heads.push({ th: th, el: b, label: c.label, sort: c.sort });
+      } else {
+        th.textContent = c.label;
+      }
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    var tbody = doc.createElement("tbody");
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    /* the next page, after the list; it says how many are still to come */
+    var more = doc.createElement("button");
+    more.type = "button";
+    more.className = "ced-btn ced-images__more";
+    more.hidden = true;
     body.appendChild(none);
     body.appendChild(list);
+    body.appendChild(table);
+    body.appendChild(more);
 
     var note = doc.createElement("div");
     note.className = "ced-modal__status";
@@ -2950,10 +3272,6 @@
     var at = onMonthPage() ? "../" : "";
     var urls = [];   /* blob: URLs of pictures read from deletethese/, revoked on close */
 
-    function newestFirst(a, b) {
-      if (a.added !== b.added) return a.added < b.added ? 1 : -1;
-      return a.base < b.base ? 1 : a.base > b.base ? -1 : 0;
-    }
     function copyText(text) {
       var write = navigator.clipboard && navigator.clipboard.writeText
         ? navigator.clipboard.writeText(text) : Promise.reject(new Error("no clipboard"));
@@ -2972,23 +3290,41 @@
         say(ok ? "Copied " + text : "The clipboard was refused. Select and copy: " + text);
       });
     }
+    /* Where an image is used, one tag for each place, so four places read
+       as four things and not one sentence. A post is a link to its post.
+       Between two tags a reader who hears the row gets a comma; on screen
+       the gap between the pills says it. */
     function usedIn(e) {
       var el = doc.createElement("div");
       el.className = "ced-image__used";
       if (!e.used.length) { el.textContent = "Not used"; return el; }
       el.appendChild(doc.createTextNode("Used in "));
       e.used.forEach(function (u, i) {
-        if (i) el.appendChild(doc.createTextNode(i === e.used.length - 1 ? " and " : ", "));
-        if (/^p[0-9a-z]\d{3}$/.test(u)) {
-          var a = doc.createElement("a");
-          a.href = at + BLOG_PAGE + "#" + u;
-          a.textContent = u;
-          el.appendChild(a);
-        } else {
-          el.appendChild(doc.createTextNode(placeWords(u)));
+        if (i) {
+          var sep = doc.createElement("span");
+          sep.className = "ced-sr";
+          sep.textContent = ", ";
+          el.appendChild(sep);
         }
+        var post = /^p[0-9a-z]\d{3}$/.test(u);
+        var tag = doc.createElement(post ? "a" : "span");
+        if (post) tag.href = at + BLOG_PAGE + "#" + u;
+        tag.className = "ced-image__place";
+        tag.textContent = post ? u : placeWords(u);
+        el.appendChild(tag);
       });
       return el;
+    }
+    /* A thumbnail is fetched when its row nears the view, and not before:
+       the body scrolls, so a page a reader never reaches costs nothing. */
+    function thumb(src) {
+      var pic = doc.createElement("img");
+      pic.className = "ced-image__pic";
+      pic.alt = "";
+      pic.setAttribute("loading", "lazy");
+      pic.setAttribute("decoding", "async");
+      pic.src = src;
+      return pic;
     }
     /* the words of a row: the name, the facts, and where it is used; for
        a super deleted image, when it went and the paths that went */
@@ -3018,16 +3354,9 @@
       words.appendChild(paths);
       return words;
     }
-    function imageRow(e) {
-      var li = doc.createElement("li");
-      li.className = "ced-image";
-      li.setAttribute("data-base", e.base);
-      var pic = doc.createElement("img");
-      pic.className = "ced-image__pic";
-      pic.alt = "";
-      pic.src = at + I.filesOf(e).sd;
-      li.appendChild(pic);
-      li.appendChild(wordsOf(e, null));
+    /* A row's tools, the same on a card and on a line: Copy tag or Copy
+       path, and the trash can; for a super deleted image, Restore. */
+    function imageActs(e) {
       var acts = doc.createElement("div");
       acts.className = "ced-image__acts";
       var copy = doc.createElement("button");
@@ -3039,7 +3368,27 @@
       copy.addEventListener("click", function () { copyText(e.num ? imageTag(e) : I.filesOf(e).hd); });
       acts.appendChild(copy);
       acts.appendChild(iconTool("Super delete", CED_TRASH, function () { superDelete(e); }, "ced-superdel"));
-      li.appendChild(acts);
+      return acts;
+    }
+    function goneActs(d) {
+      var acts = doc.createElement("div");
+      acts.className = "ced-image__acts";
+      var back = doc.createElement("button");
+      back.type = "button";
+      back.className = "ced-tool";
+      back.textContent = "Restore";
+      back.title = "Move its files back and put it in the index again";
+      back.addEventListener("click", function () { restoreImage(d); });
+      acts.appendChild(back);
+      return acts;
+    }
+    function imageRow(e) {
+      var li = doc.createElement("li");
+      li.className = "ced-image";
+      li.setAttribute("data-base", e.base);
+      li.appendChild(thumb(at + I.filesOf(e).sd));
+      li.appendChild(wordsOf(e, null));
+      li.appendChild(imageActs(e));
       return li;
     }
     /* the small copy from deletethese/ when the folder is connected, and
@@ -3053,10 +3402,7 @@
       repoReadFile(I.DELETE_DIR + small).then(function (file) {
         var url = URL.createObjectURL(file);
         urls.push(url);
-        var pic = doc.createElement("img");
-        pic.className = "ced-image__pic";
-        pic.alt = "";
-        pic.src = url;
+        var pic = thumb(url);
         if (tile.parentNode) tile.parentNode.replaceChild(pic, tile);
       }, function () {});
       return tile;
@@ -3067,38 +3413,126 @@
       li.setAttribute("data-base", d.base);
       li.appendChild(gonePic(d));
       li.appendChild(wordsOf(d.entry, d));
-      var acts = doc.createElement("div");
-      acts.className = "ced-image__acts";
-      var back = doc.createElement("button");
-      back.type = "button";
-      back.className = "ced-tool";
-      back.textContent = "Restore";
-      back.title = "Move its files back and put it in the index again";
-      back.addEventListener("click", function () { restoreImage(d); });
-      acts.appendChild(back);
-      li.appendChild(acts);
+      li.appendChild(goneActs(d));
       return li;
     }
-    function draw() {
+    /* THE LINES of the List view, one an image, from the same helpers the
+       cards use, so the two views cannot say different things. */
+    function lineCell(key, child, text, title) {
+      var td = doc.createElement("td");
+      td.className = "ced-images__col--" + key;
+      if (child) td.appendChild(child);
+      else td.textContent = text || "";
+      if (title) td.title = title;
+      return td;
+    }
+    /* The facts every line has: the picture, the name with the base and
+       the words as its title (the words stay there when a narrow screen
+       hides their column), the type, the pixels and the size. */
+    function lineFacts(tr, e, pic, said) {
+      tr.appendChild(lineCell("pic", pic));
+      tr.appendChild(lineCell("name", null, imageName(e), e.base + (said ? "\n" + said : "")));
+      tr.appendChild(lineCell("type", null, String(e.type || "").toUpperCase() + (e.animated ? " · animated" : "")));
+      tr.appendChild(lineCell("px", null, e.ow && e.oh ? e.ow + " x " + e.oh : ""));
+      tr.appendChild(lineCell("size", null, e.bytes ? sizeText(e.bytes) : ""));
+    }
+    function imageLine(e) {
+      var said = I.index.words ? I.index.words(e) : "";
+      var tr = doc.createElement("tr");
+      tr.className = "ced-image-line";
+      tr.setAttribute("data-base", e.base);
+      lineFacts(tr, e, thumb(at + I.filesOf(e).sd), said);
+      tr.appendChild(lineCell("added", null, dayWords(e.added)));
+      tr.appendChild(lineCell("used", usedIn(e)));
+      tr.appendChild(lineCell("words", null, said, said));
+      tr.appendChild(lineCell("tools", imageActs(e)));
+      return tr;
+    }
+    function goneLine(d) {
+      var e = d.entry;
+      var said = I.index.words ? I.index.words(e) : "";
+      var tr = doc.createElement("tr");
+      tr.className = "ced-image-line ced-image-line--gone";
+      tr.setAttribute("data-base", d.base);
+      lineFacts(tr, e, gonePic(d), said);
+      tr.appendChild(lineCell("added", null, "Super deleted " + momentWords(d.at)));
+      var paths = doc.createElement("div");
+      paths.className = "ced-image__paths";
+      d.paths.forEach(function (p) {
+        var c = doc.createElement("code");
+        c.textContent = p;
+        paths.appendChild(c);
+      });
+      tr.appendChild(lineCell("used", paths));
+      tr.appendChild(lineCell("words", null, said, said));
+      tr.appendChild(lineCell("tools", goneActs(d)));
+      return tr;
+    }
+    /* THE DRAW. The rows are worked out whole, filter and sort, and then
+       drawn a page at a time: the first page here, and each later one by
+       Show more, which adds rows and leaves the drawn ones as they are.
+       A change of filter, sort or page size draws again from the first
+       page. The pill counts are the totals, whatever the page. */
+    var shownRows = [], shownTo = 0;
+    /* keepReach draws as many rows as were drawn before, for a switch of
+       view, which changes the shape of the rows and nothing else */
+    function draw(keepReach) {
+      var reach = keepReach ? shownTo : 0;
       var rec = I.index.get() || { images: [] };
       var log = I.log.get() || { deleted: [] };
-      var images = rec.images.slice().sort(newestFirst);
+      var terms = term.toLowerCase().split(/\s+/).filter(Boolean);
+      var match = function (r) { return rowMatches(r, terms); };
+      var images = rec.images.filter(match);
       var unused = images.filter(function (e) { return !e.used.length; });
-      var deleted = log.deleted.filter(function (d) { return !d.restored; }).sort(function (a, b) {
-        return a.at < b.at ? 1 : a.at > b.at ? -1 : 0;
-      });
+      var deleted = log.deleted.filter(function (d) { return !d.restored; }).filter(match);
       var counts = { all: images.length, unused: unused.length, deleted: deleted.length };
       pills.forEach(function (p) {
         p.el.textContent = p.label + " (" + counts[p.key] + ")";
         p.el.setAttribute("aria-pressed", String(p.key === showing));
       });
+      drawSort();
+      viewBtns.forEach(function (v) { v.el.setAttribute("aria-pressed", String(v.list === asList)); });
       list.innerHTML = "";
-      var rows = showing === "all" ? images : showing === "unused" ? unused : deleted;
-      rows.forEach(function (r) { list.appendChild(showing === "deleted" ? goneRow(r) : imageRow(r)); });
-      none.hidden = rows.length > 0;
-      none.textContent = showing === "deleted" ? "Nothing has been super deleted."
+      tbody.innerHTML = "";
+      shownRows = sortRows(showing === "all" ? images : showing === "unused" ? unused : deleted,
+                           sortKey, sortDir);
+      shownTo = 0;
+      list.hidden = asList;
+      table.hidden = !asList || !shownRows.length;
+      none.hidden = shownRows.length > 0;
+      none.textContent = terms.length ? 'Nothing matches "' + term + '".'
+        : showing === "deleted" ? "Nothing has been super deleted."
         : showing === "unused" ? "Every image is used somewhere." : "The site holds no images yet.";
+      drawTo(Math.max(pageSize, reach));
     }
+    /* Draw the rows up to n, from where the list stops. The status line
+       says where the reader is while rows remain, and nothing once the
+       list is whole. */
+    function drawTo(n) {
+      var to = Math.min(n, shownRows.length);
+      var first = null;
+      var gone = showing === "deleted";
+      for (var i = shownTo; i < to; i++) {
+        var row = asList ? (gone ? goneLine(shownRows[i]) : imageLine(shownRows[i]))
+          : (gone ? goneRow(shownRows[i]) : imageRow(shownRows[i]));
+        if (!first) first = row;
+        (asList ? tbody : list).appendChild(row);
+      }
+      shownTo = to;
+      var left = shownRows.length - shownTo;
+      var hadFocus = doc.activeElement === more;
+      more.hidden = left <= 0;
+      more.textContent = "Show more (" + left + " left)";
+      say(left > 0 ? "Showing " + shownTo + " of " + shownRows.length +
+        (term ? ' that match "' + term + '"' : "") : "");
+      /* the button went with the last page: the keyboard goes on to the
+         first row it added, where the reader was reading */
+      if (hadFocus && more.hidden && first) {
+        var next = first.querySelector("button, a[href]");
+        if (next) next.focus();
+      }
+    }
+    more.addEventListener("click", function () { drawTo(shownTo + pageSize); });
 
     var shut = false;
     function done() {
@@ -3120,6 +3554,7 @@
     box.appendChild(headEl);
     box.appendChild(xBtn);
     box.appendChild(filters);
+    box.appendChild(tools);
     box.appendChild(body);
     box.appendChild(note);
     box.appendChild(btns);
@@ -3134,8 +3569,9 @@
     say("Reading the record...");
     Promise.all([I.index.load(), I.log.load()]).then(function () {
       if (shut) return;
+      /* the draw says the position, or clears the line when the list is
+         whole, so nothing is said after it */
       draw();
-      say("");
       close.focus();
     });
     return imagesOpen;
@@ -3184,7 +3620,9 @@
       var rec = JSON.parse(JSON.stringify(was));
       rec.images = rec.images.filter(function (e) { return e.base !== entry.base; });
       var back = JSON.parse(JSON.stringify(entry));
+      /* no place shows it, so no place says anything about it */
       back.used = [];
+      back.words = {};
       rec.images.push(back);
       return indexWrite(rec);
     });
@@ -9303,14 +9741,23 @@
         var had = null;
         rec.images.forEach(function (e) { if (e.base === base) had = e; });
         var entry = I.index.fromPhoto(photo, base, had ? had.added : dayStamp());
-        if (had) { entry.used = had.used; rec.images[rec.images.indexOf(had)] = entry; }
+        if (had) { entry.used = had.used; entry.words = had.words; rec.images[rec.images.indexOf(had)] = entry; }
         else rec.images.push(entry);
       });
+      /* Each written page replaces its own places, in used and in words,
+         and leaves every other page's as they were: this save has not
+         read those pages, so it knows nothing new about them. */
       built.forEach(function (b) {
         var uses = I.usageOf(b.text, b.path);
+        var said = I.wordsOf ? I.wordsOf(b.text, b.path) : {};
+        var mine = function (u) { return u.indexOf(b.path + "#") === 0; };
         rec.images.forEach(function (e) {
-          e.used = e.used.filter(function (u) { return u.indexOf(b.path + "#") !== 0; })
-            .concat(uses[e.base] || []);
+          e.used = e.used.filter(function (u) { return !mine(u); }).concat(uses[e.base] || []);
+          var words = {};
+          Object.keys(e.words || {}).forEach(function (u) { if (!mine(u)) words[u] = e.words[u]; });
+          var here = said[e.base] || {};
+          Object.keys(here).forEach(function (u) { words[u] = here[u]; });
+          e.words = words;
         });
       });
       var before = I.index.stampText(was), after = I.index.stampText(rec);

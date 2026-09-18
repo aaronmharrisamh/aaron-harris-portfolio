@@ -14100,6 +14100,596 @@ async function main() {
     JSON.stringify({ folder: ul8 && ul8.folder.filter((p) => p.indexOf("deletethese/") === 0),
       entry: ul8ix.images.filter((e) => e.base === (ulPick || {}).base), months: ul8 && ul8.months }).slice(0, 400));
 
+  // ============ IB. THE IMAGES BOX: ORDER, PAGES AND PLACES ============
+  // The box reads the record and never a page, so every control here is a
+  // view of the record: three sorts that turn with a second press, a page
+  // size with Show more, lazy thumbnails, and the places as tags. The
+  // record is a fixture of twelve images, both schemes, three days and
+  // twelve sizes, set on the engine after its load. The orders the checks
+  // expect are worked out here, in Node, and not taken from the page.
+  const ibE = (base, bytes, added, used, extra) =>
+    Object.assign({ base, type: "png", ow: 640, oh: 480, bytes, animated: false, added, used }, extra || {});
+  const ibBlog = (n, d, bytes, used) =>
+    ibE("blog/" + d + "_img" + n, bytes, d, used, { num: n, date: d, uhd: false, truesize: false });
+  const IB_REC = { v: 1, stamp: "ibfix", nextImg: "0020", images: [
+    ibBlog("0011", "260910", 4000, ["p0020"]),
+    ibBlog("0012", "260910", 90000, []),
+    ibBlog("0013", "260912", 2000, ["p0021"]),
+    ibBlog("0014", "260912", 700000, ["p0021", "p0022", "p0023"]),
+    ibBlog("0015", "260914", 15000, []),
+    ibBlog("0016", "260914", 300, ["p0023"]),
+    ibE("img/work/alder-aa11bb", 120000, "260910", ["index.html#fr3-gallery"]),
+    ibE("img/work/birch-cc22dd", 8000, "260912", []),
+    ibE("img/work/cedar-ee33ff", 450000, "260914", ["gallery.html#gal-tbg"]),
+    ibE("img/work/zebra-gg44hh", 60000, "260910", []),
+    ibE("img/work/maple-ii55jj", 1500, "260912", ["index.html#fr3-gallery"]),
+    ibE("img/work/oak-kk66ll", 33000, "260914", [])
+  ]};
+  const ibName = (e) => e.num ? "img" + e.num : e.base.replace(/^.*\//, "");
+  const ibCmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  /* the order a reader should see: the key, then the base, one direction */
+  const ibOrder = (rows, key, dir) => rows.slice().sort((a, b) => {
+    const k = (e) => key === "size" ? e.bytes : key === "name" ? ibName(e).toLowerCase() : e.added;
+    return (ibCmp(k(a), k(b)) || ibCmp(a.base, b.base)) * (dir === "asc" ? 1 : -1);
+  }).map(ibName);
+  const IB_UNUSED = IB_REC.images.filter((e) => !e.used.length);
+  const IB_STATE = `(function () {
+    var box = document.querySelector('.ced-images');
+    if (!box) return null;
+    var pressed = box.querySelector('.ced-images__tools .ced-btn[aria-pressed="true"]');
+    var more = box.querySelector('.ced-images__more');
+    var sel = box.querySelector('.ced-images__show select');
+    var imgs = [].slice.call(box.querySelectorAll('.ced-images__list img'));
+    return {
+      tools: !!box.querySelector('.ced-images__tools[role="group"]'),
+      names: [].map.call(box.querySelectorAll('.ced-image__name'), function (n) { return n.textContent; }),
+      pills: [].map.call(box.querySelectorAll('.ced-images__tools [data-sort]'), function (b) {
+        return b.getAttribute('data-sort') + ':' + b.getAttribute('aria-pressed'); }),
+      pressed: pressed ? pressed.getAttribute('data-sort') + ':' + pressed.getAttribute('data-dir') : null,
+      label: pressed ? pressed.getAttribute('aria-label') : null,
+      arrow: pressed ? (pressed.querySelector('.ced-images__dir') || {}).textContent : null,
+      select: sel ? sel.value : null,
+      options: sel ? [].map.call(sel.options, function (o) { return o.value; }) : [],
+      filters: [].map.call(box.querySelectorAll('.ced-images__filters .ced-btn'), function (b) {
+        return b.textContent + ':' + b.getAttribute('aria-pressed'); }),
+      more: more ? (more.hidden ? 'hidden' : more.textContent) : 'none',
+      status: box.querySelector('.ced-modal__status').textContent,
+      imgs: imgs.length,
+      lazy: imgs.length > 0 && imgs.every(function (i) {
+        return i.getAttribute('loading') === 'lazy' && i.getAttribute('decoding') === 'async'; })
+    };
+  })()`;
+  const ibSort = (k) => `(function () { var b = document.querySelector('.ced-images__tools [data-sort="${k}"]');
+    if (!b) return false; b.click(); return true; })()`;
+  const ibFilter = (k) => `(function () { var b = document.querySelector('.ced-images__filters [data-show="${k}"]');
+    if (!b) return false; b.click(); return true; })()`;
+  /* a page size the select does not offer, so paging is tried on twelve
+     rows; the change goes through the select's own handler */
+  const ibSize = (n) => `(function () { var s = document.querySelector('.ced-images__show select');
+    if (!s) return false;
+    if (![].some.call(s.options, function (o) { return o.value === '${n}'; })) s.add(new Option('${n}', '${n}'));
+    s.value = '${n}'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
+  const IB_MORE = `(function () { var m = document.querySelector('.ced-images__more');
+    if (!m || m.hidden) return false; m.click(); return true; })()`;
+  const ibAfter = async (expr) => { await evaluate(expr); await sleep(250); return await evaluate(IB_STATE); };
+
+  await send("Page.navigate", { url: PAGE + "?ib=1" });
+  await waitLoaded();
+  await evaluate(`sessionStorage.clear()`);
+  await sdEditorOn();
+  await evaluate(`AMH.images.index.load().then(function () { AMH.images.index.set(${JSON.stringify(IB_REC)}); return true; })`,
+    { awaitPromise: true });
+  await sdOpen();
+
+  // IB1. the tools row, and a box that opens in the order it always had
+  const ib1 = await evaluate(IB_STATE);
+  check("images box: a tools row under the filters sorts by date, size or name, date pressed and newest first, and shows 20 a page",
+    !!ib1 && ib1.tools && ib1.pills.join() === "date:true,size:false,name:false" &&
+    ib1.pressed === "date:desc" && ib1.arrow === "↓" && ib1.label === "Sort by date, newest first" &&
+    ib1.select === "20" && ib1.options.join() === "20,50,100" &&
+    JSON.stringify(ib1.names) === JSON.stringify(ibOrder(IB_REC.images, "date", "desc")) &&
+    ib1.more === "hidden" && ib1.status === "",
+    JSON.stringify(ib1).slice(0, 600));
+
+  // IB2. each sort, both ways, and back
+  const ib2a = await ibAfter(ibSort("size"));
+  const ib2b = await ibAfter(ibSort("size"));
+  const ib2c = await ibAfter(ibSort("name"));
+  const ib2d = await ibAfter(ibSort("date"));
+  check("images box: Size orders by the file's bytes, a second press turns it, Name runs A to Z across both schemes, and Date comes back newest first",
+    JSON.stringify(ib2a.names) === JSON.stringify(ibOrder(IB_REC.images, "size", "desc")) && ib2a.pressed === "size:desc" &&
+    JSON.stringify(ib2b.names) === JSON.stringify(ibOrder(IB_REC.images, "size", "asc")) && ib2b.pressed === "size:asc" &&
+    ib2b.arrow === "↑" &&
+    JSON.stringify(ib2c.names) === JSON.stringify(ibOrder(IB_REC.images, "name", "asc")) && ib2c.pressed === "name:asc" &&
+    JSON.stringify(ib2d.names) === JSON.stringify(ibOrder(IB_REC.images, "date", "desc")) && ib2d.pressed === "date:desc",
+    JSON.stringify({ size: ib2a.names, turned: ib2b.names, name: ib2c.names, date: ib2d.names }).slice(0, 700));
+
+  // IB3. the sort holds inside a filter, and the counts stay the totals
+  await evaluate(ibFilter("unused"));
+  const ib3 = await ibAfter(ibSort("size"));
+  check("images box: a sort holds inside a filter, and the filter counts stay the totals",
+    JSON.stringify(ib3.names) === JSON.stringify(ibOrder(IB_UNUSED, "size", "desc")) &&
+    ib3.filters.join() === "All (12):false,Unused (5):true,Super deleted (0):false",
+    JSON.stringify({ names: ib3.names, filters: ib3.filters }));
+  await evaluate(ibFilter("all"));
+  await sleep(200);
+
+  // IB4 and IB5. a page of five, Show more twice, and a sort that starts
+  // the pages again; every picture drawn is lazy, and a row past the page
+  // has no picture in the document at all
+  const ib4a = await ibAfter(ibSize(5));
+  const ib4b = await ibAfter(IB_MORE);
+  const ib4c = await ibAfter(IB_MORE);
+  const ib4d = await ibAfter(ibSort("name"));
+  check("images box: a page size draws that many rows, Show more adds a page and says what is left, and a sort starts again at the first page",
+    ib4a.names.length === 5 && ib4a.more === "Show more (7 left)" && ib4a.status === "Showing 5 of 12" &&
+    ib4b.names.length === 10 && ib4b.more === "Show more (2 left)" && ib4b.status === "Showing 10 of 12" &&
+    ib4c.names.length === 12 && ib4c.more === "hidden" && ib4c.status === "" &&
+    JSON.stringify(ib4c.names) === JSON.stringify(ibOrder(IB_REC.images, "size", "desc")) &&
+    ib4d.names.length === 5 && ib4d.more === "Show more (7 left)",
+    JSON.stringify({ a: [ib4a.names.length, ib4a.more, ib4a.status], b: [ib4b.names.length, ib4b.more, ib4b.status],
+      c: [ib4c.names.length, ib4c.more, ib4c.status], d: [ib4d.names.length, ib4d.more] }));
+  check("images box: every thumbnail is lazy and async, and a row past the page has no picture in the document",
+    ib4a.imgs === 5 && ib4a.lazy && ib4c.imgs === 12 && ib4c.lazy,
+    JSON.stringify({ firstPage: [ib4a.imgs, ib4a.lazy], whole: [ib4c.imgs, ib4c.lazy] }));
+
+  // IB6. the places are tags: a post a link, a region its words
+  await evaluate(ibSize(20));
+  await sleep(250);
+  const ib6 = await evaluate(`(function () {
+    function row(name) { return [].slice.call(document.querySelectorAll('.ced-image')).filter(function (li) {
+      return li.querySelector('.ced-image__name').textContent === name; })[0]; }
+    function tags(name) { var r = row(name); return r ? [].map.call(r.querySelectorAll('.ced-image__place'), function (t) {
+      return t.tagName + ':' + t.textContent + ':' + (t.getAttribute('href') || ''); }) : null; }
+    return { post: tags('img0014'), region: tags('alder-aa11bb'), none: tags('birch-cc22dd'),
+      noneText: row('birch-cc22dd').querySelector('.ced-image__used').textContent,
+      postText: row('img0014').querySelector('.ced-image__used').textContent };
+  })()`);
+  check("images box: each place is a tag, a post as a link to it and a region by its page and name, and a row nothing uses says so",
+    ib6.post.join() === "A:p0021:blog.html#p0021,A:p0022:blog.html#p0022,A:p0023:blog.html#p0023" &&
+    ib6.region.join() === "SPAN:index.html · Forerunner 3:" &&
+    ib6.none.length === 0 && ib6.noneText === "Not used" &&
+    ib6.postText === "Used in p0021, p0022, p0023",
+    JSON.stringify(ib6));
+  await sdClose();
+
+  // ============ IW. AN IMAGE'S WORDS, AND FIND ============
+  // Every entry carries what each place says about its image, its caption
+  // and its alt text, kept by place the way used is: a save writes the
+  // places of the pages it writes, a publish the places of its post, and
+  // neither touches the other's. The Images box reads them as one string,
+  // and Find looks for every term in what a row says.
+  const iwEntry = (table, base) => ((table && table.images) || []).filter((e) => e.base === base)[0] || null;
+
+  // IW1. the field's shape: an object of strings, only for the places in
+  // used, in used order; one string for a reader; one line in the file
+  await send("Page.navigate", { url: PAGE + "?iw=1" });
+  await waitLoaded();
+  await evaluate(`sessionStorage.clear()`);
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  const iw1 = await evaluate(`AMH.images.index.load().then(function (was) {
+    var keep = JSON.parse(JSON.stringify(was));
+    var r = AMH.images.index.set({ images: [
+      { base: "blog/260916_img0006", num: "0006", date: "260916", used: ["p0011", "p0012"],
+        words: { p0012: " satellitetest ", p0011: "Satellite · satellitetest", p0099: "stale" } },
+      { base: "img/work/x-aaaaaa", used: ["index.html#fr3-gallery"] } ] });
+    var out = { first: r.images[0].words, second: r.images[1].words,
+      joined: AMH.images.index.words(r.images[0]),
+      phrase: AMH.images.phrase(["  Cap ", "", "Cap", "Alt"]),
+      line: AMH.images.index.text(r, "abc123").split("\\n")[2] };
+    AMH.images.index.set(keep);
+    return out; })`, { awaitPromise: true });
+  check("words: an entry keeps its words by place, only for the places it is used and in their order, and a reader gets them as one string",
+    JSON.stringify(iw1.first) === JSON.stringify({ p0011: "Satellite · satellitetest", p0012: "satellitetest" }) &&
+    JSON.stringify(iw1.second) === "{}" && iw1.joined === "Satellite · satellitetest" && iw1.phrase === "Cap · Alt" &&
+    iw1.line.indexOf('"words":{"p0011":"Satellite · satellitetest","p0012":"satellitetest"}') !== -1,
+    JSON.stringify(iw1).slice(0, 500));
+
+  // IW2. a page save writes a site image's words from its caption and alt;
+  // a second save of that page replaces its own place and keeps another
+  // page's, which this save has not read
+  await evaluate(PHOTO_HELPER);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').plusChip.click()`);
+  await sleep(300);
+  await evaluate(`window.__photo('IW Orbit.png', 900, 600, '#7b3fa0').then(function (f) {
+    window.__choose(document.querySelector('.ced-addphoto input[type=file]'), f); })`, { awaitPromise: true });
+  await waitFor(onStep("2 Describe"));
+  await evaluate(`(function () { var ins = document.querySelectorAll('.ced-addphoto .ced-describe .ced-field input');
+    ins[0].value = 'Orbit one'; ins[0].dispatchEvent(new Event('input', { bubbles: true }));
+    ins[1].value = 'An orbit'; ins[1].dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(200);
+  await evaluate(`${NEXT}.click()`);
+  await sleep(700);
+  const iwBase = await evaluate(`(function () {
+    var s = AMH.tool.regionFor('fr3-gallery').model.map(function (e) { return e.src; })
+      .filter(function (x) { return /^img\\/work\\//.test(x || ''); })[0] || '';
+    return s ? AMH.images.baseOf(s) : ''; })()`);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await waitFor(`!!document.querySelector('.ced-saved')`, 20000);
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent').click()`);
+  await sleep(300);
+  const iw2a = iwEntry(imagesTable(await evaluate(`window.__wrote['images.js'] || ''`)), iwBase);
+  /* another page says something about the same photograph */
+  await evaluate(`(function () { var rec = JSON.parse(JSON.stringify(AMH.images.index.get()));
+    rec.images.forEach(function (e) { if (e.base === ${JSON.stringify(iwBase)}) {
+      e.used = e.used.concat(['gallery.html#gal-tbg']); e.words['gallery.html#gal-tbg'] = 'Kept from the gallery'; } });
+    AMH.images.index.set(rec); return true; })()`);
+  await evaluate(`AMH.tool.regionFor('fr3-gallery').chip.click()`);
+  await sleep(400);
+  await evaluate(`(function () { var i = document.querySelector('.ced-photos .ced-photo input');
+    i.value = 'Orbit two'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await evaluate(`[...document.querySelectorAll('.ced-photos .ced-modal__btns .ced-btn')].find(x => x.textContent === 'Apply').click()`);
+  await sleep(500);
+  await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+  await waitFor(`!!document.querySelector('.ced-saved')`, 20000);
+  await evaluate(`document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent').click()`);
+  await sleep(300);
+  const iw2b = iwEntry(imagesTable(await evaluate(`window.__wrote['images.js'] || ''`)), iwBase);
+  check("words: a page save writes a site image's words from its caption and alt by place, and a second save replaces that place and keeps another page's",
+    !!iwBase && !!iw2a && JSON.stringify(iw2a.words) === JSON.stringify({ "index.html#fr3-gallery": "Orbit one · An orbit" }) &&
+    !!iw2b && iw2b.words["index.html#fr3-gallery"] === "Orbit two · An orbit" &&
+    iw2b.words["gallery.html#gal-tbg"] === "Kept from the gallery" && Object.keys(iw2b.words).length === 2,
+    JSON.stringify({ base: iwBase, first: iw2a && iw2a.words, second: iw2b && iw2b.words }));
+
+  // IW3. the publish's writer: a post's words by the post, replaced by a
+  // republish, gone with the tag and with the post, and a second post's
+  // words beside the first's
+  await send("Page.navigate", { url: BLOGPAGE + "?iw=3" });
+  await waitLoaded();
+  await sdEditorOn();
+  const iw3 = await evaluate(`AMH.images.index.load().then(function (was) {
+    var keep = JSON.parse(JSON.stringify(was));
+    AMH.images.index.set({ stamp: "iw3", nextImg: "0007", images: [
+      { base: "blog/260916_img0006", num: "0006", date: "260916", type: "png", ow: 32, oh: 32, bytes: 459,
+        added: "260916", used: ["p0011"], words: { p0011: "Satellite · satellitetest" } } ] });
+    function step(o) { var ix = AMH.publish.indexNext(o); if (ix) AMH.images.index.set(ix.rec);
+      var e = AMH.images.index.get().images[0]; return { used: e.used, words: e.words }; }
+    var out = {};
+    out.phrases = AMH.publish.phrasesOf("Hi [img0006,New cap|new alt] and [img0006,New cap|other alt] and [img0007|only alt]");
+    out.publish = step({ images: {}, postId: "0020", refs: { "0006": true }, phrases: AMH.publish.phrasesOf("[img0006,New cap|new alt]") });
+    out.republish = step({ images: {}, postId: "0020", refs: { "0006": true }, phrases: AMH.publish.phrasesOf("[img0006,Other cap|new alt]") });
+    out.dropped = step({ images: {}, postId: "0020", refs: {}, phrases: {} });
+    out.deleted = step({ images: {}, gone: "0011" });
+    AMH.images.index.set(keep);
+    return out; })`, { awaitPromise: true });
+  check("words: a publish writes a post's words by the post beside another post's, a republish replaces them, and a dropped tag or a delete takes them away",
+    JSON.stringify(iw3.phrases) === JSON.stringify({ "0006": "New cap · new alt · other alt", "0007": "only alt" }) &&
+    JSON.stringify(iw3.publish) === JSON.stringify({ used: ["p0011", "p0020"], words: { p0011: "Satellite · satellitetest", p0020: "New cap · new alt" } }) &&
+    JSON.stringify(iw3.republish.words) === JSON.stringify({ p0011: "Satellite · satellitetest", p0020: "Other cap · new alt" }) &&
+    JSON.stringify(iw3.dropped) === JSON.stringify({ used: ["p0011"], words: { p0011: "Satellite · satellitetest" } }) &&
+    JSON.stringify(iw3.deleted) === JSON.stringify({ used: [], words: {} }),
+    JSON.stringify(iw3).slice(0, 700));
+
+  // IW4. on this run's own site: a real publish writes its post's words,
+  // and a rebuild makes every blog image's words whole from the sources
+  // and fills a site image's words from the pages. What the page says is
+  // read here, from the bundle's own index.html, and not from the engine.
+  const iwIx0 = existsSync(join(bdir, "images.js")) ? imagesTable(readFileSync(join(bdir, "images.js"), "utf8")) : { images: [] };
+  const iwNum = ((iwIx0.images || []).filter((e) => e.num)[0] || {}).num || "";
+  const iwHome = existsSync(join(bdir, "index.html")) ? readFileSync(join(bdir, "index.html"), "utf8") : "";
+  const iwRegion = (/<!--\[edit:fr3-gallery\]-->([\s\S]*?)<!--\[\/edit:fr3-gallery\]-->/.exec(iwHome) || [])[1] || "";
+  const iwTag = (/<img\b[^>]*data-original="img\/work\/[^"]*"[^>]*>/.exec(iwRegion) || [])[0] || "";
+  const iwAttr = (name) => ((new RegExp("\\s" + name + '="([^"]*)"').exec(iwTag) || [])[1] || "");
+  const iwSiteBase = iwAttr("data-original").replace(/_original\.[a-z]+$/, "");
+  const iwSiteWords = [iwAttr("data-caption"), iwAttr("alt")].map((s) => s.trim())
+    .filter((s, i, all) => s && all.indexOf(s) === i).join(" · ");
+  let iw4pub = null, iw4 = null;
+  if (iwNum && iwSiteBase) {
+    bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+    await sleep(1500);
+    await send("Page.navigate", { url: B + "blog.html?iw=4a" });
+    await sdEditorOn();
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.confirm = function () { return true; };`);
+    await evaluate(`window.edit.blog()`);
+    await sleep(900);
+    await evaluate(`(function () {
+      document.querySelector('.bc-date').value = "260715";
+      var t = document.querySelector('.bc-write textarea');
+      t.value = "The words of an image.\\n\\n[img${iwNum},Orbit cap|Orbit alt]";
+      t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(600);
+    await pressPublish();
+    const iwZip = await capturePublish();
+    const iwPostId = iwZip && iwZip["blog.html"]
+      ? ((/\n(?:[^\n]*\|)?260715([0-9a-z]\d{3})The words of an image/.exec(iwZip["blog.html"].toString("utf8")) || [])[1] || "") : "";
+    iw4pub = { post: iwPostId, entry: iwZip ? entryIn(indexIn(iwZip), iwNum) : null };
+    if (iwZip) writeBundle(iwZip);
+    /* a key for a post that names no image, and a site image with a place
+       and no words, as a record from before the words would hold it */
+    const iwIx1 = imagesTable(readFileSync(join(bdir, "images.js"), "utf8"));
+    iwIx1.images.forEach((e) => { if (e.num === iwNum) { e.used = e.used.concat(["pz999"]); e.words = Object.assign({}, e.words, { pz999: "stale" }); } });
+    iwIx1.images = iwIx1.images.filter((e) => e.base !== iwSiteBase).concat([{ base: iwSiteBase, type: "png", ow: 10, oh: 10,
+      bytes: 100, animated: false, added: "260917", used: ["index.html#fr3-gallery"], words: {} }]);
+    writeFileSync(join(bdir, "images.js"), "/* GENERATED by the suite */\nwindow.AMH_IMAGES = " + JSON.stringify(iwIx1) + ";\n");
+    await send("Page.navigate", { url: B + "blog.html?iw=4b" });
+    await sdEditorOn();
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(`window.edit.blog.rebuild()`);
+    await passRouteStep();
+    const iwRb = await capturePublish();
+    const iwRbIx = iwRb ? indexIn(iwRb) : { images: [] };
+    iw4 = { blog: entryIn(iwRbIx, iwNum), site: iwEntry(iwRbIx, iwSiteBase) };
+    if (iwRb) writeBundle(iwRb);
+    try { bs?.kill(); } catch {}
+    bs = null;
+  }
+  check("words: a publish writes its post's words, and a rebuild makes every blog image's words whole and fills a site image's from its page",
+    !!iw4pub && !!iw4pub.post && !!iw4pub.entry && iw4pub.entry.words["p" + iw4pub.post] === "Orbit cap · Orbit alt" &&
+    !!iw4 && !!iw4.blog && iw4.blog.words["p" + iw4pub.post] === "Orbit cap · Orbit alt" && !("pz999" in iw4.blog.words) &&
+    iw4.blog.used.indexOf("pz999") === -1 &&
+    !!iw4.site && iw4.site.words["index.html#fr3-gallery"] === iwSiteWords && !!iwSiteWords,
+    JSON.stringify({ num: iwNum, site: iwSiteBase, expect: iwSiteWords, pub: iw4pub, rebuild: iw4 }).slice(0, 700));
+
+  // IW5. Restore brings an entry back with no places and no words; the log
+  // keeps the words the entry had, because the log is the history
+  await send("Page.navigate", { url: PAGE + "?iw=5" });
+  await waitLoaded();
+  await evaluate(`sessionStorage.clear()`);
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  const iwGone = { base: "blog/260915_img0005", num: "0005", date: "260915", type: "gif", ow: 320, oh: 200, bytes: 90000,
+    animated: true, added: "260915", uhd: true, truesize: false, used: ["p0012"], words: { p0012: "A moving picture" } };
+  const iwPaths = ["blog/260915_img0005_sd.webp", "blog/260915_img0005.jpg", "blog/260915_img0005_original.gif"];
+  await evaluate(`Promise.all([AMH.images.index.load(), AMH.images.log.load()]).then(function () {
+    AMH.images.index.set({ stamp: "iw5", nextImg: "0009", images: [] });
+    AMH.images.log.set({ deleted: [{ at: "260917-120000", base: ${JSON.stringify(iwGone.base)},
+      paths: ${JSON.stringify(iwPaths)}, entry: ${JSON.stringify(iwGone)}, restored: "" }] });
+    ${JSON.stringify(iwPaths)}.forEach(function (p) { window.__putFile("deletethese/" + p, "x"); });
+    return true; })`, { awaitPromise: true });
+  await sdOpen();
+  await evaluate(sdPill("deleted"));
+  await sleep(250);
+  await evaluate(sdAct("img0005", "Restore"));
+  await waitFor(`!!document.querySelector('.ced-saved')`, 15000);
+  const iw5 = await evaluate(`({ ix: window.__wrote['images.js'] || '', log: window.__wrote['superdeleted.js'] || '' })`);
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(300);
+  await sdClose();
+  const iw5e = iwEntry(imagesTable(iw5.ix), iwGone.base);
+  const iw5l = ((imagesTable(iw5.log).deleted) || [])[0] || null;
+  check("words: Restore brings an entry back with no places and no words, and the log keeps the words it had",
+    !!iw5e && iw5e.used.length === 0 && JSON.stringify(iw5e.words) === "{}" &&
+    !!iw5l && iw5l.entry.words.p0012 === "A moving picture" && /^\d{6}-\d{6}$/.test(iw5l.restored),
+    JSON.stringify({ entry: iw5e, line: iw5l }).slice(0, 500));
+
+  // IW6 and IW7. Find, on the IB record with words on two entries
+  const IW_REC = JSON.parse(JSON.stringify(IB_REC));
+  IW_REC.images.forEach((e) => {
+    if (e.num === "0013") e.words = { p0021: "Orbital dawn · a sunrise" };
+    if (e.base === "img/work/alder-aa11bb") e.words = { "index.html#fr3-gallery": "Alder leaves" };
+  });
+  await evaluate(`AMH.images.index.load().then(function () { AMH.images.index.set(${JSON.stringify(IW_REC)}); return true; })`,
+    { awaitPromise: true });
+  await sdOpen();
+  const IW_LOOK = `(function () { var b = document.querySelector('.ced-images');
+    if (!b) return { open: false };
+    return { open: true, names: [].map.call(b.querySelectorAll('.ced-image__name'), function (n) { return n.textContent; }),
+      filters: [].map.call(b.querySelectorAll('.ced-images__filters .ced-btn'), function (p) { return p.textContent; }),
+      status: b.querySelector('.ced-modal__status').textContent,
+      empty: b.querySelector('.ced-empty').hidden ? '' : b.querySelector('.ced-empty').textContent,
+      field: b.querySelector('.ced-images__find').value,
+      more: (b.querySelector('.ced-images__more') || {}).hidden ? 'hidden' : (b.querySelector('.ced-images__more') || {}).textContent }; })()`;
+  const iwFind = async (t) => {
+    await evaluate(`(function () { var f = document.querySelector('.ced-images__find'); if (!f) return false;
+      f.value = ${JSON.stringify(t)}; f.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await sleep(250);
+    return await evaluate(IW_LOOK);
+  };
+  const iwSet = (s) => (s.names || []).slice().sort().join();
+  const iw6 = {};
+  for (const t of ["0014", "alder", "2026-09-12", "260912", "p0022", "index.html", "forerunner", "FORERUNNER",
+                   "orbital", "alder leaves", "blog 260914", "png"]) iw6[t] = await iwFind(t);
+  const iw6none = await iwFind("qqq");
+  await iwFind("alder");
+  await evaluate(`document.querySelector('.ced-images__find').focus()`);
+  await pressKey("Escape", "Escape", 27);
+  await sleep(250);
+  const iw6esc = await evaluate(IW_LOOK);
+  await pressKey("Escape", "Escape", 27);
+  await sleep(250);
+  const iw6shut = await evaluate(IW_LOOK);
+  check("find: a term matches the number, the name, the day in both forms, a place by its id, its page and its name, and the words; every term must match, and case does not matter",
+    iwSet(iw6["0014"]) === "img0014" && iwSet(iw6["alder"]) === "alder-aa11bb" &&
+    iwSet(iw6["2026-09-12"]) === "birch-cc22dd,img0013,img0014,maple-ii55jj" &&
+    iwSet(iw6["260912"]) === iwSet(iw6["2026-09-12"]) &&
+    iwSet(iw6["p0022"]) === "img0014" && iwSet(iw6["index.html"]) === "alder-aa11bb,maple-ii55jj" &&
+    iwSet(iw6["forerunner"]) === "alder-aa11bb,maple-ii55jj" && iwSet(iw6["FORERUNNER"]) === iwSet(iw6["forerunner"]) &&
+    iwSet(iw6["orbital"]) === "img0013" && iwSet(iw6["alder leaves"]) === "alder-aa11bb" &&
+    iwSet(iw6["blog 260914"]) === "img0015,img0016" && iw6["png"].names.length === 12,
+    JSON.stringify(Object.keys(iw6).map((k) => k + "=" + iwSet(iw6[k]))).slice(0, 700));
+  check("find: the filter counts follow the term, a term with no match says so, and Escape empties the field before it closes the box",
+    iw6["forerunner"].filters.join() === "All (2),Unused (0),Super deleted (0)" &&
+    iw6none.names.length === 0 && iw6none.empty === 'Nothing matches "qqq".' &&
+    iw6none.filters.join() === "All (0),Unused (0),Super deleted (0)" &&
+    iw6esc.open && iw6esc.field === "" && iw6esc.names.length === 12 && !iw6shut.open,
+    JSON.stringify({ counts: iw6["forerunner"].filters, none: iw6none, esc: [iw6esc.open, iw6esc.field, (iw6esc.names || []).length], shut: iw6shut.open }).slice(0, 500));
+
+  // IW7. Find with the sort and the pages: the matches come sorted and
+  // paged, and the status line names the term
+  await sdOpen();
+  await iwFind("blog");
+  await evaluate(ibSort("size"));
+  await sleep(250);
+  await evaluate(ibSize(5));
+  await sleep(250);
+  const iw7 = await evaluate(IW_LOOK);
+  const iw7want = ibOrder(IW_REC.images.filter((e) => e.num), "size", "desc");
+  check("find: the matches come sorted and a page at a time, and the status line says how many of them are shown",
+    JSON.stringify(iw7.names) === JSON.stringify(iw7want.slice(0, 5)) &&
+    iw7.more === "Show more (1 left)" && iw7.status === 'Showing 5 of 6 that match "blog"' &&
+    iw7.filters.join() === "All (6),Unused (2),Super deleted (0)",
+    JSON.stringify({ got: iw7, want: iw7want }).slice(0, 600));
+  await sdClose();
+
+  // ============ IL. THE LIST VIEW ============
+  // The same rows as the cards, one line each, in a table: every fact and
+  // every tool a card has, three heads that sort with the pills' own state,
+  // and Find, the filters and the pages exactly as the cards have them.
+  // The record is the one the words section used.
+  const IL_LOOK = `(function () {
+    var b = document.querySelector('.ced-images');
+    if (!b) return null;
+    var t = b.querySelector('.ced-images__table');
+    var lines = [].slice.call(b.querySelectorAll('.ced-images__table tbody tr'));
+    var body = b.querySelector('.ced-images__body');
+    var pressed = b.querySelector('.ced-images__tools .ced-btn[aria-pressed="true"]');
+    function cell(tr, k) { var c = tr.querySelector('.ced-images__col--' + k);
+      return c ? { text: c.textContent, title: c.title || '', shown: getComputedStyle(c).display !== 'none' } : null; }
+    function line(tr) { return { name: cell(tr, 'name'), type: cell(tr, 'type'), px: cell(tr, 'px'), size: cell(tr, 'size'),
+      added: cell(tr, 'added'), used: cell(tr, 'used'), words: cell(tr, 'words'),
+      tags: [].map.call(tr.querySelectorAll('.ced-image__place'), function (x) { return x.textContent; }),
+      paths: [].map.call(tr.querySelectorAll('.ced-images__col--used code'), function (x) { return x.textContent; }),
+      tools: [].map.call(tr.querySelectorAll('.ced-images__col--tools button'), function (x) {
+        return x.textContent || x.getAttribute('aria-label'); }) }; }
+    return {
+      view: [].map.call(b.querySelectorAll('.ced-seg__btn'), function (x) { return x.getAttribute('data-view') + ':' + x.getAttribute('aria-pressed'); }).join(),
+      table: !!t && getComputedStyle(t).display !== 'none',
+      cards: getComputedStyle(b.querySelector('.ced-images__list')).display !== 'none' ? b.querySelectorAll('.ced-images__list .ced-image').length : -1,
+      heads: [].map.call(b.querySelectorAll('.ced-images__table th'), function (th) { return th.textContent.replace(/[↑↓]/g, ''); }),
+      sorted: [].map.call(b.querySelectorAll('.ced-images__table th[aria-sort]'), function (th) {
+        return th.textContent.replace(/[↑↓]/g, '') + ':' + th.getAttribute('aria-sort') + (/[↑↓]/.test(th.textContent) ? ':arrow' : ''); }),
+      names: lines.map(function (tr) { return cell(tr, 'name').text; }),
+      lines: lines.map(line),
+      pill: pressed ? pressed.getAttribute('data-sort') + ':' + pressed.getAttribute('data-dir') : null,
+      filters: [].map.call(b.querySelectorAll('.ced-images__filters .ced-btn'), function (p) { return p.textContent; }).join(),
+      filterOn: (b.querySelector('.ced-images__filters .ced-btn[aria-pressed="true"]') || {}).textContent || '',
+      term: b.querySelector('.ced-images__find').value,
+      more: b.querySelector('.ced-images__more').hidden ? 'hidden' : b.querySelector('.ced-images__more').textContent,
+      status: b.querySelector('.ced-modal__status').textContent,
+      sideways: body.scrollWidth - body.clientWidth };
+  })()`;
+  const ilView = (k) => `(function () { var v = document.querySelector('.ced-seg__btn[data-view="${k}"]'); if (!v) return false; v.click(); return true; })()`;
+  const ilHead = (k) => `(function () { var h = document.querySelector('.ced-images__table .ced-images__head[data-sort="${k}"]');
+    if (!h) return false; h.click(); return true; })()`;
+  const ilFind = (t) => `(function () { var f = document.querySelector('.ced-images__find'); if (!f) return false;
+    f.value = ${JSON.stringify(t)}; f.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
+  const ilLine = (name) => `[].slice.call(document.querySelectorAll('.ced-images__table tbody tr')).filter(function (tr) {
+    return tr.querySelector('.ced-images__col--name').textContent === ${JSON.stringify(name)}; })[0]`;
+  const ilStep = async (expr) => { await evaluate(expr); await sleep(250); return await evaluate(IL_LOOK); };
+  const ilLineOf = (s, name) => ((s && s.lines) || []).filter((l) => l.name.text === name)[0] || null;
+
+  await send("Page.navigate", { url: PAGE + "?il=1" });
+  await waitLoaded();
+  await evaluate(`sessionStorage.clear()`);
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  await evaluate(`AMH.images.index.load().then(function () { AMH.images.index.set(${JSON.stringify(IW_REC)}); return true; })`,
+    { awaitPromise: true });
+  await sdOpen();
+
+  // IL1. the switch, and a table with every fact and tool a card has
+  const il1a = await evaluate(IL_LOOK);
+  const il1 = await ilStep(ilView("list"));
+  const il1alder = ilLineOf(il1, "alder-aa11bb");
+  check("list: a switch in the tools row turns the cards into a table of nine columns, one line an image, with every fact and tool a card has",
+    !!il1a && il1a.view === "cards:true,list:false" && !il1a.table && il1a.cards === 12 &&
+    !!il1 && il1.view === "cards:false,list:true" && il1.table && il1.cards === -1 &&
+    il1.heads.join() === "Picture,Name,Type,Pixels,Size,Added,Used in,Words,Tools" && il1.lines.length === 12 &&
+    !!il1alder && il1alder.name.title.indexOf("img/work/alder-aa11bb") === 0 && /Alder leaves/.test(il1alder.name.title) &&
+    il1alder.type.text === "PNG" && il1alder.px.text === "640 x 480" && il1alder.size.text === "117 KB" &&
+    il1alder.added.text === "2026-09-10" && il1alder.tags.join() === "index.html · Forerunner 3" &&
+    il1alder.words.text === "Alder leaves" && il1alder.words.title === "Alder leaves" &&
+    il1alder.tools.join() === "Copy path,Super delete",
+    JSON.stringify({ before: il1a && [il1a.view, il1a.table, il1a.cards], after: il1 && [il1.view, il1.heads, il1.lines.length], alder: il1alder }).slice(0, 700));
+
+  // IL2. the heads sort, and the pills agree, because they are one state
+  const il2a = await ilStep(ilHead("size"));
+  const il2b = await ilStep(ilHead("size"));
+  const il2c = await ilStep(ilHead("name"));
+  const il2d = await ilStep(ilHead("date"));
+  check("list: Name, Size and Added in the head sort the lines, a second press turns the order, and the pills in the tools row say the same",
+    il2a.sorted.join() === "Name:none,Size:descending:arrow,Added:none" && il2a.pill === "size:desc" &&
+    JSON.stringify(il2a.names) === JSON.stringify(ibOrder(IW_REC.images, "size", "desc")) &&
+    il2b.sorted.join() === "Name:none,Size:ascending:arrow,Added:none" && il2b.pill === "size:asc" &&
+    JSON.stringify(il2b.names) === JSON.stringify(ibOrder(IW_REC.images, "size", "asc")) &&
+    il2c.pill === "name:asc" && JSON.stringify(il2c.names) === JSON.stringify(ibOrder(IW_REC.images, "name", "asc")) &&
+    il2d.pill === "date:desc" && il2d.sorted.join() === "Name:none,Size:none,Added:descending:arrow" &&
+    JSON.stringify(il2d.names) === JSON.stringify(ibOrder(IW_REC.images, "date", "desc")),
+    JSON.stringify({ a: [il2a.sorted, il2a.pill], b: [il2b.sorted, il2b.pill], c: il2c.pill, d: [il2d.sorted, il2d.pill] }));
+
+  // IL3. Find, the filters and the pages hold in the list as in the cards
+  const il3a = await ilStep(ilFind("blog"));
+  const il3b = await ilStep(ibSize(5));
+  const il3c = await ilStep(IB_MORE);
+  const il3d = await ilStep(ibFilter("unused"));
+  check("list: Find, the filters and the pages apply to the lines, and Show more adds lines to the same table",
+    il3a.lines.length === 6 && il3a.filters === "All (6),Unused (2),Super deleted (0)" &&
+    il3b.lines.length === 5 && il3b.more === "Show more (1 left)" && il3b.status === 'Showing 5 of 6 that match "blog"' &&
+    il3c.lines.length === 6 && il3c.more === "hidden" &&
+    il3d.names.slice().sort().join() === "img0012,img0015",
+    JSON.stringify({ a: [il3a.lines.length, il3a.filters], b: [il3b.lines.length, il3b.more, il3b.status],
+      c: [il3c.lines.length, il3c.more], d: il3d.names }));
+  await evaluate(ibFilter("all"));
+  await evaluate(ilFind(""));
+  await evaluate(ibSize(20));
+  await sleep(250);
+
+  // IL4. a super deleted line, and the tools on a line do what a card's do
+  await evaluate(`AMH.images.log.load().then(function () { AMH.images.log.set({ deleted: [{ at: "260917-143205",
+    base: "blog/260915_img0005", paths: ["blog/260915_img0005_sd.webp", "blog/260915_img0005.jpg", "blog/260915_img0005_original.gif"],
+    entry: { base: "blog/260915_img0005", num: "0005", date: "260915", type: "gif", ow: 320, oh: 200, bytes: 90000,
+             animated: true, added: "260915", used: [] }, restored: "" }] }); return true; })`, { awaitPromise: true });
+  const il4gone = ilLineOf(await ilStep(ibFilter("deleted")), "img0005");
+  await evaluate(ibFilter("all"));
+  await sleep(250);
+  await evaluate(`navigator.clipboard.writeText = function (t) { window.__clip = t; return Promise.resolve(); }; true`);
+  await evaluate(`(function () { var tr = ${ilLine("img0014")}; if (!tr) return false;
+    [].filter.call(tr.querySelectorAll('button'), function (b) { return b.textContent === 'Copy tag'; })[0].click(); return true; })()`);
+  await sleep(300);
+  const il4clip = await evaluate(`({ clip: window.__clip, status: document.querySelector('.ced-images .ced-modal__status').textContent })`);
+  await evaluate(`(function () { var tr = ${ilLine("birch-cc22dd")}; if (!tr) return false;
+    tr.querySelector('.ced-superdel').click(); return true; })()`);
+  await waitFor(`!!document.querySelector('.ced-ask')`, 8000);
+  const il4ask = await evaluate(SD_ASK);
+  await evaluate(sdPress(".ced-ask", "Cancel"));
+  await sleep(300);
+  const il4after = await evaluate(IL_LOOK);
+  check("list: a super deleted line shows when it went, its paths and Restore, and Copy tag and the trash on a line do what they do on a card",
+    !!il4gone && il4gone.added.text === "Super deleted 2026-09-17 14:32:05" && il4gone.paths.length === 3 &&
+    il4gone.tools.join() === "Restore" && il4gone.type.text === "GIF · animated" &&
+    il4clip.clip === "[img0014]" && il4clip.status === "Copied [img0014]" &&
+    !!il4ask && il4ask.title === "Super delete birch-cc22dd?" && il4ask.focus === "Cancel" &&
+    !!ilLineOf(il4after, "birch-cc22dd") && il4after.lines.length === 12,
+    JSON.stringify({ gone: il4gone, clip: il4clip, ask: il4ask && il4ask.title, after: il4after && il4after.lines.length }).slice(0, 700));
+
+  // IL5. on a phone: the wide columns go, the words stay in the name's
+  // title, and the box never scrolls sideways
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(700);
+  const il5 = await evaluate(IL_LOOK);
+  const il5alder = ilLineOf(il5, "alder-aa11bb");
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(500);
+  check("list: on a 390 px phone the type, pixels, added and words columns go, the words stay in the name's title, and the box does not scroll sideways",
+    !!il5alder && !il5alder.type.shown && !il5alder.px.shown && !il5alder.added.shown && !il5alder.words.shown &&
+    il5alder.name.shown && il5alder.size.shown && il5alder.used.shown && /Alder leaves/.test(il5alder.name.title) &&
+    il5.sideways <= 0,
+    JSON.stringify({ alder: il5alder && { type: il5alder.type.shown, px: il5alder.px.shown, added: il5alder.added.shown,
+      words: il5alder.words.shown, title: il5alder.name.title }, sideways: il5 && il5.sideways }));
+
+  // IL6. a switch of view keeps the term, the filter, the sort, its
+  // direction and how far the reader has paged
+  await evaluate(ilFind("blog"));
+  await evaluate(ibSort("size"));
+  await evaluate(ibSort("size"));
+  await evaluate(ibSize(5));
+  await sleep(250);
+  await evaluate(IB_MORE);
+  await sleep(250);
+  const il6a = await ilStep(ilView("cards"));
+  const il6b = await ilStep(ilView("list"));
+  check("list: switching between the views keeps the term, the filter, the sort and its direction, and the rows already shown",
+    il6a.view === "cards:true,list:false" && il6a.cards === 6 && il6a.term === "blog" && il6a.pill === "size:asc" &&
+    /^All/.test(il6a.filterOn) && il6a.more === "hidden" &&
+    il6b.view === "cards:false,list:true" && il6b.lines.length === 6 && il6b.pill === "size:asc" &&
+    JSON.stringify(il6b.names) === JSON.stringify(ibOrder(IW_REC.images.filter((e) => e.num), "size", "asc")),
+    JSON.stringify({ cards: [il6a.view, il6a.cards, il6a.term, il6a.pill, il6a.filterOn, il6a.more],
+      list: [il6b.view, il6b.lines.length, il6b.pill, il6b.names] }));
+  await sdClose();
+
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));
   process.exitCode = failed ? 1 : 0;
