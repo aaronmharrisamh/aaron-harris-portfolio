@@ -19,7 +19,7 @@
    Seven sections:
      1. HEADER AND SETUP         5. GENERATORS
      2. CONSTANTS AND STATE      6. BUNDLE AND PUBLISH
-     3. IMAGE INTAKE             7. LIFECYCLE AND API
+     3. IMAGE AND MEDIA INTAKE   7. LIFECYCLE AND API
      4. COMPOSER UI
 
    This file uses two surfaces and publishes one.
@@ -83,6 +83,12 @@
      bundle is delivered, and then becomes the current record. */
   var INDEX_FILE = "images.js";
   var bcIndexPending = null;
+  /* The most a bundle that carries a media file can hold. The browser
+     builds a bundle whole in memory, the zip and the folder write alike,
+     so a large file is read, held and written at once. The number is a
+     budget for the browsers the site is edited in, and not a limit any
+     host sets. AMH.publish.BUNDLE_MAX_MB is read in its place. */
+  var BC_BUNDLE_MAX_MB = 256;
   /* the dead tags a rebuild found: a tag whose image the site does not
      hold, named with its post on the Done step */
   var bcDeadTags = [];
@@ -507,21 +513,36 @@
   }
 
   /* ==========================================================
-     3. IMAGE INTAKE
+     3. IMAGE AND MEDIA INTAKE
      ----------------------------------------------------------
      A dropped file goes through the image engine, the same one the site
-     pages use. It comes back as three files: a small copy, the copy a
-     page shows, and the original with its location and camera data cut
-     out unless the author keeps them.
+     pages use. A photo comes back as three files: a small copy, the copy
+     a page shows, and the original with its location and camera data cut
+     out unless the author keeps them. A video, a sound or a MIDI file
+     comes back as one file, byte for byte as it came.
 
      The number is permanent: it is the name of the files the bundle
      ships and the number the body tag refers to. The DATE is not. A post
-     can be given another date before it is published, so the held photo
-     is renamed at publish rather than named again here.
+     can be given another date before it is published, so a held file is
+     renamed at publish rather than named again here. Once a media file is
+     on the site its name never changes again.
+
+     A card is one file. A PLACEMENT is one tag for it in the body, and
+     a file can be placed more than once, each tag with its own caption
+     and its own options. The card edits one placement at a time.
      ========================================================== */
 
   /* The base path one blog photo is written under. */
   function bcImgBase(date, num) { return "blog/" + date + "_img" + num; }
+  /* The base path one blog media file is written under: one file, with
+     the extension it came with. */
+  function bcMediaBase(date, num) { return "blog/" + date + "_media" + num; }
+  /* A card's file is a media file: a video, a sound or a MIDI file. */
+  function bcIsMedia(im) { return !!(im && im.kind && im.kind !== "image"); }
+  /* The word its tags use, and the name the composer calls it by:
+     img0006, video0012. */
+  function bcWordOf(im) { return AMH.images.tagWordOf((im && im.kind) || "image"); }
+  function bcNameOf(im) { return bcWordOf(im) + im.num; }
 
   /* The date the composer would publish under, as the files are named. */
   function bcDateNow() {
@@ -540,41 +561,146 @@
      written, or when no id is left for it: the last id, z999, counts this
      session's files too. A refused file costs no number. */
   var BC_NO_ID = "The site has no id left for a new file. Every id up to z999 is taken.";
-  function bcTakePhoto(file) {
-    var date = bcDateNow();
-    var num = "";
+  /* The number is taken in the engine's name call and nowhere earlier.
+     The engine makes that call once the file is made, and once a media
+     file's kind is known, so a file it refuses or the author lets go
+     never burns a number, and the numbers follow the order of the drop. */
+  function bcNumberer(date, base) {
+    var taken = { num: "" };
+    taken.name = function () {
+      var n = bcNextImg() + bcImgCounter;
+      if (n >= AMH.blog.ID_COUNT) throw new Error(BC_NO_ID);
+      bcImgCounter++;
+      taken.num = bcIdOf(n);
+      return base(date, taken.num);
+    };
+    return taken;
+  }
+  function bcTakeReady() {
     return AMH.images.index.load().then(function () {
       if (AMH.images.index.problem()) throw new Error(AMH.images.index.problem());
       if (bcNextImg() + bcImgCounter >= AMH.blog.ID_COUNT) throw new Error(BC_NO_ID);
-      return AMH.images.intake(file, {
-        keepMeta: bcKeepMeta,
-        /* The number is taken HERE and nowhere earlier. The engine calls this
-           once the photo is made, so a file it refuses never burns a number,
-           and the numbers still follow the order the files were taken in. */
-        name: function () {
-          var n = bcNextImg() + bcImgCounter;
-          if (n >= AMH.blog.ID_COUNT) throw new Error(BC_NO_ID);
-          bcImgCounter++;
-          num = bcIdOf(n);
-          return bcImgBase(date, num);
-        }
-      });
+    });
+  }
+  function bcTakePhoto(file) {
+    var date = bcDateNow();
+    var numbering = bcNumberer(date, bcImgBase);
+    return bcTakeReady().then(function () {
+      return AMH.images.intake(file, { keepMeta: bcKeepMeta, name: numbering.name });
     }).then(function (photo) {
-      AMH.images.hold(photo);
       /* the engine says which switches a new photo starts with */
       var starts = AMH.images.defaults(photo);
       var im = {
-        num: num, caption: "", alt: TOOL.imageRegion.humanize(photo.from),
+        num: numbering.num, kind: "image", caption: "", alt: TOOL.imageRegion.humanize(photo.from),
         uhd: starts.uhd, truesize: starts.truesize,
-        published: false, photo: photo, date0: date
+        published: false, photo: photo, date0: date, next: {}, target: null
       };
+      bcHold(im);
       bcImages.push(im);
       return im;
     });
   }
+  /* A media file, taken and held. The engine reads what it is, and asks
+     the author, through bcAskKind, when nothing in the file says whether
+     it is a video or a sound. Resolves null when the author let it go. */
+  function bcTakeMedia(file) {
+    var date = bcDateNow();
+    var numbering = bcNumberer(date, bcMediaBase);
+    return bcTakeReady().then(function () {
+      return AMH.images.intakeMedia(file, { chooseKind: bcAskKind, name: numbering.name });
+    }).then(function (photo) {
+      if (!photo) return null;
+      var im = { num: numbering.num, kind: photo.kind, caption: "", alt: "", published: false,
+                 photo: photo, date0: date, next: {}, target: null };
+      bcHold(im);
+      bcImages.push(im);
+      return im;
+    });
+  }
+  /* Hold a new file, and say so when the browser's storage refused a
+     copy: the file then lives in this page's memory alone, and a reload
+     or a walk to another page loses it. */
+  function bcHold(im) {
+    AMH.images.hold(im.photo).then(function (kept) {
+      if (kept) return;
+      im.localOnly = bcNameOf(im) + " is held on this page only: the browser's storage refused a copy. " +
+        "Publish it before you leave or reload this page.";
+      bcSetStatus(im.localOnly);
+      /* the card says it too, where no later line writes over it */
+      if (im.ui) bcCardWarn(im);
+    });
+  }
+  /* A card's warnings: what the engine noted about the file, and a copy
+     the browser's storage refused. */
+  function bcCardWarn(im) {
+    if (!im.ui) return;
+    var words = ((im.photo && im.photo.notes) || []).slice();
+    if (im.localOnly) words.push(im.localOnly);
+    im.ui.warn.textContent = words.join(" ");
+    im.ui.warn.hidden = !words.length;
+  }
+  /* A file the composer takes: a photo, by its type or its name, or a
+     media file by its name. Anything else is refused here, before either
+     engine reads it, with words that name both lists. */
+  function bcTakeFile(file) {
+    if (AMH.images.isMediaName(file.name)) return bcTakeMedia(file);
+    if (/^image\//i.test(file.type || "") || /\.(?:jpe?g|png|webp|gif|hei[cf])$/i.test(file.name || "")) {
+      return bcTakePhoto(file);
+    }
+    var list = AMH.images.MEDIA_ACCEPT.split(",");
+    return Promise.reject(new Error('"' + (file.name || "That file") + '" is not a file the blog takes. It takes ' +
+      "JPG, PNG, WebP and GIF photos, and " + list.slice(0, -1).join(", ") + " or " + list[list.length - 1] + " files."));
+  }
 
-  /* What one image says about itself, whether it is held or published.
-     A published image knows what its index entry says. */
+  /* THE KIND, WHEN THE FILE CANNOT SAY. An MP4, WebM or Ogg file holds a
+     picture or a sound, and one whose header and whose test player both
+     say nothing is asked about here, once, on the Media view. The
+     browser's word for it comes first. Skip lets the file go, and it
+     costs no number. Closing the composer answers Skip. */
+  var bcKindAnswer = null;
+  function bcAskKind(info) {
+    return new Promise(function (resolve) {
+      if (!bcPanel || !bcPanel.parentNode || !bcCards) { resolve(""); return; }
+      bcPanel.setAttribute("data-tab", "images");
+      bcTabsSync();
+      var box = doc.createElement("div");
+      box.className = "bc-kindask";
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", "What " + info.name + " holds");
+      var say = doc.createElement("p");
+      say.textContent = '"' + info.name + '" can hold a video or a sound, and nothing in it says which. What is it?';
+      box.appendChild(say);
+      if (info.mime) {
+        var hint = doc.createElement("p");
+        hint.className = "bc-kindask__hint";
+        hint.textContent = "The browser calls it " + info.mime + ".";
+        box.appendChild(hint);
+      }
+      var row = doc.createElement("div");
+      row.className = "bc-kindask__btns";
+      function answer(kind) {
+        bcKindAnswer = null;
+        if (box.parentNode) box.parentNode.removeChild(box);
+        resolve(kind);
+      }
+      (info.hint === "audio" ? ["audio", "video"] : ["video", "audio"]).forEach(function (kind, i) {
+        var b = bcBtn(kind === "video" ? "Video" : "Audio", i === 0 ? "ced-btn--accent" : "",
+          function () { answer(kind); }, row);
+        b.setAttribute("data-kind", kind);
+      });
+      bcBtn("Skip", "", function () { answer(""); }, row);
+      box.appendChild(row);
+      bcKindAnswer = answer;
+      bcCards.parentNode.insertBefore(box, bcCards);
+      row.firstChild.focus();
+    });
+  }
+
+  /* The words for a kind on a card. */
+  var BC_KIND_WORDS = { image: "image", video: "video", audio: "audio", midi: "MIDI" };
+
+  /* What one file says about itself, whether it is held or published.
+     A published file knows what its index entry says. */
   function bcImFacts(im) {
     var out = [];
     if (im.published) out.push({ text: "published" });
@@ -583,9 +709,17 @@
       out.push({ text: im.src });
       return out;
     }
-    /* a held photo says everything about itself; a published one says what
+    /* a held file says everything about itself; a published one says what
        its index entry says */
     var from = im.photo || im;
+    if (bcIsMedia(im)) {
+      out.push({ text: BC_KIND_WORDS[im.kind] || im.kind });
+      if (from.type) out.push({ text: from.type.toUpperCase() });
+      if (from.ow && from.oh) out.push({ text: from.ow + " x " + from.oh });
+      if (from.bytes) out.push({ text: AMH.work.sizeText(from.bytes) });
+      if (from.from) out.push({ text: "from " + from.from });
+      return out;
+    }
     if (from.type) out.push({ text: from.type.toUpperCase() + " original" });
     if (from.type === "gif" && from.animated) out.push({ text: "animated" });
     if (from.ow && from.oh) out.push({ text: from.ow + " x " + from.oh });
@@ -601,23 +735,22 @@
     return out;
   }
 
-  /* The picture a card shows: the small copy, from the blob for a held
-     photo and from the site for a published one. */
+  /* The picture an image's card shows: the small copy, from the blob for
+     a held photo and from the site for a published one. */
   function bcImThumb(im) {
     return im.photo ? im.photo.urls.sd : (im.sd || im.src || "");
   }
 
   /* ---------------- tags in the body ---------------- */
-  /* A card's tag, written with no options of its own. A tag written before
-     the engine may say png, and every reader still takes it as a synonym,
-     but nothing writes one: what a page shows is a fact in the index now,
-     not a format baked into a file name. The options are the author's to
-     type, and a rewrite keeps the ones a tag already has, and its kind's
-     word, so a rewrite never changes what the author asked for. */
-  function bcBuildTag(im, options, word) {
-    return "[" + (options ? options + " " : "") + (word && word !== "png" ? word : "img") + im.num +
-      (im.caption || im.alt ? "," + im.caption : "") +
-      (im.alt ? "|" + im.alt : "") + "]";
+  /* A tag as the composer writes it: the options in their one order, the
+     kind's word, the number, and the caption and the description. A tag
+     written before the engine may say png, and every reader still takes
+     it as a synonym, but nothing writes one: what a page shows is a fact
+     in the index now, not a format baked into a file name. */
+  function bcWriteTag(o, word, num, caption, alt) {
+    var options = AMH.blog.optionsText(o || {});
+    return "[" + (options ? options + " " : "") + (word && word !== "png" ? word : "img") + num +
+      (caption || alt ? "," + caption : "") + (alt ? "|" + alt : "") + "]";
   }
   /* The tags for one number, from the tag's one pattern in blog.js, with its
      groups: the options, the kind's word, the number, the caption, the alt. */
@@ -635,19 +768,6 @@
     if (html) out = out.replace(/[ \t]*<p>\s*<\/p>[ \t]*\r?\n?/g, "");
     return out;
   }
-  /* pull the tag's current caption/alt into the card before its inputs make
-     their first rewrite, so typed-in-tag values are never clobbered */
-  function bcHarvestTag(im) {
-    var m = bcTagRe(im.num).exec(bcBody.value);
-    if (!m) return;
-    if (m[4] !== undefined) im.caption = m[4];
-    if (m[5] !== undefined) im.alt = m[5];
-  }
-  function bcRewriteTag(im) {
-    bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), function (tag, options, word) {
-      return bcBuildTag(im, options, word);
-    });
-  }
   function bcClean(s) { return s.replace(/[\]|]/g, "").trim(); }
   /* The text a post's tags are checked in. In a Markdown post a tag in
      code is text, which the page never draws, so it is no problem of its
@@ -655,6 +775,127 @@
   function bcTagText(source, format) {
     return format === "md" && AMH.markdown && AMH.markdown.withoutCode
       ? AMH.markdown.withoutCode(source) : String(source || "");
+  }
+
+  /* ---------------- a file's placements ----------------
+
+     The card edits the tag the caret was in when the Media view opened,
+     the one its chooser names when the file is placed twice or more, or
+     the first. A file placed nowhere keeps the options its next Insert
+     tag writes.
+
+     The card keeps its placement as its place in the list and its text.
+     An edit reads the body again first, and a tag that does not match any
+     more is stale: the body changed under the card, and an edit made now
+     could land on another tag. A stale placement changes nothing, and the
+     card says so and takes its placement again. */
+
+  /* every tag in the body for this card's number, in order, read */
+  function bcPlacesOf(im) {
+    return AMH.blog.tagsOf(bcBody.value).filter(function (t) { return t.num === im.num; });
+  }
+  /* The placement this card edits: a read tag, null when the file is
+     placed nowhere, or { stale: true }. */
+  function bcTargetOf(im) {
+    var places = bcPlacesOf(im);
+    if (!places.length) { im.target = null; return null; }
+    if (im.target) {
+      var kept = places[im.target.k];
+      return kept && kept.text === im.target.text ? kept : { stale: true };
+    }
+    var caret = bcBody.selectionStart || 0;
+    var k = 0;
+    places.forEach(function (p, i) { if (caret >= p.at && caret <= p.at + p.text.length) k = i; });
+    im.target = { k: k, text: places[k].text };
+    return places[k];
+  }
+  /* a read tag's options, by name */
+  function bcOptionsOf(t) {
+    return { shape: t.shape, nocarousel: t.nocarousel, noborders: t.noborders, nocontrols: t.nocontrols,
+             autoplay: t.autoplay, sound: t.sound, loop: t.loop };
+  }
+  var BC_STALE = "The body changed since this card was drawn, so nothing was changed. Choose the placement again.";
+  /* Write the one placement this card edits again, in place: change(t)
+     returns its new { o, caption, alt }, and nothing else in the body
+     moves. Returns false, and changes nothing, for a stale placement. */
+  function bcEditPlace(im, change) {
+    var t = bcTargetOf(im);
+    if (!t) return false;
+    if (t.stale) { im.target = null; bcSetStatus(BC_STALE); return false; }
+    var next = change(t);
+    var text = bcWriteTag(next.o, t.word, im.num, next.caption, next.alt);
+    var v = bcBody.value, end = t.at + t.text.length;
+    var caret = bcBody.selectionStart;
+    bcBody.value = v.slice(0, t.at) + text + v.slice(end);
+    if (caret >= end) bcBody.selectionStart = bcBody.selectionEnd = caret + text.length - t.text.length;
+    im.target.text = text;
+    bcRefreshCounts();
+    return true;
+  }
+  /* One option of the placement this card edits, or of its next Insert
+     tag when the file is placed nowhere. */
+  function bcSetOption(im, name, value) {
+    var t = bcTargetOf(im);
+    if (t && t.stale) { im.target = null; bcSetStatus(BC_STALE); bcCardSync(im, true); return; }
+    if (!t) im.next[name] = value;
+    else {
+      bcEditPlace(im, function (tag) {
+        var o = bcOptionsOf(tag);
+        o[name] = value;
+        return { o: o, caption: tag.caption, alt: tag.alt };
+      });
+    }
+    bcCardSync(im, false);
+  }
+  /* Take the one placement this card edits out of the body. The file
+     keeps its card, and its other placements stay. */
+  function bcRemovePlace(im) {
+    var t = bcTargetOf(im);
+    if (!t) return;
+    if (t.stale) { im.target = null; bcSetStatus(BC_STALE); bcCardSync(im, true); return; }
+    var v = bcBody.value;
+    bcBody.value = v.slice(0, t.at) + v.slice(t.at + t.text.length);
+    im.target = null;
+    bcRefreshCounts();
+    bcCardSync(im, true);
+    bcSetStatus("One placement of " + bcNameOf(im) + " removed. Its other placements stay.");
+  }
+  /* the line of the body a place is on, from 1 */
+  function bcLineOf(at) { return bcBody.value.slice(0, at).split("\n").length; }
+  var BC_FRAME_WORDS = { landscape: "landscape", portrait: "portrait", "portrait1:1": "square" };
+  /* What a card says under its options: where the placement is, the
+     frame and the borders its carousel takes from its first tags, and
+     any word of the tag's that the carousel does not use. */
+  function bcPlaceWords(im, t) {
+    if (!t) {
+      return "Placed nowhere yet. Insert tag writes " +
+        bcWriteTag(im.next, bcWordOf(im), im.num, im.caption, im.alt) + ".";
+    }
+    var run = null;
+    AMH.blog.runsOf(bcBody.value).forEach(function (r) {
+      r.tags.forEach(function (x) { if (x.at === t.at) run = r; });
+    });
+    var said = "Line " + bcLineOf(t.at) + ". ";
+    if (t.nocarousel) {
+      said += "On its own, outside any carousel.";
+    } else if (run) {
+      var stretch = null;
+      AMH.blog.stretchesOf(run.tags).forEach(function (s) {
+        s.forEach(function (x) { if (x.at === t.at) stretch = s; });
+      });
+      stretch = stretch || [t];
+      var shaper = stretch.filter(function (x) { return x.shape; })[0];
+      said += stretch.length === 1 ? "A carousel of one." : "In a carousel of " + stretch.length + ".";
+      said += shaper ? " Its frame is " + BC_FRAME_WORDS[shaper.shape] +
+        (shaper.at === t.at ? "." : ", from " + shaper.text + ".") : " Its frame follows its pictures.";
+      if (stretch[0].noborders) said += " No borders, from its first tag.";
+    }
+    var issues = AMH.blog.tagIssues(bcTagText(bcBody.value, bcMode),
+      AMH.images.index.get() ? bcPreviewImages(bcDateNow()) : null);
+    issues.problems.concat(issues.notices).forEach(function (s) {
+      if (s.indexOf(t.text + ":") === 0) said += " " + s.slice(t.text.length + 2);
+    });
+    return said;
   }
 
   /* ==========================================================
@@ -797,6 +1038,33 @@
     ".bc-card__meta.bc-err{color:var(--c-orange);}" +
     ".bc-card__meta .bc-err{color:var(--c-yellow);}" +
     ".bc-card__btns{display:flex;flex-direction:column;gap:.3rem;flex:none;}" +
+    /* A media card: a tile with its kind where a photo's picture is, the
+       browser's own player under the facts, and the placement's options in
+       rows that wrap. The card's top aligns, because a card with a player
+       and options is taller than its buttons. */
+    ".bc-card--media{align-items:flex-start;}" +
+    ".bc-card__tile{width:86px;height:56px;flex:none;display:grid;place-items:center;border-radius:6px;" +
+    "border:1px solid var(--line);background:var(--panel);color:var(--muted);" +
+    "font:11px Consolas,'Courier New',monospace;text-transform:uppercase;letter-spacing:.06em;}" +
+    ".bc-card__player{display:block;width:100%;max-width:320px;}" +
+    "video.bc-card__player{max-height:150px;background:#000;border-radius:6px;}" +
+    ".bc-card__file{font-size:.75rem;color:var(--accent);}" +
+    ".bc-card__warn{font-size:.72rem;color:var(--c-yellow);}" +
+    ".bc-place{align-self:flex-start;background:var(--panel);color:var(--text);border:1px solid var(--line);" +
+    "border-radius:6px;padding:.2rem .4rem;font:11px Consolas,'Courier New',monospace;}" +
+    ".bc-place[hidden]{display:none;}" +
+    ".bc-opts{display:flex;flex-wrap:wrap;gap:.3rem .8rem;align-items:center;}" +
+    ".bc-opt{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--text-soft);cursor:pointer;}" +
+    ".bc-opt input{accent-color:var(--accent);margin:0;}" +
+    ".bc-opt select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;" +
+    "padding:.15rem .3rem;font:11px Consolas,'Courier New',monospace;}" +
+    ".bc-opt-note,.bc-card__note{font-size:.7rem;color:var(--muted);line-height:1.45;}" +
+    /* the question a file the engine cannot place asks, above the cards */
+    ".bc-kindask{margin-top:.6rem;padding:.6rem .7rem;border:1px solid var(--accent);border-radius:10px;" +
+    "background:var(--bg-deep);font-size:.8rem;}" +
+    ".bc-kindask p{margin:0 0 .4rem;}" +
+    ".bc-kindask .bc-kindask__hint{color:var(--muted);font-size:.72rem;}" +
+    ".bc-kindask__btns{display:flex;gap:.4rem;flex-wrap:wrap;}" +
     /* the preview: a bar with the two views and the refresh, then the stage
        a view is drawn in. Only the stage scrolls, so the bar stays put. */
     ".bc-preview{display:none;flex-direction:column;background:var(--bg);border:1px solid var(--line);" +
@@ -1025,14 +1293,81 @@
       ("0" + (d.getMonth() + 1)).slice(-2) + ("0" + d.getDate()).slice(-2);
   }
 
+  /* A media card's player: the browser's own, paused, with its controls,
+     so the author can see or hear the file before placing it. A held file
+     plays from its blob: URL and reads its facts now; a published one
+     loads nothing until it is played. A MIDI file is a link. */
+  function bcCardPlayer(im) {
+    var src = im.photo ? im.photo.urls.source : (im.src || "");
+    if (im.kind === "midi") {
+      var a = doc.createElement("a");
+      a.className = "bc-card__file";
+      a.href = src;
+      a.download = (im.photo ? im.photo.from : im.from) || "";
+      a.textContent = "Download " + (a.download || bcNameOf(im));
+      a.tabIndex = -1;
+      return a;
+    }
+    var el = doc.createElement(im.kind === "video" ? "video" : "audio");
+    el.className = "bc-card__player";
+    el.controls = true;
+    el.preload = im.photo ? "metadata" : "none";
+    if (im.kind === "video") el.setAttribute("playsinline", "");
+    el.tabIndex = -1;
+    el.src = src;
+    /* its Play pauses the page's player, and the page's Play pauses it */
+    if (AMH.work && AMH.work.mediaAdopt) AMH.work.mediaAdopt(el);
+    return el;
+  }
+  /* One option as a switch with its words, and one as a choice. Both stay
+     out of the tab ring, as every control on a card does. */
+  function bcOptBox(label, onChange) {
+    var l = doc.createElement("label");
+    l.className = "bc-opt";
+    var box = doc.createElement("input");
+    box.type = "checkbox";
+    box.tabIndex = -1;
+    box.addEventListener("change", function () { onChange(box.checked); });
+    l.appendChild(box);
+    l.appendChild(doc.createTextNode(label));
+    return { el: l, box: box };
+  }
+  function bcOptPick(label, choices, onChange) {
+    var l = doc.createElement("label");
+    l.className = "bc-opt";
+    l.appendChild(doc.createTextNode(label + " "));
+    var pick = doc.createElement("select");
+    pick.tabIndex = -1;
+    choices.forEach(function (c) {
+      var o = doc.createElement("option");
+      o.value = c[0];
+      o.textContent = c[1];
+      pick.appendChild(o);
+    });
+    pick.addEventListener("change", function () { onChange(pick.value); });
+    l.appendChild(pick);
+    return { el: l, pick: pick };
+  }
+
   function bcRenderCard(im, existing) {
     var card = existing || doc.createElement("div");
-    card.className = "bc-card";
+    var media = bcIsMedia(im);
+    im.next = im.next || {};
+    card.className = "bc-card" + (media ? " bc-card--media" : "");
+    card.setAttribute("data-num", im.num);
+    card.setAttribute("data-kind", im.kind || "image");
     card.innerHTML = "";
-    var th = doc.createElement("img");
-    th.src = bcImThumb(im);
-    th.alt = "";
-    card.appendChild(th);
+    if (media) {
+      var tile = doc.createElement("div");
+      tile.className = "bc-card__tile";
+      tile.textContent = BC_KIND_WORDS[im.kind] || im.kind;
+      card.appendChild(tile);
+    } else {
+      var th = doc.createElement("img");
+      th.src = bcImThumb(im);
+      th.alt = "";
+      card.appendChild(th);
+    }
     var mid = doc.createElement("div");
     mid.className = "bc-card__mid";
     /* the facts line, the shape a photo's row wears in the site editor:
@@ -1048,30 +1383,54 @@
       meta.appendChild(s);
     });
     mid.appendChild(meta);
+    if (media) mid.appendChild(bcCardPlayer(im));
+    var warn = doc.createElement("div");
+    warn.className = "bc-card__warn";
+    warn.hidden = true;
+    mid.appendChild(warn);
+    /* the chooser, for a file placed twice or more */
+    var place = doc.createElement("select");
+    place.className = "bc-place";
+    place.tabIndex = -1;
+    place.hidden = true;
+    place.setAttribute("aria-label", "The placement this card edits");
+    place.addEventListener("change", function () {
+      var places = bcPlacesOf(im);
+      var k = parseInt(place.value, 10) || 0;
+      im.target = places[k] ? { k: k, text: places[k].text } : null;
+      bcCardSync(im, true);
+    });
+    mid.appendChild(place);
+    /* The words go to the placement this card edits, and only to it. The
+       card reads them from that tag when a field takes the focus, so a
+       word typed into the tag in the body is never written over. */
     var cap = doc.createElement("input");
-    cap.type = "text"; cap.placeholder = "caption (shown under / on the image)";
+    cap.type = "text";
+    cap.placeholder = media ? "caption (shown under the file)" : "caption (shown under / on the image)";
     cap.value = im.caption; cap.spellcheck = true;
-    cap.addEventListener("focus", function () { bcHarvestTag(im); cap.value = im.caption; alt.value = im.alt; });
+    cap.addEventListener("focus", function () { bcCardSync(im, true); });
     cap.addEventListener("input", function () {
       im.caption = bcClean(cap.value);
-      if (bcFindTag(im.num)) bcRewriteTag(im);
+      bcEditPlace(im, function (t) { return { o: bcOptionsOf(t), caption: im.caption, alt: t.alt }; });
     });
     mid.appendChild(cap);
     var alt = doc.createElement("input");
-    alt.type = "text"; alt.placeholder = "alt text (for screen readers / SEO)";
+    alt.type = "text";
+    alt.placeholder = media ? "description (what a screen reader says for the player)"
+      : "alt text (for screen readers / SEO)";
     alt.value = im.alt; alt.spellcheck = true;
-    alt.addEventListener("focus", function () { bcHarvestTag(im); cap.value = im.caption; alt.value = im.alt; });
+    alt.addEventListener("focus", function () { bcCardSync(im, true); });
     alt.addEventListener("input", function () {
       im.alt = bcClean(alt.value);
-      if (bcFindTag(im.num)) bcRewriteTag(im);
+      bcEditPlace(im, function (t) { return { o: bcOptionsOf(t), caption: t.caption, alt: im.alt }; });
     });
     mid.appendChild(alt);
     /* Display True Pixel Size, then Display Maximum UHD. A published image
-       can flip both: what the page shows is a line in the manifest, not a
+       can flip both: what the page shows is a fact in the index, not a
        format baked into a file. While True Pixel Size is on, the page shows
        the original, so UHD shows on and is locked. Turning True Pixel Size
-       off leaves UHD on and free to change. */
-    if (im.original || im.photo) {
+       off leaves UHD on and free to change. They are an image's alone. */
+    if (!media && (im.original || im.photo)) {
       var size = doc.createElement("label");
       size.className = "bc-truesize";
       var sizeOn = doc.createElement("input");
@@ -1113,40 +1472,132 @@
       });
       lockUhd();
     }
+    /* THE PLACEMENT'S OPTIONS. Each writes its word into the one tag the
+       card edits, or into the next Insert tag when the file is placed
+       nowhere. Square writes portrait1:1: there is no square word. */
+    var opts = doc.createElement("div");
+    opts.className = "bc-opts";
+    var alone = bcOptBox("Display separately", function (on) { bcSetOption(im, "nocarousel", on); });
+    var bare = bcOptBox("Borderless", function (on) { bcSetOption(im, "noborders", on); });
+    var frame = bcOptPick("Frame", [["", "Auto"], ["landscape", "Landscape"], ["portrait", "Portrait"],
+      ["portrait1:1", "Square"]], function (v) { bcSetOption(im, "shape", v); });
+    [alone, bare, frame].forEach(function (o) { opts.appendChild(o.el); });
+    var hide = null, auto = null, loop = null, sound = null;
+    var plays = im.kind === "video" || im.kind === "audio";
+    if (plays) {
+      hide = bcOptBox("Hide player controls", function (on) { bcSetOption(im, "nocontrols", on); });
+      auto = bcOptBox("Autoplay", function (on) { bcSetOption(im, "autoplay", on); });
+      loop = bcOptBox("Loop", function (on) { bcSetOption(im, "loop", on); });
+      sound = bcOptPick("Sound", [["", "Default"], ["muted", "Muted"], ["unmuted", "Unmuted"]],
+        function (v) { bcSetOption(im, "sound", v); });
+      [hide, auto, loop, sound].forEach(function (o) { opts.appendChild(o.el); });
+    }
+    mid.appendChild(opts);
+    if (plays) {
+      var help = doc.createElement("div");
+      help.className = "bc-opt-note";
+      help.textContent = "The player starts paused, with its controls, and with sound. Hide player controls " +
+        "hides the player's own controls only: the carousel's arrows stay. Autoplay asks the browser to play " +
+        "once the file can be seen, and a browser can refuse until the reader clicks.";
+      mid.appendChild(help);
+    }
+    var note = doc.createElement("div");
+    note.className = "bc-card__note";
+    mid.appendChild(note);
     card.appendChild(mid);
     var btns = doc.createElement("div");
     btns.className = "bc-card__btns";
     bcBtn("Insert tag", "ced-btn--accent", function () {
       bcPanel.setAttribute("data-tab", "write");
       bcTabsSync();
-      TOOL.insert(bcBuildTag(im));
+      TOOL.insert(bcWriteTag(im.next, bcWordOf(im), im.num, im.caption, im.alt));
+      /* the options were for this tag: the next one starts plain again */
+      im.next = {};
+      im.target = null;
       bcSetStatus("Tag for " + im.num + " inserted at the cursor.");
     }, btns);
-    /* Remove takes the image out of this post and nothing else. A
-       published image stays on the site, and its tag typed again brings
-       its card back. */
+    /* Remove takes the file out of this post and nothing else: every tag
+       for it, and its card. A published file stays on the site, and its
+       tag typed again brings its card back. */
     bcBtn("Remove", "ced-btn--danger", function () {
-      if (!window.confirm("Remove image " + im.num + " from this post?" +
+      var what = media ? bcNameOf(im) : "image " + im.num;
+      if (!window.confirm("Remove " + what + " from this post?" +
           (im.published ? "\n\nIt stays on the site. Type its tag again to bring it back." : ""))) return;
       if (bcFindTag(im.num)) {
         bcBody.value = bcBody.value.replace(bcTagRe(im.num, true), "");
-        bcSetStatus("Image " + im.num + " and its tag(s) removed.");
+        bcSetStatus((media ? bcNameOf(im) : "Image " + im.num) + " and its tag(s) removed.");
       } else {
-        bcSetStatus("Image " + im.num + " removed.");
+        bcSetStatus((media ? bcNameOf(im) : "Image " + im.num) + " removed.");
       }
+      if (AMH.work && AMH.work.mediaRelease) AMH.work.mediaRelease(card);
       if (im.photo) AMH.images.letGo(im.photo);
       bcImages.splice(bcImages.indexOf(im), 1);
       card.remove();
     }, btns);
     card.appendChild(btns);
+    im.ui = { place: place, cap: cap, alt: alt, alone: alone, bare: bare, frame: frame, warn: warn,
+              hide: hide, auto: auto, loop: loop, sound: sound, note: note, btns: btns, removePlace: null };
     bcNoTab(card);   /* by click: the ring is title, body, images, Publish, Close */
+    bcCardWarn(im);
+    bcCardSync(im, true);
     return card;
+  }
+  /* A card again, from the body: its chooser, its words, its options and
+     what it says under them. fresh reads the words into the fields even
+     while one has the focus, which a field asks for as it takes it. */
+  function bcCardSync(im, fresh) {
+    var ui = im.ui;
+    if (!ui || !bcBody) return;
+    var places = bcPlacesOf(im);
+    var t = bcTargetOf(im);
+    if (t && t.stale) { im.target = null; t = bcTargetOf(im); }
+    ui.place.innerHTML = "";
+    ui.place.hidden = places.length < 2;
+    places.forEach(function (p, i) {
+      var o = doc.createElement("option");
+      o.value = String(i);
+      o.textContent = "Placement " + (i + 1) + " of " + places.length + ", line " + bcLineOf(p.at);
+      ui.place.appendChild(o);
+    });
+    if (t) ui.place.value = String(im.target.k);
+    if (t) { im.caption = t.caption; im.alt = t.alt; }
+    if (fresh || doc.activeElement !== ui.cap) ui.cap.value = im.caption;
+    if (fresh || doc.activeElement !== ui.alt) ui.alt.value = im.alt;
+    var o = t ? bcOptionsOf(t) : im.next;
+    ui.alone.box.checked = !!o.nocarousel;
+    ui.bare.box.checked = !!o.noborders;
+    ui.frame.pick.value = o.shape || "";
+    if (ui.hide) {
+      ui.hide.box.checked = !!o.nocontrols;
+      ui.auto.box.checked = !!o.autoplay;
+      ui.loop.box.checked = !!o.loop;
+      ui.sound.pick.value = o.sound || "";
+    }
+    ui.note.textContent = bcPlaceWords(im, t);
+    /* Remove placement is for a file placed twice or more: with one, it
+       would be Remove with the card kept */
+    if (places.length >= 2 && !ui.removePlace) {
+      ui.removePlace = bcBtn("Remove placement", "ced-btn--danger", function () { bcRemovePlace(im); }, ui.btns);
+      ui.removePlace.tabIndex = -1;
+    } else if (places.length < 2 && ui.removePlace) {
+      ui.removePlace.remove();
+      ui.removePlace = null;
+    }
   }
 
   /* One image's line for the index and the renderer, from a card. A held
      photo answers from itself; a published one keeps what its entry said,
      with the switch the author may have flipped. */
   function bcImLine(im, date) {
+    /* A media file's line: a held one is named for this date, as its
+       file will be at publish; a published one keeps its record's base
+       and date, because its path is fixed once it is on the site. */
+    if (bcIsMedia(im)) {
+      var f = im.photo || im;
+      return { num: im.num, kind: im.kind, type: f.type, mime: f.mime, from: f.from || "",
+               ow: f.ow, oh: f.oh, bytes: f.bytes,
+               date: im.photo ? date : im.date0, base: im.photo ? bcMediaBase(date, im.num) : im.base };
+    }
     if (im.photo) {
       return { num: im.num, date: date, kind: "image", type: im.photo.type, from: im.photo.from || "",
                ow: im.photo.ow, oh: im.photo.oh, bytes: im.photo.bytes,
@@ -1205,7 +1656,16 @@
       b.classList.toggle("on", on);
       b.setAttribute("aria-selected", on ? "true" : "false");
     });
+    /* a player in a view that goes out of sight is paused first: a page
+       must never sound from a view nobody can see */
+    if (AMH.work && AMH.work.mediaPause) {
+      if (cur !== "preview") AMH.work.mediaPause(bcPvStage);
+      if (cur !== "images") AMH.work.mediaPause(bcCards);
+    }
     if (cur === "preview") { bcSyncCards(); bcRenderPreview(); }
+    /* the Media view shows each card's placement again, from the tag the
+       caret was in while the body was written */
+    if (cur === "images") bcImages.forEach(function (im) { im.target = null; bcCardSync(im, true); });
   }
 
   /* ---------------- the preview ----------------
@@ -1265,6 +1725,18 @@
         if (img.getAttribute("data-hd")) img.setAttribute("data-hd", urls.hd);
       });
     });
+    /* A media file no save has written plays from its blob: URL, found by
+       its number in the media scheme and its one file, the source. The
+       link that downloads it takes the same URL and keeps its name. */
+    Array.prototype.forEach.call(body.querySelectorAll("figure.bp-media source, figure.bp-media a.bp-media__file"),
+      function (el) {
+        var attr = el.tagName === "SOURCE" ? "src" : "href";
+        var m = /_media([0-9a-z]\d{3})\.[a-z0-9]+$/.exec(el.getAttribute(attr) || "");
+        if (!m) return;
+        bcImages.forEach(function (im) {
+          if (im.num === m[1] && im.photo && bcIsMedia(im)) el.setAttribute(attr, im.photo.urls.source);
+        });
+      });
     return box.innerHTML;
   }
 
@@ -1288,6 +1760,9 @@
     /* the preview draws published images from the index, so the index
        comes first; the draw follows the load once */
     if (!AMH.images.index.get()) { AMH.images.index.load().then(bcRenderPreview); return; }
+    /* the old view's players stop and let go of their files before its
+       markup goes, the phone's frame among them */
+    if (AMH.work && AMH.work.mediaRelease) AMH.work.mediaRelease(bcPvStage);
     var view = bcPvView();
     bcPreviewEl.setAttribute("data-view", view);
     bcPvBtns.forEach(function (b) {
@@ -1323,7 +1798,17 @@
       if (!page) return;
       bcPreviewFold(page);
       page.addEventListener("click", bcPreviewReadMore);
+      /* the post is folded, so its players may now join this page's one
+         owner, on screen only while this frame is the phone in view */
+      var work = frame.contentWindow && frame.contentWindow.AMH && frame.contentWindow.AMH.work;
+      if (work && work.mediaConnect && AMH.work && AMH.work.mediaCoordinator) {
+        work.mediaConnect({ coordinator: AMH.work.mediaCoordinator(),
+                            onScreen: function () { return bcPhoneOnScreen(frame); } });
+      }
     });
+    /* the phone's players wait for the connection above: none of them
+       starts before its host says where it is */
+    frame.setAttribute("data-media-host", "wait");
     frame.srcdoc = bcPhonePage(html);
     phone.appendChild(frame);
     fit.appendChild(phone);
@@ -1349,9 +1834,22 @@
       "<style>" + BC_PHONE_CSS + "</style></head><body>" +
       '<section class="blog-page"><div class="wrap"><div class="bs-stream">' + html +
       "</div></div></section>" +
-      (work ? '<script src="' + esc(work.src) + '"></script>' : "") +
+      (work ? '<script src="' + esc(work.src) + '"></script><script>' + BC_PHONE_SCOPE + "</script>" : "") +
       "</body></html>";
   }
+  /* The phone's page is on screen while it is the preview's frame, the
+     Preview view shows the phone, and the composer is in front and not
+     behind the wizard. Its players ask this before they may start: the
+     page in the frame cannot see what hides the frame. */
+  function bcPhoneOnScreen(frame) {
+    return frame.isConnected && !!bcPanel && !bcPanelHid && !bcPanel.hidden &&
+      bcPanel.getAttribute("data-tab") === "preview" && bcPvView() === "mobile";
+  }
+  /* The phone's page runs work.js and not blog.js, so it is told here what
+     the blog tells its own carousels: a photo opens the viewer on every
+     photo of its post. */
+  var BC_PHONE_SCOPE = "if (window.AMH && AMH.work && AMH.work.viewerScope) " +
+    "AMH.work.viewerScope(function (g) { return g.closest('.bs-post'); });";
 
   /* Scale the phone to the room the stage has: never above its own size,
      and never below BC_PHONE_MIN_SCALE. A stage with no size, a view not on
@@ -1400,6 +1898,8 @@
     var body = more.parentNode;
     body.removeChild(more);
     Array.prototype.forEach.call(body.children, function (el) { el.hidden = false; });
+    /* the rest of the post is on screen, its players with it */
+    if (AMH.work && AMH.work.mediaSync) AMH.work.mediaSync();
   }
 
   /* ---------------- the clock, the zone, and the time field ----------------
@@ -1489,7 +1989,7 @@
     var cut = function (s) { return s.length > 48 ? s.slice(0, 47) + "..." : s; };
     var parts = [];
     if (unknown.length) {
-      parts.push("No image on this site has the number " + unknown.join(", ") + ".");
+      parts.push("No file on this site has the number " + unknown.join(", ") + ".");
     }
     if (near.length) {
       parts.push(near.length + (near.length === 1 ? " tag is not a tag: " : " tags are not tags: ") +
@@ -1511,8 +2011,8 @@
      way a help panel stays true.
 
      The other two are the composer's own and are declared here, beside the
-     code that reads them: the image tag, which bcPublish resolves against
-     the Images view, and the heading rule in bcHeadingTitle. */
+     code that reads them: the media tags, which bcPublish resolves against
+     the Media view, and the heading rule in bcHeadingTitle. */
   function bcSpecials() {
     /* A post written in HTML never goes through the Markdown renderer, so
        the flags and the heading rule do nothing in it. The image tag does:
@@ -1527,7 +2027,7 @@
                  does: f.does + " The line splits where you write it." };
       }) : [];
     out.push({ write: "[img0001,caption|alt]", where: "on its own line",
-               does: "Places an image from the Images view in a carousel frame. Tags on " +
+               does: "Places an image from the Media view in a carousel frame. Tags on " +
                      "back-to-back lines are one carousel, and a blank line starts a new one. " +
                      "The caption and the alt text are both optional." });
     out.push({ write: "[portrait img0001,caption|alt]", where: "the first tag of a carousel",
@@ -1536,6 +2036,17 @@
     out.push({ write: "[nocarousel img0001,caption|alt]", where: "on its own line",
                does: "Shows the image on its own, with its caption under it, outside any " +
                      "carousel. The carousel before it ends there, and the tags after it start a new one." });
+    out.push({ write: "[video0012,caption|description]", where: "on its own line",
+               does: "Places a video from the Media view: the browser's own player, paused, with its " +
+                     "controls. [audio0013] places a sound the same way, and [midi0014] a MIDI file, " +
+                     "which the page offers to download. Each also links its file. The caption shows " +
+                     "under the file and is not a timed caption track: when the words spoken matter, " +
+                     "write them in the post." });
+    out.push({ write: "[nocarousel noborders portrait1:1 video0012]", where: "before the kind",
+               does: "The options a tag can open with, in any order: nocarousel, noborders, and one " +
+                     "frame word, portrait, landscape or portrait1:1 for a square. A video or a sound " +
+                     "can also say nocontrols, autoplay, loop, and muted or unmuted. A card on the " +
+                     "Media view writes them for you." });
     if (md) {
       out.push({ write: "# A heading", where: "the first line of the post",
                  does: "Becomes the post's name in the stream, the month list and the " +
@@ -1631,7 +2142,7 @@
         date: bcDate.value, title: bcTitle.value, body: bcBody.value,
         tags: bcTags.value, time: bcTime.value, zone: bcZone.value, when: Date.now()
       }));
-      bcSetStatus("Draft saved. Text only: images do not persist, so keep the files. One slot.");
+      bcSetStatus("Draft saved. Text only: the photos and the media files do not persist, so keep the files. One slot.");
     } catch (err) { bcSetStatus("Draft save failed: " + err.message); }
   }
   /* A draft from before the time, zone and tags fields restores with those
@@ -1656,7 +2167,16 @@
     if (d.time) { bcTimeTouched = true; bcStopTicker(); bcTime.value = d.time; }
     else { bcTimeTouched = false; bcStartTicker(); }
     bcRefreshCounts();
-    bcSetStatus("Draft restored. Add any images it references again.");
+    /* a draft keeps the tags and never the files, so it names the files
+       that its tags need and the site does not hold */
+    var missing = bcSyncCards() || [];
+    var words = {};
+    AMH.blog.tagsOf(bcBody.value).forEach(function (t) {
+      if (missing.indexOf(t.num) !== -1) words[t.num] = (t.word === "png" ? "img" : t.word) + t.num;
+    });
+    var names = Object.keys(words).sort().map(function (n) { return words[n]; });
+    bcSetStatus(names.length ? "Draft restored. Add these files again on the Media view: " + names.join(", ") + "."
+      : "Draft restored.");
   }
 
   function bcRequestClose() {
@@ -1666,6 +2186,11 @@
   }
   function bcClose() {
     bcStopTicker();
+    /* a question on screen is answered Skip, and every player stops and
+       lets go of its file before the panel goes */
+    if (bcKindAnswer) bcKindAnswer("");
+    if (bcPanel && AMH.work && AMH.work.mediaRelease) AMH.work.mediaRelease(bcPanel);
+    if (bcPanel && AMH.work && AMH.work.mediaSurface) AMH.work.mediaSurface(bcPanel, false);
     bcPvUnwatch();
     if (bcSpec) { bcSpec.destroy(); bcSpec = null; }
     /* a photo the composer prepared and did not publish is the store's to
@@ -1800,7 +2325,7 @@
     tabs.className = "bc-tabs";
     tabs.setAttribute("role", "tablist");
     bcTabBtns = [];
-    [["write", "Write"], ["preview", "Preview"], ["images", "Images"]].forEach(function (t) {
+    [["write", "Write"], ["preview", "Preview"], ["images", "Media"]].forEach(function (t) {
       var b = doc.createElement("button");
       b.type = "button"; b.className = "bc-tab";
       b.setAttribute("role", "tab");
@@ -1880,8 +2405,9 @@
     bcBody.placeholder = bcMode === "html"
       ? "<p>This post is HTML, and stays HTML.</p>"
       : "Write the post in Markdown. # for a heading, - for a list, **bold**, *italic*.\n\n" +
-        "Drop images on the Images view, then place them with [img####,caption|alt] tags: tags on " +
-        "back-to-back lines are one carousel, and a blank line starts a new one. " +
+        "Drop photos and media files on the Media view, then place them with tags such as " +
+        "[img####,caption|alt] and [video####]: tags on back-to-back lines are one carousel, and a " +
+        "blank line starts a new one. " +
         "{expandformore} and {pagebreak} alone on a line tell the feed where to fold.";
     bcBody.addEventListener("input", bcRefreshCounts);
     /* the first heading is the name, so the section that says so has to
@@ -1940,7 +2466,7 @@
     writeEl.appendChild(bcTagNoteEl);
     bcPanel.appendChild(writeEl);
 
-    /* images tab */
+    /* the Media view */
     var imagesEl = doc.createElement("div");
     imagesEl.className = "bc-images";
     /* the images area is the ring's third stop, so it takes focus and
@@ -1950,14 +2476,15 @@
     drop.setAttribute("role", "button");
     drop.tabIndex = 0;
     var dropWords = doc.createElement("span");
-    dropWords.innerHTML = "<strong>Drop photos here</strong><br>JPG, PNG, WebP or GIF. " +
-      "Each is saved as a JPG 1920px on its long edge, with a small copy and the " +
-      "original beside it.";
+    dropWords.innerHTML = "<strong>Drop photos and media files here</strong><br>A JPG, PNG, WebP or GIF " +
+      "photo is saved as a JPG 1920px on its long edge, with a small copy and the original beside it. " +
+      "An MP4, WebM, WEBA, MP3, WAV, Ogg or MIDI file is kept as it came, up to " +
+      AMH.images.MEDIA_MAX_MB + " MB: convert it first, because the editor never does.";
     drop.appendChild(dropWords);
     var picker = doc.createElement("input");
     picker.type = "file";
     picker.multiple = true;
-    picker.accept = AMH.images.ACCEPT;
+    picker.accept = AMH.images.ACCEPT + "," + AMH.images.MEDIA_ACCEPT;
     picker.style.display = "none";
     picker.tabIndex = -1;
     /* intake is async (decode + encode); chain it so numbers are always
@@ -1965,9 +2492,10 @@
     function takeImages(list) {
       Array.prototype.slice.call(list || []).forEach(function (f) {
         bcTakeChain = bcTakeChain.then(function () {
-          return bcTakePhoto(f).then(function (im) {
+          return bcTakeFile(f).then(function (im) {
+            if (!im) { bcSetStatus(f.name + " was not added, and it took no number."); return; }
             bcCards.appendChild(bcRenderCard(im, null));
-            bcSetStatus(im.num + " added (" + AMH.work.sizeText(im.photo.bytes) +
+            bcSetStatus((bcIsMedia(im) ? bcNameOf(im) : im.num) + " added (" + AMH.work.sizeText(im.photo.bytes) +
               "). Use Insert tag to place it.");
           }).catch(function (err) {
             var note = doc.createElement("div");
@@ -1997,7 +2525,7 @@
     var choose = doc.createElement("button");
     choose.type = "button";
     choose.className = "ced-btn bc-choose";
-    choose.textContent = "Choose a photo";
+    choose.textContent = "Choose files";
     choose.tabIndex = -1;
     choose.addEventListener("click", function (e) { e.stopPropagation(); picker.click(); });
     drop.appendChild(choose);
@@ -2022,7 +2550,7 @@
        navigation frees them. */
     var imgNote = doc.createElement("div");
     imgNote.className = "bc-imgnote";
-    imgNote.textContent = "Images live on this page only. Text edits follow you " +
+    imgNote.textContent = "Photos and media files live on this page only. Text edits follow you " +
       "between pages, but these are real file bytes: leaving loses them, so " +
       "publish the post from here.";
     imagesEl.appendChild(imgNote);
@@ -2158,6 +2686,9 @@
     bcRefreshCounts();
     doc.body.appendChild(bcScrim);
     doc.body.appendChild(bcPanel);
+    /* the composer is in front of the page: a player on the page stops,
+       and only the composer's own players may play */
+    if (AMH.work && AMH.work.mediaSurface) AMH.work.mediaSurface(bcPanel, true);
     bcTabsSync();
     bcTitle.focus();
     bcSetStatus("Reminder: publish from a clean repo that is synced with the live site.");
@@ -2239,6 +2770,8 @@
        Escape from in front of the wizard, so the key would close a panel
        nobody can see instead of the step in front. */
     if (bcSpec) bcSpec.open(false);
+    /* the composer goes out of sight, and its players stop with it */
+    if (AMH.work && AMH.work.mediaPause) AMH.work.mediaPause(bcPanel);
     bcPanelHid = true;
     bcPanelWas = doc.activeElement;
     bcPanel.classList.add("ced-box--past");
@@ -2256,6 +2789,9 @@
     bcPanelHid = false;
     if (!panel || !panel.parentNode) return;
     panel.hidden = false;
+    /* the composer is on screen again; its players stay where they
+       stopped, and nothing resumes by itself */
+    if (AMH.work && AMH.work.mediaSync) AMH.work.mediaSync();
     if (bcScrim && !bcScrim.parentNode) doc.body.appendChild(bcScrim);
     /* one frame at the far side, so coming back is a move and not a paint */
     window.requestAnimationFrame(function () {
@@ -3045,7 +3581,13 @@
       : rec.kind === "rebuild" ? "The site shows the rebuild"
       : "The site shows the post";
     w.body.innerHTML =
-      (rec.fellBack
+      (rec.partial
+        ? '<p class="bc-wiz__fell"><strong>The folder write stopped partway.</strong> ' +
+          rec.partial.wrote.length + " file" + (rec.partial.wrote.length === 1 ? " was" : "s were") +
+          " written into the folder before it stopped at <code>" + esc(rec.partial.stopped) + "</code>: <code>" +
+          rec.partial.wrote.map(esc).join("</code> <code>") + "</code>. The zip holds the whole bundle. " +
+          "Extract it at the repo root to finish: it writes those files again with the same bytes.</p>"
+        : rec.fellBack
         ? '<p class="bc-wiz__fell"><strong>The folder write did not happen.</strong> ' +
           esc(rec.fellBack) + "</p>"
         : "") +
@@ -3063,6 +3605,10 @@
           rec.superDeleted.wrote.map(esc).join("</code> <code>") + "</code> " +
           (rec.superDeleted.wrote.length === 1 ? "was" : "were") +
           " written. Empty that folder when you are sure.</p>"
+        : "") +
+      (rec.superDeleteFailed
+        ? '<p class="bc-wiz__fell"><strong>' + esc(rec.superDeleteFailed.name) + " was not super deleted.</strong> " +
+          "The posts above no longer name it. " + esc(rec.superDeleteFailed.why) + "</p>"
         : "") +
       (rec.indexShort
         ? '<p class="bc-wiz__fell"><strong>Find will not see every post.</strong> The ' +
@@ -3187,14 +3733,24 @@
     var w = bcWizShow("failed", what + " failed");
     var msg = err && err.message ? err.message : String(err);
     var code = err && err.code ? err.code : "";
+    var part = err && err.partial;
+    var esc = TOOL.escAttr;
     w.body.innerHTML =
-      "<p>" + TOOL.escAttr(msg) + "</p>" +
-      "<p><strong>Nothing was written.</strong> " +
-      (code === "BLG-E07"
-        ? "You cancelled the file hand-off. Publish again when the files are at hand."
-        : code === "BLG-E11"
-        ? "Save the draft, reload the page, and compose again."
-        : "Fix the cause and publish again. The composer keeps your post.") + "</p>";
+      "<p>" + esc(msg) + "</p>" +
+      (part
+        /* a folder write that stopped partway: the folder holds part of the
+           bundle, and saying that nothing was written would be false */
+        ? '<p class="bc-wiz__fell"><strong>The folder write stopped partway.</strong> ' + part.wrote.length +
+          " file" + (part.wrote.length === 1 ? " was" : "s were") + " written into the folder before it stopped at <code>" +
+          esc(part.stopped) + "</code>: <code>" + part.wrote.map(esc).join("</code> <code>") + "</code>. " +
+          "The rest was not written, and no zip holds the bundle. Put those files back as they were before you " +
+          "publish again: git status names them. The composer keeps your post.</p>"
+        : "<p><strong>Nothing was written.</strong> " +
+          (code === "BLG-E07"
+            ? "You cancelled the file hand-off. Publish again when the files are at hand."
+            : code === "BLG-E11"
+            ? "Save the draft, reload the page, and compose again."
+            : "Fix the cause and publish again. The composer keeps your post.") + "</p>");
     var close = function () { bcWizClose(); };
     bcWizSpacer();
     /* "Close" stopped saying what this does once the composer began
@@ -3666,9 +4222,9 @@
      engine, whose card says so and offers Remove alone. */
   function bcPublishedCard(m, line, date0) {
     var im = {
-      num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
+      num: m[3], kind: "image", caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
       published: true, photo: null, date0: line ? line.date : date0,
-      uhd: !!(line && line.uhd), truesize: !!(line && line.truesize)
+      uhd: !!(line && line.uhd), truesize: !!(line && line.truesize), next: {}, target: null
     };
     if (line) {
       var paths = bcImagePaths(line);
@@ -3687,11 +4243,27 @@
     bcCards.appendChild(bcRenderCard(im, null));
     return im;
   }
-  /* An image card is made for an image: a media file's entry, and a media
-     tag with no entry, get none, because an image card would name image
-     files that such an id never had. */
-  function bcImageCardFor(m, line) {
-    return line ? (line.kind || "image") === "image" : AMH.blog.KINDS[m[2]] === "image";
+  /* A card for one published media file, from its index entry: the file
+     is on the site, so the card plays it from there, and its path is the
+     entry's, fixed. */
+  function bcPublishedMediaCard(m, line) {
+    var im = {
+      num: m[3], kind: line.kind, caption: (m[4] || "").trim(), alt: (m[5] || "").trim(),
+      published: true, photo: null, date0: line.date, base: line.base, type: line.type,
+      mime: line.mime, from: line.from || "", ow: line.ow, oh: line.oh, bytes: line.bytes,
+      src: AMH.images.filesOf(line).source, next: {}, target: null
+    };
+    bcImages.push(im);
+    bcCards.appendChild(bcRenderCard(im, null));
+    return im;
+  }
+  /* The card a tag's number gets, by its entry's kind: an image's or a
+     media file's. A media tag with no entry gets none, because no file
+     stands behind it, and an image card would name files it never had. */
+  function bcCardFor(m, line, date0) {
+    var kind = line ? line.kind || "image" : AMH.blog.KINDS[m[2]];
+    if (kind === "image") return bcPublishedCard(m, line, date0);
+    return line ? bcPublishedMediaCard(m, line) : null;
   }
   function bcLoadPublishedImages(source, date0) {
     var re = new RegExp(AMH.blog.TAG, "g"), m;
@@ -3703,17 +4275,17 @@
     while ((m = re.exec(source))) {
       if (seen[m[3]]) continue;
       seen[m[3]] = true;
-      if (bcImageCardFor(m, map[m[3]])) bcPublishedCard(m, map[m[3]], date0);
+      bcCardFor(m, map[m[3]], date0);
     }
   }
   /* A TAG RECONNECTS BY ITS NUMBER.
 
      A tag typed after the composer opened, pasted from another post, or
-     fixed after a typo names an image the site holds: it gets a card here,
-     from its index entry, with no upload. A media file the index holds gets
-     no card, and is still a number the site has. A number the site does not
-     have gets no card, and the caller says so. Runs on each input, on the
-     Preview view and at publish. Returns the numbers with no entry. */
+     fixed after a typo names a file the site holds: it gets a card here,
+     from its index entry, with no upload, an image's or a media file's. A
+     number the site does not have gets no card, and the caller says so.
+     Runs on each input, on the Preview view and at publish. Returns the
+     numbers with no entry. */
   function bcSyncCards() {
     if (!bcBody || !bcCards) return [];
     /* the map waits for the index; the refresh that follows the load runs
@@ -3732,7 +4304,7 @@
       known[m[3]] = true;
       var line = bcManImages[m[3]];
       if (!line) unknown.push(m[3]);
-      else if (bcImageCardFor(m, line)) bcPublishedCard(m, line, line.date);
+      else bcCardFor(m, line, line.date);
     }
     return unknown;
   }
@@ -4492,12 +5064,34 @@
      publish stamp the bundle's manifest carries. Which files were spliced
      is a fact the managed-page list already holds, and everything else in
      the bundle was written whole. */
+  /* The most a bundle that carries a media file can hold, read each time
+     from AMH.publish, so a test can lower it. */
+  function bcBundleMaxMb() { return (AMH.publish && AMH.publish.BUNDLE_MAX_MB) || BC_BUNDLE_MAX_MB; }
+  function bcBundleMax() { return bcBundleMaxMb() * 1024 * 1024; }
   function bcFinishBundle(files, zipName, statusMsg, extraLog, rec) {
     var route = rec.route === BC_ROUTE_FOLDER ? BC_ROUTE_FOLDER : BC_ROUTE_ZIP;
     var enc = new TextEncoder();
     var orphans = bcOrphans.filter(function (o, i) { return bcOrphans.indexOf(o) === i; });
-    if (rec.kind === "rebuild") bcIndexShort = 0;   /* a rebuild is the repair */
     var names = Object.keys(files).sort();
+    /* THE BUILT BUNDLE, CHECKED BEFORE A BYTE IS WRITTEN OR STAGED. Its
+       whole size, text and all, when it carries a media file; and what a
+       classic zip can say, for the zip route and for the zip a folder
+       write falls back to. A refusal changes nothing: the composer and
+       the held files stay as they were, and the failed step says that
+       nothing was written. */
+    var total = 0, media = false;
+    names.forEach(function (n) {
+      total += files[n].length;
+      if (AMH.images.isMediaName(n)) media = true;
+    });
+    if (media && total > bcBundleMax()) {
+      throw new Error("This bundle is " + AMH.work.sizeText(total) + ", and a bundle that carries a media " +
+        "file can be " + bcBundleMaxMb() + " MB at most. Place some of the files in the next post, and " +
+        "publish this one with the rest.");
+    }
+    var zipProblem = TOOL.zipCheck ? TOOL.zipCheck(names.map(function (n) { return { name: n, bytes: files[n] }; })) : "";
+    if (zipProblem) throw new Error(zipProblem);
+    if (rec.kind === "rebuild") bcIndexShort = 0;   /* a rebuild is the repair */
     console.info("[blog] bundle contents:\n  " + names.join("\n  ") + (extraLog ? "\n" + extraLog : ""));
     if (orphans.length) {
       console.warn("[blog] these files are named by nothing after this publish:\n  " +
@@ -4532,17 +5126,32 @@
       if (/\.(html|xml|txt|js)$/.test(n)) staged[n] = dec.decode(files[n]);
       else images.push(n);
     });
+    /* what the tab held before this bundle, for a delivery that fails */
+    var layerBefore = TOOL.layer();
+    var indexBefore = AMH.images.index.get();
     TOOL.layerKeep(record, staged, images);
     /* the record this bundle leaves is the current one from here, so the
        next bundle in this page load builds on it */
     if (bcIndexPending) { AMH.images.index.set(bcIndexPending); bcIndexPending = null; }
-    /* and onto the page, so a second post is composed against the first */
-    bcLayerOnto(true);
     var prog = bcProg;
     bcProg = null;
     if (prog) prog.mark(6);
     (prog ? prog.finish() : Promise.resolve())
       .then(function () { return bcDeliver(files, names, zipName, record); })
+      .then(function () {
+        /* and onto the page, so a second post is composed against the first */
+        bcLayerOnto(true);
+      }, function (err) {
+        /* No zip holds the bundle, so the tab keeps no record of it. The
+           layer and the index go back to what they were: no line names a
+           bundle that is not there, and the next publish builds on the
+           site as it is, with the same post id. The composer counts as
+           unsaved again. */
+        TOOL.layerSave(layerBefore);
+        if (indexBefore) AMH.images.index.set(indexBefore);
+        bcPublished = false;
+        throw err;
+      })
       /* what the job asked to run on the written bundle, before the Done
          step draws: a Super Delete moves its files here, so the checklist
          names the posts and the files in one place */
@@ -4563,6 +5172,12 @@
         }));
         bcWizDone(record);
         if (bcJobSettle) bcJobSettle(record);
+      }, function (err) {
+        /* a delivery that failed is said on the wizard, and a job that
+           waits for it hears that nothing was delivered */
+        console.error("[blog] delivery failed:", err);
+        bcWizFail(err, rec.kind === "rebuild" ? "Rebuild" : rec.kind === "delete" ? "Delete" : "Publish");
+        if (bcJobSettle) bcJobSettle(null);
       });
   }
 
@@ -4620,9 +5235,34 @@
         " The bundle was downloaded instead.";
       console.warn("[blog] folder write refused: " + record.fellBack);
     }).then(null, function (err) {
-      asZip();
-      record.fellBack = (err && err.message ? err.message : String(err)) +
-        " The bundle was downloaded instead.";
+      /* A write that stopped partway leaves real files in the folder. They
+         are named apart from the zip that follows, so the reader knows the
+         folder holds a part of the bundle and the zip holds all of it. The
+         held files are kept: a zip is not proof that they arrived. */
+      var done = (err && err.written) || [];
+      /* the folder's part is recorded before the zip is made, so a zip
+         that fails cannot take that record with it */
+      if (done.length) record.partial = { wrote: done.slice(), stopped: names[done.length] || "" };
+      try {
+        asZip();
+      } catch (zipErr) {
+        /* The zip failed as well, after the folder took part of the
+           bundle. The publish is not complete, and the failed step names
+           the files the folder holds. With no part written, the zip's
+           own error is the whole story. */
+        if (!record.partial) throw zipErr;
+        var fail = new Error("The zip that should hold the whole bundle could not be made: " +
+          (zipErr && zipErr.message ? zipErr.message : String(zipErr)));
+        fail.partial = record.partial;
+        throw fail;
+      }
+      if (record.partial) {
+        record.fellBack = "The folder write stopped at " + (record.partial.stopped || "a file") + " after " +
+          done.length + " file" + (done.length === 1 ? "" : "s") + ". The zip holds the whole bundle.";
+      } else {
+        record.fellBack = (err && err.message ? err.message : String(err)) +
+          " The bundle was downloaded instead.";
+      }
       console.warn("[blog] folder write failed: " + record.fellBack);
     });
   }
@@ -4702,7 +5342,7 @@
     if (problem && !window.confirm("Tag check: " + problem + "\n\nPublish anyway?")) {
       bcSetStatus("Not published. " + problem); return;
     }
-    /* image tags vs image cards */
+    /* media tags vs cards */
     /* A tag names a number and nothing else now. What the page shows is a
        line in the manifest, so there is no format for a tag to disagree
        with; a tag written before the engine may still say png, and it is
@@ -4717,17 +5357,12 @@
     }
     var known = {};
     bcImages.forEach(function (im) { known[im.num] = im; });
-    /* a media file the site holds is known by its entry, because the
-       composer makes it no card */
-    var siteMap = bcPreviewImages(date);
-    Object.keys(refs).forEach(function (n) {
-      if (siteMap[n] && (siteMap[n].kind || "image") !== "image") known[n] = siteMap[n];
-    });
     var dangling = Object.keys(refs).filter(function (n) { return !known[n]; });
     if (dangling.length) {
-      bcSetStatus("No image on this site has the number " + dangling.join(", ") +
-        ". Add it on the Images tab, or fix the tag."); return;
+      bcSetStatus("No file on this site has the number " + dangling.join(", ") +
+        ". Add it on the Media view, or fix the tag."); return;
     }
+    var siteMap = bcPreviewImages(date);
     /* a tag that asks for what cannot be shown is fixed before it is
        published: the page would have to guess what it means */
     var issues = AMH.blog.tagIssues(bcTagText(source, format), siteMap);
@@ -4750,9 +5385,25 @@
     var usedPub = bcImages.filter(function (im) { return refs[im.num] && im.published; });
     var unusedNew = bcImages.filter(function (im) { return !refs[im.num] && !im.published; });
     if (unusedNew.length && !window.confirm(unusedNew.length +
-        " new image(s) have no tag in the body. They are not published:\n" +
-        unusedNew.map(function (im) { return im.num; }).join(", ") + "\n\nPublish without them?")) {
+        " new file(s) have no tag in the body. They are not published:\n" +
+        unusedNew.map(bcNameOf).join(", ") + "\n\nPublish without them?")) {
       return;
+    }
+    /* THE BUNDLE'S SIZE, BEFORE A BYTE OF A MEDIA FILE IS READ. A bundle
+       that carries a media file can be BUNDLE_MAX_MB at most, because the
+       browser builds it whole in memory. The new files' sizes are known
+       from what the store holds, so an over-size bundle is refused here,
+       with the post as it was. bcFinishBundle checks the built bundle
+       again, text and all, before a byte is written. */
+    var newBytes = 0, newMedia = false;
+    usedNew.forEach(function (im) {
+      if (bcIsMedia(im)) newMedia = true;
+      Object.keys(im.photo.blobs).forEach(function (k) { newBytes += im.photo.blobs[k].size || 0; });
+    });
+    if (newMedia && newBytes > bcBundleMax()) {
+      bcSetStatus("Not published. The new files are " + AMH.work.sizeText(newBytes) + ", and a bundle " +
+        "that carries a media file can be " + bcBundleMaxMb() + " MB at most. Place some of them in the next " +
+        "post, and publish this one with the rest."); return;
     }
     /* A published image with no tag now stays on the site, with its line
        and its files: nothing is asked, and nothing is orphaned. */
@@ -4875,7 +5526,7 @@
       "Write blog/" + yymm + ".html",
       "Write the manifest and the index card",
       "Write sitemap.xml and robots.txt",
-      usedNew.length ? "Add " + usedNew.length + " new image" + (usedNew.length === 1 ? "" : "s") : "No new images",
+      usedNew.length ? "Add " + usedNew.length + " new file" + (usedNew.length === 1 ? "" : "s") : "No new files",
       "Write the other pages",
       "Zip the bundle"
     ]);
@@ -4925,7 +5576,11 @@
             return u.indexOf("p") === 0 && (!bcEditing || u !== "p" + bcEditing.id);
           });
         });
-        usedPub.forEach(function (im) { renamed[im.num] = dateChanged && !im.before && !shared[im.num]; });
+        /* a media file's path is fixed once it is on the site: it moves
+           with no post */
+        usedPub.forEach(function (im) {
+          renamed[im.num] = dateChanged && !im.before && !shared[im.num] && !bcIsMedia(im);
+        });
         images = bcSiteMap();
         usedNew.forEach(function (im) { images[im.num] = bcImLine(im, date); });
         usedPub.forEach(function (im) {
@@ -5014,16 +5669,30 @@
                                phrases: bcPhrasesOf(source), nextImg: bcNextImg() + bcImgCounter });
         if (ix) { files[INDEX_FILE] = enc.encode(ix.text); bcIndexPending = ix.rec; }
         bcProg.mark(3);
-        /* A held photo is three files, and all three go into blog/ beside
-           the page that shows them. The date may have changed since the
-           photo was named, so the held record is renamed first: its paths
-           are what the bundle writes and what the manifest states. */
-        return Promise.all(usedNew.map(function (im) {
-          AMH.images.rename(im.photo.base, bcImgBase(date, im.num));
-          return AMH.images.files([im.photo.base]).then(function (held) {
-            Object.keys(held).forEach(function (path) { files[path] = held[path]; });
+        /* A held file goes into blog/ beside the page that shows it: a
+           photo's three files, a media file's one, its bytes as it came.
+           The date may have changed since the file was named, so the held
+           record is renamed first: its paths are what the bundle writes and
+           what the index states. The files are read one at a time, and a
+           file the store does not hold stops the publish with its path. A
+           file a save already wrote is on disk, and is not read again. */
+        return usedNew.reduce(function (chain, im) {
+          return chain.then(function () {
+            var base = bcIsMedia(im) ? bcMediaBase(date, im.num) : bcImgBase(date, im.num);
+            AMH.images.rename(im.photo.base, base);
+            var holder = AMH.images.photo(im.photo.base);
+            if (holder && holder.saved) return null;
+            return AMH.images.files([im.photo.base]).then(function (held) {
+              var want = AMH.images.pathsOf({ base: im.photo.base, kind: im.photo.kind, type: im.photo.type });
+              var gone = want.filter(function (p) { return !held[p]; });
+              if (gone.length) {
+                throw new Error(bcNameOf(im) + " is not held any more, so " + gone.join(", ") +
+                  " cannot be written. Add the file again on the Media view, then publish.");
+              }
+              Object.keys(held).forEach(function (path) { files[path] = held[path]; });
+            });
           });
-        }));
+        }, Promise.resolve());
       })
       .then(function () {
         /* date change: published files carry the date in their names, and
@@ -5242,7 +5911,7 @@
      leaves each post's source, so the month files, the stream, the search
      index and the feed are all written without it, and the record's uses
      for it are empty by construction. The site stops naming the file
-     before the Images box moves it.
+     before the Media box moves it.
 
      opts.after runs once the bundle is written and before the Done step,
      so one box says both what was written and what was moved. It is given
@@ -5612,14 +6281,14 @@
       return "checklist open";
     },
     checkLive: bcCheckLive,
-    /* the numbers of the images the open composer holds as cards, so the
-       Images box refuses to super delete one from under it */
+    /* the numbers of the files the open composer holds as cards, so the
+       Media box refuses to super delete one from under it */
     holds: function () {
       if (!bcPanel || !bcPanel.parentNode) return [];
       return bcImages.map(function (im) { return im.num; });
     },
     /* a publish or a rebuild is running: the wizard is on screen. The
-       Images box waits for it rather than writing over it. */
+       Media box waits for it rather than writing over it. */
     busy: function () { return !!(bcWiz && bcWiz.box && bcWiz.box.parentNode); },
     /* the page's own lifecycle hook, run again when the page's manifest
        changes under it */
@@ -5652,6 +6321,9 @@
        search entry shows, so the suite can try both on a known record */
     nextImg: bcNextImg,
     firstImage: bcFirstImage,
+    /* the most a bundle that carries a media file can hold, in MB; read
+       each time, so a test can lower it */
+    BUNDLE_MAX_MB: BC_BUNDLE_MAX_MB,
     tick: bcTickTime,
     timeParse: bcTimeParse,
     timeLabel: bcTimeLabel

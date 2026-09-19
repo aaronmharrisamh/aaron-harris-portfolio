@@ -428,6 +428,13 @@
     }
     return runs;
   }
+  /* The runs of a text, each tag read: [{ start, end, tags }]. The
+     composer asks, to say which carousel a placement is in. */
+  function blogRunsOf(source) {
+    return blogTagRuns(String(source || "")).map(function (run) {
+      return { start: run.start, end: run.end, tags: run.tags.map(blogTagRead) };
+    });
+  }
   /* A run's carousels, each a list of read tags: the run cut at each tag
      that says nocarousel, which belongs to none of them. */
   function blogStretches(tags) {
@@ -757,6 +764,14 @@
      Only the stream folds. A month page is the whole post, and its cut
      markers are hidden by CSS with nothing reading them. */
 
+  /* The page hid or showed a part of a post: a fold, an Expand, a tag
+     filter or one post on its own. Every player looks again, so one
+     that nobody can see stops where it is, and nothing starts before its
+     part of the post is on screen. work.js holds the players' rules. */
+  function blogPlayersLook() {
+    if (AMH.work && AMH.work.mediaSync) AMH.work.mediaSync();
+  }
+
   /* One block's worth of lines. A list and a table are as long as they
      look; a code fence is as long as it is. */
   function blogBlockLines(el) {
@@ -831,6 +846,7 @@
          downward and the page does not jump */
       if (hardAt !== -1) blogCutApply(post, blocks, hardAt, "hard", -1);
       if (AMH.site) AMH.site.requestTick();
+      blogPlayersLook();
     });
   }
   /* Fold one post, once. */
@@ -849,6 +865,7 @@
     if (soft !== -1) blogCutApply(post, blocks, soft, "soft", hard);
     else if (hard !== -1) blogCutApply(post, blocks, hard, "hard", -1);
     else return false;
+    blogPlayersLook();
     return true;
   }
   /* Fold the posts that are not folded yet, and say how many.
@@ -1182,6 +1199,7 @@
 
     doc.body.classList.add("is-focus");
     blogPosts().forEach(function (p) { p.hidden = p !== post; });
+    blogPlayersLook();
     /* the ways to the other months belong to the month view: a reader
        here asked for one post, and the rest of the chain answers a
        question they did not ask.
@@ -2065,6 +2083,7 @@
       post.hidden = !has;
       if (has) shown++;
     });
+    blogPlayersLook();
     blogTagLine(tag, shown);
     blogTagRest(tag);
     /* the address carries the filter, so a copied link shows what the
@@ -2187,7 +2206,8 @@
     var onMonth = blogChainAttach();
     if (!onMonth && !blogAttach()) return;
     /* One viewer for a post: a photo opens the viewer on every photo of
-       its post, from its first carousel to its last. */
+       its post, from its first carousel to its last, a photo on its own
+       included, and never on a player. */
     if (AMH.work && AMH.work.viewerScope) {
       AMH.work.viewerScope(function (gallery) { return gallery.closest(".bs-post"); });
     }
@@ -2230,6 +2250,9 @@
        OPTIONS / KINDS            the option words, and each kind's word
        readTag(match)             one match of TAG, by name
        tagsOf(source)             every tag in a text, read
+       runsOf(source)             the runs of tags, each tag read
+       stretchesOf(tags)          a run's carousels: the run cut at each
+                                  tag that says nocarousel
        options(text)              an options string, by name
        optionsText(options)       the same, written the one way a tag is
        tagIssues(source, map)     { problems, notices } about a body's tags
@@ -2293,6 +2316,8 @@
     KINDS: BLOG_KINDS,
     readTag: blogTagRead,
     tagsOf: blogTagsOf,
+    runsOf: blogRunsOf,
+    stretchesOf: blogStretches,
     options: blogTagOptions,
     optionsText: blogOptionsText,
     tagIssues: blogTagIssues,

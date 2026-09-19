@@ -2898,15 +2898,15 @@
   /* "1 file was" or "3 files were", for a sentence about a count */
   function wereWords(n) { return n === 1 ? "1 file was" : n + " files were"; }
 
-  /* THE IMAGES BOX.
+  /* THE MEDIA BOX.
 
-     Every image the site holds, from the record and the log and never
-     from a page: the note under the title says the list is as of the last
-     save or publish, because that is when the record was written. Three
-     filters, newest first. A row copies a tag or a path to place the
-     image, and its trash can is Super Delete, the one move that takes an
-     image off the site. A super deleted row offers Restore while its
-     files are in deletethese/. */
+     Every image and media file the site holds, from the record and the
+     log and never from a page: the note under the title says the list is
+     as of the last save or publish, because that is when the record was
+     written. Three filters, newest first. A row copies a tag or a path to
+     place the file, and its trash can is Super Delete, the one move that
+     takes a file off the site. A super deleted row offers Restore while
+     its files are in deletethese/. */
   var imagesOpen = null;   /* the box on screen, so a second press shows it and not a twin */
 
   /* THE ORDER AND THE PAGE.
@@ -2946,7 +2946,8 @@
   function rowText(r) {
     var e = r.entry || r;
     var I = engine();
-    var parts = [imageName(e), e.base, e.num || "", imageFacts(e).join(" "), e.added, dayWords(e.added)];
+    var parts = [imageName(e), e.base, e.num || "", imageFacts(e).join(" "), e.added, dayWords(e.added),
+                 e.kind || "image", e.from || ""];
     (e.used || []).forEach(function (u) { parts.push(u, placeWords(u)); });
     if (I.index && I.index.words) parts.push(I.index.words(e));
     if (r.entry) parts.push(r.at, momentWords(r.at));
@@ -3039,8 +3040,8 @@
 
     var headEl = doc.createElement("div");
     headEl.className = "ced-modal__head";
-    headEl.innerHTML = '<span class="ced-b">IMAGES</span>' +
-      '<span class="ced-slug" id="cedImagesTitle">Every image the site holds</span>' +
+    headEl.innerHTML = '<span class="ced-b">MEDIA</span>' +
+      '<span class="ced-slug" id="cedImagesTitle">Every image and media file the site holds</span>' +
       '<span class="ced-images__note">as of the last save or publish</span>';
 
     var xBtn = doc.createElement("button");
@@ -3333,12 +3334,40 @@
       pic.src = src;
       return pic;
     }
-    /* an entry's picture: its small copy, or the tile of a media file */
+    /* An entry's picture: its small copy, or the tile of a media file. A
+       row never reads a media file for its own sake: the tile is a button,
+       and the file loads only when the author opens it. A video or a sound
+       opens as the browser's own player, paused; a MIDI file as a link. */
     function picOf(e) {
       if (!isMediaEntry(e)) return thumb(at + I.filesOf(e).sd);
-      var tile = doc.createElement("div");
+      var tile = doc.createElement("button");
+      tile.type = "button";
       tile.className = "ced-image__pic ced-image__pic--none";
       tile.textContent = e.kind === "midi" ? "MIDI" : e.kind;
+      tile.setAttribute("aria-label", (e.kind === "midi" ? "Show a link to " : "Open a player for ") + imageName(e));
+      tile.title = e.kind === "midi" ? "Show a link to the file" : "Open a player for the file";
+      tile.addEventListener("click", function () {
+        var src = at + I.filesOf(e).source;
+        var open;
+        if (e.kind === "midi") {
+          open = doc.createElement("a");
+          open.href = src;
+          open.download = e.from || "";
+          open.textContent = e.from || imageName(e);
+        } else {
+          open = doc.createElement(e.kind === "video" ? "video" : "audio");
+          open.controls = true;
+          open.preload = "metadata";
+          if (e.kind === "video") open.setAttribute("playsinline", "");
+          open.src = src;
+        }
+        open.className = "ced-image__pic ced-image__pic--open";
+        if (tile.parentNode) tile.parentNode.replaceChild(open, tile);
+        /* the player joins the page's one owner: it starts paused, never
+           by itself, and its Play pauses any other player */
+        if (e.kind !== "midi" && AMH.work && AMH.work.mediaAdopt) AMH.work.mediaAdopt(open);
+        if (open.focus) open.focus();
+      });
       return tile;
     }
     /* the words of a row: the name, the facts, and where it is used; for
@@ -3507,6 +3536,9 @@
       });
       drawSort();
       viewBtns.forEach(function (v) { v.el.setAttribute("aria-pressed", String(v.list === asList)); });
+      /* a player a row opened stops and lets go of its file before the
+         rows are drawn again */
+      if (AMH.work && AMH.work.mediaRelease) AMH.work.mediaRelease(box);
       list.innerHTML = "";
       tbody.innerHTML = "";
       shownRows = sortRows(showing === "all" ? images : showing === "unused" ? unused : deleted,
@@ -3557,6 +3589,8 @@
       dialogDown(done);
       if (scrimEl) scrimEl.removeEventListener("click", onScrim);
       scrimDown();
+      if (AMH.work && AMH.work.mediaRelease) AMH.work.mediaRelease(box);
+      if (AMH.work && AMH.work.mediaSurface) AMH.work.mediaSurface(box, false);
       urls.forEach(function (u) { URL.revokeObjectURL(u); });
       if (box.parentNode) box.parentNode.removeChild(box);
     }
@@ -3577,6 +3611,8 @@
     scrimUp();
     if (scrimEl) scrimEl.addEventListener("click", onScrim);
     doc.body.appendChild(box);
+    /* the box is in front of the page: a player on the page stops */
+    if (AMH.work && AMH.work.mediaSurface) AMH.work.mediaSurface(box, true);
     dialogUp(done);
     imagesOpen = { el: box, draw: draw, say: say,
                    show: function (key) { showing = key; draw(); } };
@@ -3743,22 +3779,47 @@
   }
 
   /* The three writes a Super Delete ends with, once the site has stopped
-     naming the image: the files into deletethese/, the record without the
+     naming the file: the files into deletethese/, the record without the
      entry, and the log with a line. A file already missing is skipped and
-     named. Resolves { moved, written }. */
+     named. Resolves { moved, written }.
+
+     A MOVE THAT STOPS PARTWAY writes nothing more. The entry stays in the
+     index, and the error names the files that moved and the files that
+     did not. A second Super Delete finishes it: a file already moved is
+     not in its place any more, so it is skipped. A write of the index or
+     the log that fails after the move says what moved and what is left
+     to write, and the console holds the log's line. */
   function superDeleteMove(e) {
     var I = engine();
     var paths = I.pathsOf(e);
+    var name = imageName(e);
     return Promise.all(paths.map(repoHas)).then(function (there) {
       paths.forEach(function (p, i) {
         if (!there[i]) console.warn("[site editor] " + p + " is not in the repo folder. It was skipped.");
       });
-      return repoMove(paths.filter(function (p, i) { return there[i]; }));
+      var present = paths.filter(function (p, i) { return there[i]; });
+      return repoMove(present).then(function (moved) {
+        if (moved.length === present.length) return moved;
+        var left = present.filter(function (p) { return moved.indexOf(p) === -1; });
+        throw new Error(left[0] + " could not be moved into " + I.DELETE_DIR + ", so the index still names " +
+          name + ". " + (moved.length ? "Moved: " + moved.join(", ") + ". " : "") + "Not moved: " +
+          left.join(", ") + ". Super delete it again to finish: a file already moved is skipped.");
+      });
     }).then(function (moved) {
       return indexWithout(e.base).then(function (wrote) {
         return logAppend(e, paths).then(function (wrote2) {
           return { moved: moved, written: wrote.concat(wrote2) };
+        }, function (err) {
+          console.warn("[site editor] the line superdeleted.js lacks:\n" +
+            JSON.stringify({ at: I.log.now(), base: e.base, paths: paths, entry: e, restored: "" }));
+          throw new Error(name + " moved into " + I.DELETE_DIR + " and left " + I.index.file + ", and " +
+            I.log.file + " was not written: " + (err && err.message ? err.message : String(err)) +
+            ". The line it lacks is in the console.");
         });
+      }, function (err) {
+        throw new Error(name + " moved into " + I.DELETE_DIR + ", and " + I.index.file + " was not written: " +
+          (err && err.message ? err.message : String(err)) + ". Super delete it again to finish: a file " +
+          "already moved is skipped.");
       });
     });
   }
@@ -3849,8 +3910,12 @@
             name: name,
             after: function (rec) {
               if (!rec.wrote || !rec.wrote.length) return null;
+              /* the posts are written by now: a move that stops is said on
+                 the Done step with the posts, and not as a failed rebuild */
               return superDeleteMove(e).then(function (out) {
                 rec.superDeleted = { name: name, moved: out.moved, wrote: out.written };
+              }, function (err) {
+                rec.superDeleteFailed = { name: name, why: err && err.message ? err.message : String(err) };
               });
             }
           }).then(function (rec) {
@@ -3858,6 +3923,7 @@
               say("Nothing was written, so nothing moved.");
               return false;
             }
+            if (rec.superDeleteFailed) { say(rec.superDeleteFailed.why); return false; }
             if (box) { box.show("deleted"); box.say("Super deleted " + name + "."); }
             return true;
           });
@@ -3936,21 +4002,30 @@
     return repoForImages().then(function (got) {
       if (!got) { say("Restore needs the repo folder."); return false; }
       return Promise.all(paths.map(function (p) { return repoHas(I.DELETE_DIR + p); })).then(function (there) {
-        var missing = paths.filter(function (p, i) { return !there[i]; });
-        if (missing.length) {
-          say(missing[0] + " is not in " + I.DELETE_DIR + ". Add the image again instead.");
-          return false;
-        }
         return Promise.all(paths.map(repoHas)).then(function (taken) {
-          var blocked = paths.filter(function (p, i) { return taken[i]; });
+          /* Each path is in one of four states. In deletethese/ alone, it
+             moves. On the site alone, an earlier Restore moved it and
+             stopped: it is skipped, so this one finishes that one. In
+             both places, a file would be written over, and nothing moves.
+             In neither, the file is lost, and nothing moves. */
+          var missing = paths.filter(function (p, i) { return !there[i] && !taken[i]; });
+          if (missing.length) {
+            say(missing[0] + " is not in " + I.DELETE_DIR + ". Add the image again instead.");
+            return false;
+          }
+          var blocked = paths.filter(function (p, i) { return there[i] && taken[i]; });
           if (blocked.length) {
             say(blocked[0] + " is already on the site. Nothing was moved.");
             return false;
           }
+          var toMove = paths.filter(function (p, i) { return there[i]; });
           say("Restoring " + name + "...");
-          return repoMoveBack(paths).then(function (moved) {
-            if (moved.length !== paths.length) {
-              say(paths[moved.length] + " could not be moved back. See the console.");
+          return repoMoveBack(toMove).then(function (moved) {
+            if (moved.length !== toMove.length) {
+              var left = toMove.filter(function (p) { return moved.indexOf(p) === -1; });
+              say(left[0] + " could not be moved back, so the index does not name " + name + " yet. " +
+                (moved.length ? "Moved back: " + moved.join(", ") + ". " : "") + "Still in " + I.DELETE_DIR +
+                ": " + left.join(", ") + ". Restore it again to finish.");
               return false;
             }
             return indexWith(d.entry).then(function (wrote) {
@@ -3999,9 +4074,15 @@
       console.warn("[site editor] " + why);
       if (!changedPages().length) { say("Nothing to save", SAVE_SAY_MS); return; }
       /* there were edits, and something stopped their save: the author
-         reads why, and what fixes it, and the edits stay on the page */
+         reads why, and what fixes it, and the edits stay on the page. A
+         folder write that stopped partway names the files it wrote. */
       say("Not saved", SAVE_SAY_MS);
-      askBox({ tag: "NOT SAVED", title: "The save stopped", lines: [why], yes: "OK", only: true });
+      var lines = [why];
+      if (err && err.written && err.written.length) {
+        lines.push("These files were written before it stopped: " + err.written.join(", ") +
+          ". Save again to write the rest.");
+      }
+      askBox({ tag: "NOT SAVED", title: "The save stopped", lines: lines, yes: "OK", only: true });
     });
   }
 
@@ -4151,7 +4232,7 @@
     /* Images is on every page, because the record it shows is the site's
        and not a page's. It sits before New post: the box is about what
        the site holds, and the composer is about adding to it. */
-    footBtn("Images", "", function () { api.images(); });
+    footBtn("Media", "", function () { api.images(); });
     footBtn("New post", "", function () { api.blog(); });
     footBtn("Revert all", "", function () { api.revertAll(); });
     footBtn("Exit", "", function () { api(); });
@@ -8584,12 +8665,25 @@
   }
 
   /* Write one file. The stream truncates, so the file is replaced whole
-     and never left with the tail of a longer previous version. */
+     and never left with the tail of a longer previous version.
+
+     A file this write made and could not fill is taken away again. A
+     folder makes the file before its bytes arrive, and an empty file
+     left there would read as a written one. A file that was there
+     before keeps its old bytes: the stream writes a copy, and only a
+     closed stream replaces the file. */
   function writeOne(path, bytes) {
     var parts = path.split("/");
     var name = parts.pop();
+    var dir = null, made = false;
     return repoDirFor(parts)
-      .then(function (d) { return d.getFileHandle(name, { create: true }); })
+      .then(function (d) {
+        dir = d;
+        return d.getFileHandle(name).then(null, function () {
+          made = true;
+          return d.getFileHandle(name, { create: true });
+        });
+      })
       .then(function (fh) { return fh.createWritable(); })
       .then(function (stream) {
         return Promise.resolve(stream.write(bytes)).then(function () {
@@ -8597,7 +8691,9 @@
         });
       })
       .then(null, function (err) {
-        throw errObj("BLG-E14", path + (err && err.message ? " (" + err.message + ")" : ""));
+        var why = errObj("BLG-E14", path + (err && err.message ? " (" + err.message + ")" : ""));
+        if (!made || !dir) throw why;
+        return dir.removeEntry(name).then(function () { throw why; }, function () { throw why; });
       });
   }
 
@@ -8668,7 +8764,11 @@
      move is a copy and then a removal: a folder handle has no rename that
      crosses folders. The first failure stops the run and names its file,
      so the folder is left in a state that can be described. Resolves the
-     paths moved. */
+     paths moved.
+
+     A move that fails removes the copy it made. A folder makes the file
+     before its bytes are written, and an empty file left at the
+     destination would stop the move that finishes this one. */
   function repoMoveEach(paths, fromOf, toOf) {
     var moved = [];
     return (paths || []).reduce(function (chain, path) {
@@ -8676,19 +8776,30 @@
         if (stopped) return true;
         var parts = fromOf(path).split("/");
         var name = parts.pop();
+        var to = toOf(path);
+        var made = false;
         return repoDirAt(parts).then(function (d) {
           return d.getFileHandle(name)
             .then(function (fh) { return fh.getFile(); })
             .then(function (file) { return file.arrayBuffer(); })
-            .then(function (buf) { return writeOne(toOf(path), new Uint8Array(buf)); })
+            .then(function (buf) {
+              return repoHas(to).then(function (was) {
+                made = !was;
+                return writeOne(to, new Uint8Array(buf));
+              });
+            })
             .then(function () { return d.removeEntry(name); });
         }).then(function () {
           moved.push(path);
           return false;
         }, function (err) {
-          console.warn("[site editor] " + fromOf(path) + " could not be moved to " + toOf(path) +
+          console.warn("[site editor] " + fromOf(path) + " could not be moved to " + to +
             " (" + (err && err.message ? err.message : err) + "). It is still where it was.");
-          return true;
+          if (!made) return true;
+          var at = to.split("/");
+          var copy = at.pop();
+          return repoDirAt(at).then(function (d2) { return d2.removeEntry(copy); })
+            .then(function () { return true; }, function () { return true; });
         });
       });
     }, Promise.resolve(false)).then(function () { return moved; });
@@ -8708,7 +8819,7 @@
 
      No save moves an image file. An image a page stops using keeps its
      three files, so a tag or a photo box can bring it back with no upload.
-     The one move out of the repo is Super Delete, in the Images box, and
+     The one move out of the repo is Super Delete, in the Media box, and
      the engine's finder for files nothing uses (AMH.images.unused) is
      there for that box. */
 
@@ -9845,9 +9956,38 @@
     for (var i = 0; i < bytes.length; i++) crc = zipCrcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
+  /* WHAT A CLASSIC ZIP CAN SAY. Its fields are 16 and 32 bits wide: fewer
+     than 65535 files, each file and each offset under 4 GiB, and a name of
+     65535 bytes at most. A bundle past any of them needs ZIP64, which this
+     writer does not write, so it is refused before a byte is written, and
+     no value is ever cut to fit a field. Returns the sentence that
+     refuses the bundle, or "". */
+  var ZIP_MAX_FILES = 65535, ZIP_MAX_BYTES = 4294967295, ZIP_MAX_NAME = 65535;
+  function zipCheck(entries) {
+    var enc = new TextEncoder();
+    if (entries.length >= ZIP_MAX_FILES) {
+      return "The bundle has " + entries.length + " files, and a zip holds fewer than " + ZIP_MAX_FILES + ".";
+    }
+    var offset = 0, central = 22;
+    for (var i = 0; i < entries.length; i++) {
+      var nameBytes = enc.encode(entries[i].name).length;
+      var size = entries[i].bytes.length;
+      if (nameBytes > ZIP_MAX_NAME) return "The name " + entries[i].name.slice(0, 60) + "... is too long for a zip.";
+      if (size >= ZIP_MAX_BYTES) return entries[i].name + " is too large for a zip.";
+      offset += 30 + nameBytes + size;
+      central += 46 + nameBytes;
+      if (offset >= ZIP_MAX_BYTES || offset + central >= ZIP_MAX_BYTES) {
+        return "The bundle is too large for a zip.";
+      }
+    }
+    return "";
+  }
   /* entries: [{name, bytes: Uint8Array}] -> Blob. STORE only: images are
-     already compressed and the text files are small. */
+     already compressed and the text files are small. It throws, and
+     writes nothing, for a bundle zipCheck refuses. */
   function zipStore(entries) {
+    var problem = zipCheck(entries);
+    if (problem) throw new Error(problem);
     var enc = new TextEncoder();
     var now = new Date();
     var dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
@@ -10194,12 +10334,14 @@
     return "save started";
   };
 
-  /* edit.images() - every image the site holds, in one box */
+  /* edit.media() - every image and media file the site holds, in one box.
+     edit.images() is its older name, and opens the same box. */
   api.images = function () {
     injectStyles();
     imagesBox();
-    return "images box open";
+    return "media box open";
   };
+  api.media = api.images;
 
   /* The composer is publish.js, and it needs the manifest and the reading
      engine as well as itself. All three are on the blog page and nowhere
@@ -10259,7 +10401,7 @@
   api.blog.rebuild = function () {
     if (!blogHere()) return BLOG_ELSEWHERE;
     /* the engine answers with the record its bundle left, which is for the
-       Images box and not for a person reading the console */
+       Media box and not for a person reading the console */
     AMH.publish.rebuild();
     return "rebuilding: choose where the bundle should land";
   };
@@ -10276,7 +10418,8 @@
       "edit.list()       table of all editable regions\n" +
       "edit.export()     download this page with your edits\n" +
       "edit.save()       write every changed page into the repo folder\n" +
-      "edit.images()     every image the site holds: copy a tag or a path, super delete, restore\n" +
+      "edit.media()      every image and media file the site holds: copy a tag or a path,\n" +
+      "                  super delete, restore. edit.images() opens the same box\n" +
       "edit.blog()       open the blog composer (publishes a zip bundle)\n" +
       "edit.blog.edit(id) edit a published post (also: panel/stream buttons)\n" +
       "edit.blog.rebuild() re-render all month files with current chrome\n" +
@@ -10596,6 +10739,7 @@
     });
   };
   AMH.tool.zip = zipStore;                 /* STORE zip writer */
+  AMH.tool.zipCheck = zipCheck;            /* what a classic zip cannot say, or "" */
   AMH.tool.download = downloadFile;        /* hand a file to the browser */
   AMH.tool.escAttr = escAttr;          /* a consumer's serializer needs it */
   AMH.tool.stamp = stamp;                  /* six characters that name a publish */

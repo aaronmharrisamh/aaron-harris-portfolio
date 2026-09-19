@@ -11,11 +11,12 @@
      1. SETUP                    5. CORE LOGIC
      2. CONSTANTS AND CONFIG     6. CLEANUP
      3. HELPER FUNCTIONS         7. PUBLIC API
-     4. THE METADATA CUT
+     4. THE METADATA CUT AND THE MEDIA HEADERS
 
    Section 4 stands where initialization would. The engine sets
-   nothing up at load, and cutting metadata out of a file is a job
-   with rules of its own.
+   nothing up at load. Cutting metadata out of a picture, and reading
+   what a media file's first bytes say, are jobs with rules of their
+   own, at the byte level.
 
    One upload is three files, from the RENDITIONS list in section 2:
 
@@ -39,7 +40,9 @@
    A MEDIA FILE is a video, a sound or a MIDI file. It is not made into
    copies: it is one file, kept byte for byte as it came, and a blog names
    it blog/<date>_media<num>.<ext>. FORMATS, in section 2, is every
-   extension the engine takes and the kinds each one can be.
+   extension the engine takes and the kinds each one can be. intakeMedia
+   takes one: its first bytes and a test player say what it is, and when
+   neither can, the consumer asks the author.
 
    images.js, at the repo root, is the one record of every image and media
    file the site holds, either scheme: what each is, when it was added, and
@@ -164,6 +167,43 @@
     "(?:_sd\\.webp|_original\\.(?:jpg|png|webp|gif)|\\.(?:jpg|png))" +
     "|blog\\/\\d{6}_media[0-9a-z]\\d{3}\\." + MEDIA_EXT, "g");
 
+  /* A MEDIA FILE'S LIMITS.
+
+     MEDIA_MAX_MB is the largest media file the blog takes: the largest
+     file GitHub takes in a push. A larger file is refused before a byte
+     of it is read, and it costs no number.
+
+     MEDIA_HEAD_BYTES is how much of a file the engine reads to say what
+     it is, and MEDIA_PROBE_MS how long a test player has to read the
+     file's facts. The test player can read more of the file than the
+     header: the bound is on the engine's own read. */
+  var MEDIA_MAX_MB = 100;
+  var MEDIA_HEAD_BYTES = 1024 * 1024;
+  var MEDIA_PROBE_MS = 5000;
+
+  /* What a browser calls a media file, as the table names it. Some
+     systems use another name for the same format. A type that says
+     nothing is no word at all: none, application/octet-stream, and
+     application/ogg, which names a container and not a kind. */
+  var MIME_ALIASES = {
+    "audio/mp3": "audio/mpeg", "audio/x-mp3": "audio/mpeg",
+    "audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/vnd.wave": "audio/wav",
+    "audio/x-midi": "audio/midi", "application/x-midi": "audio/midi"
+  };
+  var MIME_NO_WORD = { "": true, "application/octet-stream": true, "application/ogg": true };
+
+  /* The container each media extension must hold, and the words for each
+     container the engine can name. A few are not media: a file named .mp3
+     that is a PNG is a slip worth naming. */
+  var EXT_CONTAINER = { mp4: "mp4", webm: "webm", weba: "webm", ogg: "ogg", mp3: "mp3", wav: "wav",
+                        mid: "midi", midi: "midi" };
+  var CONTAINER_WORDS = {
+    mp4: "an MP4 file", webm: "a WebM file", ogg: "an Ogg file", mp3: "an MP3 file", wav: "a WAV file",
+    midi: "a MIDI file", aac: "an AAC file", flac: "a FLAC file", avi: "an AVI file",
+    png: "a PNG image", jpeg: "a JPEG image", gif: "a GIF image", webp: "a WebP image",
+    pdf: "a PDF document", zip: "a ZIP archive"
+  };
+
   /* A JPG has no transparent pixel, so every drawn copy is painted on the
      page's own ground. The small copy is painted too: a browser swaps one
      copy for the other at a breakpoint, and the two must look the same. */
@@ -248,6 +288,33 @@
      one. */
   function tagWordOf(kind) {
     return own(TAG_WORDS, kind) || "";
+  }
+  /* A MIME type as the table names it: lower case, without parameters,
+     and with another system's name for the same format put back to the
+     table's. "" for a type that says nothing. It is a hint and never
+     proof: a browser takes it from the file's name. */
+  function mimeNormal(type) {
+    var t = String(type || "").split(";")[0].trim().toLowerCase();
+    if (own(MIME_NO_WORD, t)) return "";
+    return own(MIME_ALIASES, t) || t;
+  }
+  /* The media extensions, in FORMATS' order. */
+  function mediaExts() {
+    return Object.keys(FORMATS).filter(function (ext) { return !FORMATS[ext].image; });
+  }
+  /* True for a file name the engine takes as a media file. */
+  function isMediaName(name) {
+    var kinds = kindsOf(extOf(name));
+    return kinds.length > 0 && kinds.indexOf("image") === -1;
+  }
+  /* ".mp4, .webm and .midi", for a sentence about the list */
+  function mediaListWords() {
+    var list = mediaExts().map(function (ext) { return "." + ext; });
+    return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+  }
+  /* "359 KB" or "3.0 MB", the words the rest of the site uses for a size */
+  function sizeWords(bytes) {
+    return AMH.work && AMH.work.sizeText ? AMH.work.sizeText(bytes) : Math.ceil(bytes / 1048576) + " MB";
   }
 
   /* ---------------- bytes ---------------- */
@@ -670,6 +737,231 @@
     return whole(bytes, noFacts());
   }
 
+  /* ---------------- what a media file's first bytes say ----------------
+
+     A media file is never cut or changed. The engine reads its first
+     MEDIA_HEAD_BYTES for two facts: the container the file is, so a file
+     with the wrong extension is named before it is taken; and, for MP4,
+     WebM and Ogg, whether it holds a picture, from the tracks its header
+     lists when they are inside the bytes read.
+
+     A header that says nothing the engine knows is no fault: the file may
+     still play, and the test player decides. Only a clear mismatch and a
+     header cut short are refused. Nothing here reads every packet, so a
+     file that passes is not proved whole. */
+
+  /* The container the first bytes name, or "" for one the engine does not
+     know. A JPEG starts 0xFFD8, which is not an MPEG audio frame, so the
+     images are named before the frame test. */
+  function containerOf(b) {
+    var four = ascii(b, 0, 4);
+    if (ascii(b, 4, 4) === "ftyp") return "mp4";
+    if (b[0] === 0x1A && b[1] === 0x45 && b[2] === 0xDF && b[3] === 0xA3) return "webm";
+    if (four === "OggS") return "ogg";
+    if (four === "RIFF") {
+      var form = ascii(b, 8, 4);
+      return form === "WAVE" ? "wav" : form === "WEBP" ? "webp" : form === "AVI " ? "avi" : "";
+    }
+    if (four === "MThd") return "midi";
+    if (four === "fLaC") return "flac";
+    if (ascii(b, 0, 3) === "ID3") return "mp3";
+    if (b[0] === 0x89 && ascii(b, 1, 3) === "PNG") return "png";
+    if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "jpeg";
+    if (four === "GIF8") return "gif";
+    if (ascii(b, 0, 5) === "%PDF-") return "pdf";
+    if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 3 && b[3] === 4) return "zip";
+    /* an MPEG audio frame: eleven sync bits. Layer bits of 00 are an AAC
+       frame in ADTS, which is not an MP3 file. */
+    if (b.length >= 2 && b[0] === 0xFF && (b[1] & 0xE0) === 0xE0) return ((b[1] >> 1) & 3) === 0 ? "aac" : "mp3";
+    return "";
+  }
+
+  /* True when a file ends inside the header its container begins with. The
+     numbers are the smallest header each container can have. */
+  var HEADER_BYTES = { mp4: 8, webm: 4, ogg: 27, wav: 44, midi: 14, mp3: 4 };
+  function cutShort(container, b, size) {
+    if (size < (HEADER_BYTES[container] || 0)) return true;
+    if (container === "mp4") {
+      var box = u32(b, 0, false);
+      return box > 8 && box > size;
+    }
+    if (container === "midi") return 8 + u32(b, 4, false) > size;
+    if (container === "mp3" && ascii(b, 0, 3) === "ID3") {
+      var tag = 10 + (((b[6] & 0x7F) << 21) | ((b[7] & 0x7F) << 14) | ((b[8] & 0x7F) << 7) | (b[9] & 0x7F));
+      return tag >= size;
+    }
+    return false;
+  }
+
+  /* The boxes of an MP4 between from and to: visit(type, start, end, whole)
+     for each, where start is past the box's own header and whole says the
+     box ends inside the bytes read. A box of size 0 runs to the end of the
+     file, which is inside the bytes read only when all is true. visit
+     returns false to stop. */
+  function mp4Boxes(b, from, to, all, visit) {
+    var at = from;
+    while (at + 8 <= to) {
+      var size = u32(b, at, false), head = 8;
+      var type = ascii(b, at + 4, 4);
+      var whole = true;
+      if (size === 1) {
+        if (at + 16 > to) return;
+        size = u32(b, at + 8, false) * 4294967296 + u32(b, at + 12, false);
+        head = 16;
+      } else if (size === 0) {
+        size = to - at;
+        whole = all;
+      }
+      if (size < head) return;
+      var end = at + size;
+      if (visit(type, at + head, Math.min(end, to), whole && end <= to) === false) return;
+      at = end;
+    }
+  }
+  /* MP4: the handler of each track in the moov box, when the whole moov
+     box is inside the bytes read. 'vide' is a picture and 'soun' sound. */
+  function mp4Tracks(b, all) {
+    var out = { video: null, audio: null };
+    function inside(type, from, to, visit) {
+      mp4Boxes(b, from, to, all, function (t, s, e) { if (t === type) visit(s, e); });
+    }
+    mp4Boxes(b, 0, b.length, all, function (type, start, end, whole) {
+      if (type !== "moov") return true;
+      if (!whole) return false;
+      out.video = false;
+      out.audio = false;
+      inside("trak", start, end, function (s1, e1) {
+        inside("mdia", s1, e1, function (s2, e2) {
+          inside("hdlr", s2, e2, function (s3, e3) {
+            if (s3 + 12 > e3) return;
+            var handler = ascii(b, s3 + 8, 4);
+            if (handler === "vide") out.video = true;
+            if (handler === "soun") out.audio = true;
+          });
+        });
+      });
+      return false;
+    });
+    return out;
+  }
+
+  /* One EBML element at b[at]: its id, which keeps its length marker as
+     the specification names ids, where its data starts, and its size,
+     which does not. A size of all ones is unknown: the element runs to the
+     end of its parent. null when the bytes read end first. */
+  function ebml(b, at) {
+    var first = b[at];
+    if (first === undefined || first === 0) return null;
+    var idLen = 1;
+    while (idLen <= 4 && !(first & (0x80 >> (idLen - 1)))) idLen++;
+    if (idLen > 4 || at + idLen > b.length) return null;
+    var id = 0;
+    for (var i = 0; i < idLen; i++) id = id * 256 + b[at + i];
+    var p = at + idLen, lead = b[p];
+    if (lead === undefined || lead === 0) return null;
+    var szLen = 1;
+    while (szLen <= 8 && !(lead & (0x80 >> (szLen - 1)))) szLen++;
+    if (szLen > 8 || p + szLen > b.length) return null;
+    var size = lead & (0xFF >> szLen), ones = size === (0xFF >> szLen);
+    for (var j = 1; j < szLen; j++) {
+      size = size * 256 + b[p + j];
+      if (b[p + j] !== 0xFF) ones = false;
+    }
+    return { id: id, start: p + szLen, size: ones ? -1 : size };
+  }
+  function ebmlWalk(b, from, to, visit) {
+    var at = from;
+    while (at < to) {
+      var el = ebml(b, at);
+      if (!el) return;
+      var end = el.size < 0 ? to : el.start + el.size;
+      if (visit(el.id, el.start, Math.min(end, to), end <= to) === false) return;
+      if (el.size < 0) return;
+      at = end;
+    }
+  }
+  /* WebM: the TrackType of each track in the Tracks element, which comes
+     before the first Cluster. 1 is a picture and 2 is sound. A recording a
+     browser made gives the Segment no size, and it is read to the end. */
+  var EBML_SEGMENT = 0x18538067, EBML_TRACKS = 0x1654AE6B, EBML_TRACK = 0xAE,
+      EBML_TRACK_TYPE = 0x83, EBML_CLUSTER = 0x1F43B675;
+  function webmTracks(b) {
+    var out = { video: null, audio: null };
+    ebmlWalk(b, 0, b.length, function (id, start, end) {
+      if (id !== EBML_SEGMENT) return true;
+      ebmlWalk(b, start, end, function (id2, s2, e2, whole) {
+        if (id2 === EBML_CLUSTER) return false;
+        if (id2 !== EBML_TRACKS) return true;
+        if (!whole) return false;
+        out.video = false;
+        out.audio = false;
+        ebmlWalk(b, s2, e2, function (id3, s3, e3) {
+          if (id3 !== EBML_TRACK) return true;
+          ebmlWalk(b, s3, e3, function (id4, s4, e4) {
+            if (id4 !== EBML_TRACK_TYPE) return true;
+            var type = 0;
+            for (var k = s4; k < e4; k++) type = type * 256 + b[k];
+            if (type === 1) out.video = true;
+            if (type === 2) out.audio = true;
+          });
+        });
+        return false;
+      });
+      return false;
+    });
+    return out;
+  }
+
+  /* Ogg: the codec of each stream, from its first page. Every stream's
+     first page comes before any other page. Theora, VP8 and Dirac are
+     pictures; Vorbis, Opus, FLAC and Speex are sound. */
+  function oggTracks(b) {
+    var out = { video: null, audio: null };
+    var at = 0;
+    while (at + 27 <= b.length && ascii(b, at, 4) === "OggS") {
+      var firstPage = (b[at + 5] & 0x02) !== 0;
+      var segs = b[at + 26];
+      if (!firstPage || at + 27 + segs > b.length) break;
+      var body = at + 27 + segs, len = 0;
+      for (var i = 0; i < segs; i++) len += b[at + 27 + i];
+      if (out.video === null) { out.video = false; out.audio = false; }
+      var head = ascii(b, body, 8), word = head.slice(1, 7);
+      if ((b[body] === 0x80 && word === "theora") || head.indexOf("OVP80") === 0 || head.indexOf("BBCD") === 0) {
+        out.video = true;
+      } else if ((b[body] === 0x01 && word === "vorbis") || head === "OpusHead" ||
+                 (b[body] === 0x7F && head.slice(1, 5) === "FLAC") || head.indexOf("Speex") === 0) {
+        out.audio = true;
+      }
+      at = body + len;
+    }
+    return out;
+  }
+
+  /* What a media file's first bytes say, for its extension:
+     { problem, container, video, audio }. problem is the end of the
+     sentence that refuses the file, or "". video and audio are true or
+     false when the header lists the tracks, and null when it does not. */
+  function mediaHead(b, ext, size) {
+    var out = { problem: "", container: "", video: null, audio: null };
+    var want = own(EXT_CONTAINER, ext) || "";
+    var found = containerOf(b);
+    out.container = found;
+    if (found && want && found !== want) {
+      out.problem = "is " + (own(CONTAINER_WORDS, found) || "another kind of file") + " with the extension ." +
+        ext + ". Give it the extension its format has, then add it again.";
+      return out;
+    }
+    if (cutShort(found || want, b, size)) {
+      out.problem = "is cut short: the file ends inside its own header.";
+      return out;
+    }
+    var all = b.length >= size;
+    var tracks = found === "mp4" ? mp4Tracks(b, all) : found === "webm" ? webmTracks(b)
+      : found === "ogg" ? oggTracks(b) : null;
+    if (tracks) { out.video = tracks.video; out.audio = tracks.audio; }
+    return out;
+  }
+
   /* ==========================================================
      5. CORE LOGIC
      ========================================================== */
@@ -763,6 +1055,145 @@
     });
   }
 
+  /* ---------------- a media file's intake ----------------
+
+     AMH.images.intakeMedia(file, opts) -> Promise<photo or null>
+
+       opts.name(parts)      the base path, from { kind, ext, slug }. It is
+                             called once the kind is known, so a file that
+                             is refused or let go never takes a number.
+       opts.chooseKind(info) asked when the file can be a video or a sound
+                             and nothing in it says which. info is { name,
+                             ext, mime, hint }, and it resolves "video",
+                             "audio", or "" to let the file go.
+
+     The kind is decided in this order. The extension is in FORMATS, the
+     file holds bytes, and it is MEDIA_MAX_MB or less, all before a byte is
+     read. The browser's MIME type is a hint and never proof. The header
+     must not name another format or end early. For MP4, WebM and Ogg a
+     picture track says video, and a header that lists only sound says
+     audio; a test player that reads a picture size says video. A size of
+     0, a failed test and a timeout prove nothing about sound, so then the
+     author says, with the hint as the first choice. A .weba, .mp3 or .wav
+     file is sound, and one that holds a picture is refused. A MIDI file
+     is MIDI and is never played.
+
+     The photo it resolves is a held record of one file:
+
+       base, kind, type, mime   the path, and what the file is
+       files, blobs, urls       { source }: the path, the file as it came,
+                                and a blob: URL of it
+       ow, oh, and w, h         a video's picture size; 0 when it is not
+                                known, and always 0 for a sound or MIDI
+       bytes, from              the size, and the name the file had
+       playable                 whether this browser read the file's facts;
+                                always false for MIDI
+       notes                    sentences for the card: a hint the file
+                                did not agree with, a file it cannot play
+
+     It resolves null when the author let the file go, and rejects with an
+     Error a box shows as it is. */
+
+  /* A test player the page never shows reads the file's facts: a picture
+     size, and the tracks where a browser reports them. It is muted, loads
+     facts only, and is let go on every outcome, the timeout too. Resolves
+     { ok, w, h, tracks }, and never rejects. */
+  function probeMedia(file, tag) {
+    return new Promise(function (resolve) {
+      var el = doc.createElement(tag);
+      var url = URL.createObjectURL(file);
+      var done = false;
+      var timer = 0;
+      function finish(out) {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        el.removeEventListener("loadedmetadata", read);
+        el.removeEventListener("error", fail);
+        el.removeAttribute("src");
+        try { el.load(); } catch (err) {}
+        URL.revokeObjectURL(url);
+        resolve(out);
+      }
+      function read() {
+        var vt = el.videoTracks, at = el.audioTracks;
+        finish({ ok: true, w: el.videoWidth || 0, h: el.videoHeight || 0,
+                 tracks: vt && at ? { video: vt.length > 0, audio: at.length > 0 } : null });
+      }
+      function fail() { finish({ ok: false, w: 0, h: 0, tracks: null }); }
+      el.muted = true;
+      el.preload = "metadata";
+      el.addEventListener("loadedmetadata", read);
+      el.addEventListener("error", fail);
+      timer = window.setTimeout(fail, api.MEDIA_PROBE_MS);
+      el.src = url;
+    });
+  }
+
+  function intakeMedia(file, opts) {
+    opts = opts || {};
+    if (!file) return Promise.reject(new Error("No file was given."));
+    var called = '"' + (file.name || "That file") + '"';
+    var ext = extOf(file.name);
+    var kinds = kindsOf(ext).filter(function (k) { return k !== "image"; });
+    if (!kinds.length) {
+      return Promise.reject(new Error(called + " is not a media file the blog takes: " + mediaListWords() + "."));
+    }
+    if (!file.size) return Promise.reject(new Error(called + " is empty."));
+    if (file.size > api.MEDIA_MAX_MB * 1024 * 1024) {
+      return Promise.reject(new Error(called + " is " + sizeWords(file.size) + ". A media file can be " +
+        api.MEDIA_MAX_MB + " MB at most. Make it smaller with a converter, then add it again."));
+    }
+    var mime = mimeNormal(file.type);
+    var hint = (/^(audio|video)\//.exec(mime) || ["", ""])[1];
+    var one = kinds.length === 1 ? kinds[0] : "";
+    var head = null, seen = null;
+    return file.slice(0, MEDIA_HEAD_BYTES).arrayBuffer().then(function (buf) {
+      head = mediaHead(new Uint8Array(buf), ext, file.size);
+      if (head.problem) throw new Error(called + " " + head.problem);
+      if (one === "midi") return null;
+      return probeMedia(file, one === "audio" ? "audio" : "video");
+    }).then(function (probe) {
+      seen = probe || { ok: false, w: 0, h: 0, tracks: null };
+      var picture = head.video === true || !!(seen.tracks && seen.tracks.video) || (seen.ok && seen.w > 0);
+      if (one) {
+        if (one === "audio" && picture) {
+          throw new Error(called + " holds a picture, and a ." + ext + " file is sound. Give it the extension " +
+            ".webm or .mp4, then add it again.");
+        }
+        return { kind: one, chosen: false };
+      }
+      if (picture) return { kind: "video", chosen: false };
+      if ((head.video === false && head.audio === true) || !!(seen.tracks && !seen.tracks.video && seen.tracks.audio)) {
+        return { kind: "audio", chosen: false };
+      }
+      if (!opts.chooseKind) return { kind: "", chosen: true };
+      return Promise.resolve(opts.chooseKind({ name: file.name || "", ext: ext, mime: mime, hint: hint }))
+        .then(function (k) { return { kind: k === "video" || k === "audio" ? k : "", chosen: true }; });
+    }).then(function (d) {
+      if (!d.kind) return null;
+      var kind = d.kind;
+      var notes = [];
+      /* the table's MIME type is what the file is served as; a browser's
+         other word for it, from the file's name, is said once */
+      if (mime && mime !== mimeOf(ext, kind) && !d.chosen) {
+        notes.push("The browser called it " + mime + ". It is kept as " + mimeOf(ext, kind) + ", from what the file holds.");
+      }
+      if (kind !== "midi" && !seen.ok) {
+        notes.push("This browser cannot play it. The page still links the file, to download.");
+      }
+      var base = (opts.name || function () { return "media"; })({ kind: kind, ext: ext, slug: slugOf(file.name) });
+      var w = kind === "video" && seen.ok ? seen.w : 0;
+      var h = kind === "video" && seen.ok ? seen.h : 0;
+      return { base: base, kind: kind, type: ext, mime: mimeOf(ext, kind),
+               files: { source: base + "." + ext }, blobs: { source: file },
+               urls: { source: URL.createObjectURL(file) },
+               w: w, h: h, sdw: 0, sdh: 0, ow: w, oh: h, animated: false,
+               bytes: file.size, from: file.name || "media", meta: null, overLimit: false,
+               saved: false, playable: kind !== "midi" && seen.ok, notes: notes };
+    });
+  }
+
   /* ---------------- the held store ----------------
 
      A photo a page shows is held here until a save writes it: in memory,
@@ -782,14 +1213,15 @@
              at: Date.now(), w: photo.w, h: photo.h, sdw: photo.sdw, sdh: photo.sdh,
              ow: photo.ow, oh: photo.oh, type: photo.type, animated: photo.animated,
              bytes: photo.bytes, from: photo.from, meta: photo.meta,
-             overLimit: photo.overLimit };
+             overLimit: photo.overLimit, playable: photo.playable, notes: photo.notes };
   }
   function fromRecord(row) {
     var photo = { base: row.base, kind: kindOfRow(row), mime: mimeOfRow(row),
                   files: row.files, blobs: row.blobs, urls: {},
                   w: row.w, h: row.h, sdw: row.sdw, sdh: row.sdh, ow: row.ow, oh: row.oh,
                   type: row.type, animated: !!row.animated, bytes: row.bytes,
-                  from: row.from, meta: row.meta, overLimit: row.overLimit, saved: false };
+                  from: row.from, meta: row.meta, overLimit: row.overLimit, saved: false,
+                  playable: row.playable, notes: row.notes || [] };
     Object.keys(row.blobs).forEach(function (k) { photo.urls[k] = URL.createObjectURL(row.blobs[k]); });
     return photo;
   }
@@ -823,16 +1255,21 @@
 
   /* A page shows this photo now, so it is held until a save writes it.
      The same file added twice is held once: the first photo stands for
-     both, and the bytes are the same. */
+     both, and the bytes are the same.
+
+     Resolves true when the browser's storage kept a copy, and false when
+     it refused one, full or closed: the photo is then held in this page's
+     memory only, which a box says, because a reload loses it. */
   function hold(photo) {
-    if (!photo || held[photo.base]) return;
+    if (!photo || held[photo.base]) return Promise.resolve(true);
     held[photo.base] = photo;
-    idb("readwrite", function (st) {
+    return idb("readwrite", function (st) {
       return st.put(toRecord(photo), recordKey(photo.base));
-    }).then(null, function (err) {
+    }).then(function () { return true; }, function (err) {
       console.warn("[images] " + (photo.files.hd || photo.files.source || photo.base) + " is held on this page only (" +
         (err && err.message ? err.message : "no storage") + "). Save before you " +
-        "leave the page, or the photo has to be added again.");
+        "leave the page, or the file has to be added again.");
+      return false;
     });
   }
 
@@ -854,22 +1291,25 @@
   }
 
   /* Every file of these held photos that no save has written, as the
-     bytes a save or a bundle puts beside the page: { path: Uint8Array }. */
+     bytes a save or a bundle puts beside the page: { path: Uint8Array }.
+     One file is read at a time: a media file can be large, and reading
+     them all at once would hold every copy in memory together. */
   function files(bases) {
     return recall().then(function () {
       var out = {};
-      var jobs = [];
+      var todo = [];
       (bases || []).forEach(function (base) {
         var photo = held[base];
         if (!photo || photo.saved) return;
         Object.keys(photo.files).forEach(function (k) {
-          var path = photo.files[k];
-          jobs.push(photo.blobs[k].arrayBuffer().then(function (buf) {
-            out[path] = new Uint8Array(buf);
-          }));
+          todo.push({ path: photo.files[k], blob: photo.blobs[k] });
         });
       });
-      return Promise.all(jobs).then(function () { return out; });
+      return todo.reduce(function (chain, one) {
+        return chain.then(function () {
+          return one.blob.arrayBuffer().then(function (buf) { out[one.path] = new Uint8Array(buf); });
+        });
+      }, Promise.resolve()).then(function () { return out; });
     });
   }
 
@@ -898,7 +1338,8 @@
       return { base: base, kind: kindOfRow(p), mime: mimeOfRow(p), files: p.files,
                w: p.w, h: p.h, sdw: p.sdw, sdh: p.sdh,
                ow: p.ow, oh: p.oh, type: p.type, animated: p.animated, bytes: p.bytes,
-               from: p.from, meta: p.meta, overLimit: p.overLimit, saved: p.saved };
+               from: p.from, meta: p.meta, overLimit: p.overLimit, saved: p.saved,
+               playable: p.playable };
     });
   }
 
@@ -1271,6 +1712,10 @@
   /* A file the tag found and could not read still loads: a script with a
      fault fires load and sets nothing. The check names that, so it never
      becomes an empty index that the next write would put on the site. */
+  /* TODO: the index loads from the site and never from the staging layer.
+     After a reload, a bundle that is built and not uploaded is not in it:
+     a new file can take an id that bundle gave out, and the next bundle's
+     index leaves that bundle's files out. */
   function indexLoad() {
     if (!indexLoading) {
       indexLoading = (window.AMH_IMAGES ? Promise.resolve(true) : loadTag(INDEX_FILE)).then(function (found) {
@@ -1629,8 +2074,17 @@
     mimeOf: mimeOf,            /* the MIME type of an extension as a kind, or "" */
     tagWordOf: tagWordOf,      /* the word a blog tag names a kind with */
     kindWords: kindWords,      /* "a video", for a sentence about a kind */
+    /* a media file's limits, read each time, so a test can lower them */
+    MEDIA_MAX_MB: MEDIA_MAX_MB,
+    MEDIA_PROBE_MS: MEDIA_PROBE_MS,
+    /* the media extensions, for a picker the blog shows */
+    MEDIA_ACCEPT: mediaExts().map(function (ext) { return "." + ext; }).join(","),
+    mimeNormal: mimeNormal,    /* a browser's MIME type, as the table names it */
+    isMediaName: isMediaName,  /* is this a media file's name */
+    mediaHead: mediaHead,      /* what a media file's first bytes say */
 
     intake: intake,            /* a file, made into a photo */
+    intakeMedia: intakeMedia,  /* a media file, taken as it came */
     hold: hold,                /* a page shows it: keep it until a save */
     letGo: letGo,              /* a box closed without it */
     recall: recall,            /* this tab's photos, back from IndexedDB */

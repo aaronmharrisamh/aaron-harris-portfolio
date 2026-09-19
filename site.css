@@ -1305,7 +1305,7 @@ body.nav-open { overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gallery__ambient, .gallery__img, .gallery__nav, .gallery__preview, .gallery__counter { transition: none; }
+  .gallery__ambient, .gallery__img, .gallery__media, .gallery__nav, .gallery__preview, .gallery__counter { transition: none; }
 }
 
 /* ============================================================
@@ -2598,20 +2598,169 @@ a.bs-post__when:hover { color: var(--accent-bright); }
 .bs-post__body .gallery { margin: 1.1rem 0 0; }
 .bp-cut { display: none; }
 
-/* A tag on its own line with nocarousel, and a video, a sound or a MIDI
-   file, is a figure. The browser's own player does the work, and it works
-   with no script, so these rules only keep each one inside the column: no
-   picture or video wider than the post, or taller than most of the
-   screen, and the caption and the file link under it. They draw no frame:
-   data-shape and data-noborders on a figure are data only here. */
+/* A FRAME WITH NO BORDERS. noborders on a carousel's first tag takes away
+   the frame's border, its ground, its shadow, its glow, its inset, the
+   rounding of what it shows and the caption's plate. The frame keeps its
+   shape, its caption and its arrows, and the arrows keep their focus
+   ring. */
+.gallery[data-noborders] .gallery__frame {
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+}
+.gallery[data-noborders] .gallery__frame::before,
+.gallery[data-noborders] .gallery__frame::after,
+.gallery[data-noborders] .gallery__ambient { display: none; }
+.gallery[data-noborders] .gallery__stage { inset: 0; border-radius: 0; }
+.gallery[data-noborders] .gallery__img,
+.gallery[data-noborders] .gallery__media video { border-radius: 0; filter: none; }
+.gallery[data-noborders] .gallery__caption {
+  background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+/* A MEDIA FIGURE. A tag on its own line with nocarousel, and a video, a
+   sound or a MIDI file, is a figure. The browser's own player does the
+   work, and it works with no script: these first rules keep each figure
+   inside the column, no picture or video wider than the post or taller
+   than most of the screen, with the caption and the file link under it.
+   work.js puts a player in a box of its own, .bp-media__box, and puts its
+   buttons over it. */
 .bs-post__body .bp-media { margin: 1.1rem 0 0; }
-.bp-media > img, .bp-media > video {
+.bp-media > img, .bp-media > video, .bp-media__box > video {
   display: block; max-width: 100%; height: auto; max-height: 85vh; margin: 0 auto;
 }
-.bp-media > video { width: 100%; background: #000; }
-.bp-media > audio { display: block; width: 100%; }
+.bp-media > video, .bp-media__box > video { width: 100%; background: #000; }
+.bp-media > audio, .bp-media__box > audio { display: block; width: 100%; }
+.bp-media__box { position: relative; }
 .bp-media__cap { margin-top: .45rem; color: var(--muted); font-size: .85rem; line-height: 1.5; }
 .bp-media__file { display: inline-block; margin-top: .35rem; font-size: .8rem; }
+
+/* A FIGURE OF ITS OWN. A photo or a video on its own has a thin border and
+   a small gap to its caption. With a frame word it takes that frame, as
+   --bp-ratio from work.js, and what it shows is contained in it, never
+   stretched or cut. Without a word a photo keeps its own size, and a
+   video its own shape, 16:9 until its size is known. The width keeps the
+   frame within the screen's height, as a carousel's does. A sound stays
+   one player high whatever its words, and a MIDI file is a card with its
+   file link. */
+.bp-media--alone > img,
+.bp-media--alone[data-kind="video"] .bp-media__box {
+  border: 1px solid var(--line); border-radius: var(--radius); background: #06080c; overflow: hidden;
+}
+.bp-media--alone[data-kind="video"] .bp-media__box,
+.bp-media--alone[data-shape] > img {
+  width: 100%;
+  width: min(100%, calc(var(--gallery-screen, .85) * 100vh * var(--bp-ratio, 1.7778)));
+  width: min(100%, calc(var(--gallery-screen, .85) * 100svh * var(--bp-ratio, 1.7778)));
+  margin-inline: auto;
+}
+.bp-media--alone[data-kind="video"] .bp-media__box { aspect-ratio: var(--bp-ratio, 16 / 9); }
+.bp-media--alone .bp-media__box > video {
+  width: 100%; height: 100%; max-height: none; object-fit: contain; background: none;
+}
+.bp-media--alone[data-shape] > img {
+  aspect-ratio: var(--bp-ratio); height: auto; max-height: none; object-fit: contain;
+}
+.bp-media__photo { cursor: zoom-in; }
+.bp-media__photo:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.bp-media--alone[data-kind="midi"] {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem;
+  padding: .7rem .9rem; border: 1px solid var(--line); border-radius: var(--radius);
+}
+.bp-media--alone[data-kind="midi"]::before {
+  content: "\266B"; display: grid; place-items: center; flex: none;
+  width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  background: rgba(255,255,255,.06); color: var(--accent-bright); font-size: 1.05rem;
+}
+.bp-media--alone[data-kind="midi"] .bp-media__cap { flex: 1 1 10rem; margin: 0; }
+.bp-media--alone[data-kind="midi"] .bp-media__file { margin: 0; }
+.bp-media--alone[data-noborders] > img,
+.bp-media--alone[data-noborders] .bp-media__box,
+.bp-media--alone[data-noborders][data-kind="midi"] {
+  border: 0; border-radius: 0; background: none;
+}
+
+/* A PLAYER ON A SLIDE. A video or a sound in a carousel is a slide as a
+   photo is: it fills the stage and cross-fades. A slide that is not on
+   screen is hidden from the pointer and the keyboard as well as the eye,
+   because a player's controls still answer at opacity 0. The caption is
+   the strip's, and a video's file link shows when the browser cannot
+   play the file. */
+.gallery__media {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .7rem;
+  opacity: 0; visibility: hidden;
+  transition: opacity .46s var(--ease), visibility 0s linear .46s;
+  cursor: default;
+}
+.gallery__media.is-active { opacity: 1; visibility: visible; transition: opacity .46s var(--ease), visibility 0s; }
+.gallery__holder.is-media { cursor: default; }
+.gallery__media > .bp-media__cap { display: none; }
+.gallery__media[data-kind="video"] .bp-media__box { width: 100%; height: 100%; }
+.gallery__media video {
+  width: 100%; height: 100%; max-height: none; object-fit: contain; background: none; border-radius: 6px;
+}
+.gallery__media[data-kind="video"] > .bp-media__file { display: none; }
+.gallery__media[data-kind="video"][data-state="error"] > .bp-media__file {
+  display: inline-block; position: absolute; left: 50%; bottom: 1rem; z-index: 3; margin: 0;
+  transform: translateX(-50%); padding: .3rem .7rem; border-radius: 999px; background: rgba(6,9,14,.82);
+}
+
+/* A SOUND OR A MIDI FILE ON A SLIDE is a card in the middle of the frame:
+   a mark for its kind, then its player or its file link. It has no
+   picture, so the photos and the videos around it give the frame its
+   shape. */
+.gallery__media[data-kind="audio"],
+.gallery__media[data-kind="midi"] { padding: 1rem 1.2rem; text-align: center; }
+.gallery__media[data-kind="audio"]::before,
+.gallery__media[data-kind="midi"]::before {
+  content: "\266A"; display: grid; place-items: center; flex: none;
+  width: 3.2rem; height: 3.2rem; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06);
+  color: var(--accent-bright); font-size: 1.5rem;
+}
+.gallery__media[data-kind="midi"]::before { content: "\266B"; }
+.gallery__media[data-kind="audio"] .bp-media__box { width: min(100%, 28rem); }
+
+/* THE BUTTONS ON A PLAYER. Play sits in the middle of a paused video,
+   away from the browser's own controls at the foot, and goes when the
+   video plays. It says Play in words when the browser refused to start
+   the video by itself. A video with no controls keeps a Pause button at
+   its lower left while it plays, and a sound with no controls is a bar
+   with its name and one Play or Pause button. The line under a player
+   says a refusal or an error. */
+.bp-play, .bp-pause, .bp-audio__btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  border: 1px solid rgba(255,255,255,.28); border-radius: 999px;
+  background: rgba(6,9,14,.74); color: #fff; cursor: pointer;
+}
+.bp-play svg, .bp-pause svg, .bp-audio__btn svg { width: 1.1rem; height: 1.1rem; flex: none; }
+.bp-play {
+  position: absolute; left: 50%; top: 50%; z-index: 3; transform: translate(-50%, -50%);
+  min-width: 3rem; height: 3rem; padding: 0 .95rem;
+}
+.bp-play.is-waiting { opacity: .7; cursor: progress; }
+.bp-play__say { display: none; font-size: .8rem; font-weight: 700; letter-spacing: .02em; }
+[data-state="blocked"] .bp-play__say { display: inline; }
+.bp-pause { position: absolute; left: .7rem; bottom: .7rem; z-index: 3; width: 2.5rem; height: 2.5rem; }
+.bp-play[hidden], .bp-pause[hidden] { display: none; }
+.bp-play:focus-visible, .bp-pause:focus-visible, .bp-audio__btn:focus-visible {
+  outline: 2px solid var(--accent-bright); outline-offset: 3px;
+}
+.bp-audio {
+  display: flex; align-items: center; gap: .7rem; min-width: 0;
+  padding: .45rem .9rem .45rem .45rem; border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(255,255,255,.04);
+}
+.bp-audio__btn { width: 2.3rem; height: 2.3rem; flex: none; }
+.bp-audio__name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: .85rem;
+}
+.bp-media__say { margin: .45rem 0 0; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+.bp-media__say[hidden] { display: none; }
+.gallery__media .bp-media__say {
+  position: absolute; left: .7rem; right: .7rem; top: .7rem; z-index: 3; margin: 0;
+  padding: .35rem .6rem; border-radius: 8px; background: rgba(6,9,14,.82); color: var(--text);
+}
 
 /* The editor's New post pills: one at the end of the bar, after the month
    picker, and one centered under the last post. Two classes, because the

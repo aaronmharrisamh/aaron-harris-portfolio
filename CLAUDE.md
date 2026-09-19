@@ -154,20 +154,20 @@ here before they exist on disk.
 | `blog.html` | Blog page. The stream, the post manifest, and the composer. |
 | `site.css` | All page style. Replaces the inline style block. |
 | `site.js` | Shared page behavior for every page. |
-| `work.js` | Carousels, the deep-dive drawer, and the shared lightbox. |
-| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
+| `work.js` | Carousels of photos and players, the deep-dive drawer, the shared lightbox, and the players' rules: one at a time, and none out of sight. |
+| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
 | `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
 | `images.js` | GENERATED. The image index: every image and media file the site holds, its kind, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
-| `superdeleted.js` | GENERATED. The log of every Super Delete: when, the paths, the typed entry as it was, and when it was restored. Written by the Images box, loaded by it and by a rebuild only. Do not edit by hand. |
+| `superdeleted.js` | GENERATED. The log of every Super Delete: when, the paths, the typed entry as it was, and when it was restored. Written by the Media box, loaded by it and by a rebuild only. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
 | `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |
-| `tools/e2e/` | The test harness. |
+| `tools/e2e/` | The test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. |
 
 Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
 sections only when a distinct job cannot merge into another section. Three
@@ -196,8 +196,13 @@ other section reads the page it is on.
   machine-owned region by hand.
 - A file the image engine wrote stays until Super Delete moves it. No save,
   publish, delete or rebuild moves an image file or names one as a file to
-  delete. Super Delete, in the Images box, is the only move: into
+  delete. Super Delete, in the Media box, is the only move: into
   `deletethese/`, with a line in `superdeleted.js` that names the files.
+  One exception is older than this law: a published post given a new date
+  takes its photos to the new date's names, and that publish moves the
+  old-date files into `deletethese/` on the folder route, or lists them on
+  the zip route. A media file has no exception: its published path never
+  changes.
 - A delete never leaves a page naming a file the site does not hold. An
   image still in use comes out of every place that uses it first, and the
   files move only after those places are written.

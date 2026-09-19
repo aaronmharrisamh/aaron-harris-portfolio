@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SERVER_PORT = 8123;
@@ -79,6 +80,11 @@ const ZIP_CAPTURE = `
       fr.readAsDataURL(b);
     })).then(b64 => { window.__zipB64 = b64; });
   };`;
+
+// The media files the suite makes, as tools/e2e/fixtures/media.js makes
+// them in the page: window.__media builds a WAV, a MIDI file and media
+// headers from bytes, and a recording. The harness runs it in the page.
+const MEDIA_FIX = readFileSync(join(REPO, "tools", "e2e", "fixtures", "media.js"), "utf-8");
 
 // The wizard box, measured. A publish is one job with several screens, so
 // the box must be one box: the same height, and the buttons in the same
@@ -466,6 +472,14 @@ async function pressKey(key, code, keyCode, text) {
     { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text });
   await send("Input.dispatchKeyEvent",
     { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+}
+
+// A real click, as the browser's own input sends it, at page coordinates
+// in the viewport. It gives the page user activation, which a play with
+// sound needs, where a click dispatched from script does not.
+async function realClick(x, y) {
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 }
 
 async function waitFor(expression, ms = 6000) {
@@ -2610,7 +2624,7 @@ async function main() {
   })()`);
   check("panel foot: the moves are filled, View stays plain, and Rebuild is not offered here",
     JSON.stringify(foot.labels) ===
-      '["Export","Save to repo","Images","New post","Revert all","Exit"]' &&
+      '["Export","Save to repo","Media","New post","Revert all","Exit"]' &&
     /* every move is filled blue except Save to repo, which is yellow */
     foot.filled.every((c, i) => foot.labels[i] === "Save to repo"
       ? c === "rgb(242, 193, 78)" : c === "rgb(74, 165, 232)") &&
@@ -4074,6 +4088,10 @@ async function main() {
           return Promise.resolve(new File([body], name, { type: "text/html" }));
         },
         createWritable: function () {
+          /* a path a check names in __refuse cannot be written, as on a full disk */
+          if (window.__refuse && window.__refuse[name]) {
+            return Promise.reject(new DOMException("the disk is full", "QuotaExceededError"));
+          }
           return Promise.resolve({
             write: function (bytes) {
               window.__wrote[name] = typeof bytes === "string" ? bytes
@@ -6966,7 +6984,7 @@ async function main() {
   // first heading was taken as the name without a control to look at.
   check("composer: the views are tabs at the top, and the article fields start shut",
     layout.advShut === true && layout.chevron === true &&
-    layout.tabRoles === "tablist:Write,Preview,Images" &&
+    layout.tabRoles === "tablist:Write,Preview,Media" &&
     /No title/.test(layout.advSays),
     JSON.stringify({ advShut: layout.advShut, chevron: layout.chevron,
                      tabs: layout.tabRoles, says: layout.advSays }));
@@ -9427,7 +9445,7 @@ async function main() {
     })()`);
     check("panel foot: blog.html offers Rebuild, filled, beside Export",
       JSON.stringify(blogFoot.labels) ===
-        '["Export","Save to repo","Rebuild","Images","New post","Revert all","Exit"]' &&
+        '["Export","Save to repo","Rebuild","Media","New post","Revert all","Exit"]' &&
       blogFoot.filled === "rgb(74, 165, 232)" && blogFoot.shared,
       JSON.stringify(blogFoot));
 
@@ -13893,14 +13911,14 @@ async function main() {
   const ki5 = await evaluate(`({ status: (document.querySelector('.bc-status') || {}).textContent || '',
     wizard: !!document.querySelector('.bc-wizard'), cards: document.querySelectorAll('.bc-panel .bc-card').length })`);
   check("reconnect: a tag for a number no image has is named under the body and refused at publish with the new words",
-    /No image on this site has the number 0077\./.test(ki5note) && ki5.cards === 0 && !ki5.wizard &&
-    ki5.status === "No image on this site has the number 0077. Add it on the Images tab, or fix the tag.",
+    /No file on this site has the number 0077\./.test(ki5note) && ki5.cards === 0 && !ki5.wizard &&
+    ki5.status === "No file on this site has the number 0077. Add it on the Media view, or fix the tag.",
     JSON.stringify({ note: ki5note, ...ki5 }));
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
   // MR9. the composer names what is wrong with a tag under the body, a
-  // media file the index holds is a known number with no card, and the
+  // media file the index holds gets its card from its entry, and the
   // publish refuses a tag it cannot show before anything is built. The
   // record is set before the composer opens, which reads it then.
   await evaluate(`(function () {
@@ -13924,13 +13942,837 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
   await evaluate(`AMH.images.index.set(window.__mr9keep); true`);
-  check("media tags: the line under the body names each tag problem and each notice, a media file the index holds needs no card, and the publish refuses the first problem before anything is built",
+  check("media tags: the line under the body names each tag problem and each notice, a media file the index holds gets its card from its entry, and the publish refuses the first problem before anything is built",
     mr9note.indexOf("[portrait landscape video0012,Cap]: two frame words, portrait and landscape.") !== -1 &&
     mr9note.indexOf("[muted unmuted video0012]: both muted and unmuted.") !== -1 &&
     mr9note.indexOf("[noborders video0012]: noborders is not used. The carousel's first tag sets its borders.") !== -1 &&
-    mr9note.indexOf("No image on this site has the number") === -1 && !mr9.wizard && mr9.cards === 0 &&
+    mr9note.indexOf("No file on this site has the number") === -1 && !mr9.wizard && mr9.cards === 1 &&
     mr9.status === "Not published. [portrait landscape video0012,Cap]: two frame words, portrait and landscape. 1 more in the line under the body.",
     JSON.stringify({ note: mr9note, ...mr9 }).slice(0, 700));
+
+  // ============ MI. MEDIA INTAKE: THE HEADER, THE TEST PLAYER AND THE KIND ============
+  // A media file is read before it is held. Its header names its format
+  // and often its tracks, and a test player the page never shows reads
+  // the rest. A format that its extension does not match is refused with
+  // both named, a file that can hold a video or a sound and says neither
+  // is asked about, and the browser's other word for a file is a note.
+  // The composer takes photos and media files in one drop, in drop order;
+  // a card edits one placement of its file at a time; and the preview
+  // plays a held file from its blob and stops it when it goes out of sight.
+  // Every click here is guarded: a page exception would end the run.
+  const miClick = (sel, text) => `(function () { var b = [...document.querySelectorAll(${JSON.stringify(sel)})]
+    .find(function (x) { return x.textContent === ${JSON.stringify(text)}; }); if (b) b.click(); return !!b; })()`;
+  await evaluate(MEDIA_FIX);
+
+  // MI1. the header, the MIME type and the name
+  const mi1 = await evaluate(`(function () {
+    var M = window.__media, I = AMH.images;
+    var head = function (bytes, ext, size) { var b = new Uint8Array(bytes); return JSON.stringify(I.mediaHead(b, ext, size || b.length)); };
+    var png = M.cat([0x89], M.ascii("PNG"), [13, 10, 26, 10], M.zeros(40));
+    return {
+      tracks: [head(M.mp4(["vide", "soun"]), "mp4"), head(M.mp4(["soun"]), "mp4"), head(M.mp4(null), "mp4"),
+        head(M.webm([1, 2]), "webm"), head(M.webm([2]), "weba"), head(M.ogg(["theora", "vorbis"]), "ogg"),
+        head(M.ogg(["opus"]), "ogg"), head(M.mp3(), "mp3"), head(M.wav(0.1), "wav"), head(M.midi(), "mid")],
+      wrong: [head(M.wav(0.1), "mp3"), head(png, "mp4"), head(M.midi(), "ogg")],
+      cut: [head(M.mp4(["vide"]).slice(0, 20), "mp4"), head(M.midi().slice(0, 10), "midi")],
+      mimes: ["audio/mp3", "Audio/WAV; codecs=1", "audio/x-midi", "application/x-midi", "audio/vnd.wave", "video/mp4",
+        "application/octet-stream", "application/ogg", ""].map(I.mimeNormal),
+      names: ["a.MP4", "b.weba", "c.midi", "d.m4a", "e.png", "f", "g.mov"].map(I.isMediaName),
+      accept: I.MEDIA_ACCEPT, max: I.MEDIA_MAX_MB };
+  })()`);
+  const miHead = (problem, container, video, audio) => JSON.stringify({ problem, container, video, audio });
+  const MI_EXT = (found, ext) => "is " + found + " with the extension ." + ext + ". Give it the extension its format has, then add it again.";
+  const MI_CUT = "is cut short: the file ends inside its own header.";
+  check("intake: a media header names its container and, where it lists them, a picture track and a sound track",
+    JSON.stringify(mi1.tracks) === JSON.stringify([miHead("", "mp4", true, true), miHead("", "mp4", false, true), miHead("", "mp4", null, null),
+      miHead("", "webm", true, true), miHead("", "webm", false, true), miHead("", "ogg", true, true), miHead("", "ogg", false, true),
+      miHead("", "mp3", null, null), miHead("", "wav", null, null), miHead("", "midi", null, null)]),
+    JSON.stringify(mi1.tracks).slice(0, 900));
+  check("intake: a file whose format its extension does not match, and a file that ends inside its own header, are refused with the reason",
+    JSON.stringify(mi1.wrong) === JSON.stringify([miHead(MI_EXT("a WAV file", "mp3"), "wav", null, null),
+      miHead(MI_EXT("a PNG image", "mp4"), "png", null, null), miHead(MI_EXT("a MIDI file", "ogg"), "midi", null, null)]) &&
+    JSON.stringify(mi1.cut) === JSON.stringify([miHead(MI_CUT, "mp4", null, null), miHead(MI_CUT, "midi", null, null)]),
+    JSON.stringify({ wrong: mi1.wrong, cut: mi1.cut }).slice(0, 900));
+  check("intake: a browser's MIME type is read as the table names it, and a media file is known by its extension",
+    JSON.stringify(mi1.mimes) === '["audio/mpeg","audio/wav","audio/midi","audio/midi","audio/wav","video/mp4","","",""]' &&
+    JSON.stringify(mi1.names) === "[true,true,true,false,false,false,false]" &&
+    mi1.accept === ".mp4,.webm,.weba,.mp3,.wav,.ogg,.mid,.midi" && mi1.max === 100,
+    JSON.stringify({ mimes: mi1.mimes, names: mi1.names, accept: mi1.accept, max: mi1.max }));
+
+  // MI2. what the engine makes of each file. The name call stands in for
+  // the composer's, so each result names its kind in its path.
+  const mi2 = await evaluate(`(function () {
+    var M = window.__media, I = AMH.images;
+    var asked = [];
+    var take = function (bytes, name, type, answer, watch) {
+      var f = Array.isArray(bytes) ? M.file(bytes, name, type) : new File([bytes], name, { type: type });
+      var read = false;
+      if (watch) f.slice = function () { read = true; return File.prototype.slice.apply(this, arguments); };
+      return I.intakeMedia(f, { name: function (p) { return "blog/260918_media" + p.kind; },
+        chooseKind: function (info) { asked.push(info); return answer || ""; } }).then(function (ph) {
+        if (!ph) return "let go";
+        URL.revokeObjectURL(ph.urls.source);
+        return { kind: ph.kind, type: ph.type, mime: ph.mime, source: ph.files.source, bytes: ph.bytes === f.size, from: ph.from,
+          size: ph.w + "x" + ph.h, playable: ph.playable, notes: ph.notes.join(" "), same: ph.blobs.source === f };
+      }, function (e) { return (read ? "read, " : "") + "refused: " + e.message; });
+    };
+    var out = { asked: asked };
+    var keepMax = I.MEDIA_MAX_MB, keepMs = I.MEDIA_PROBE_MS;
+    return take(M.wav(0.3), "tone.wav", "audio/x-wav").then(function (r) { out.wav = r;
+      return take(M.wav(0.3), "tone.wav", "video/webm"); }).then(function (r) { out.called = r;
+      return take(M.midi(), "song.mid", "audio/midi"); }).then(function (r) { out.midi = r;
+      return take(M.mp4(null), "mystery.mp4", "video/mp4", "audio"); }).then(function (r) { out.chosen = r;
+      return take(M.mp4(null), "again.mp4", "", ""); }).then(function (r) { out.letGo = r;
+      return take(M.mp4(["soun"]), "talk.mp4", "video/mp4"); }).then(function (r) { out.talk = r;
+      return take(M.webm([1, 2]), "voice.weba", "audio/webm"); }).then(function (r) { out.picture = r;
+      return take(M.wav(0.1), "tone.mp3", "audio/mpeg"); }).then(function (r) { out.wrong = r;
+      return take([1, 2, 3], "notes.txt", "text/plain"); }).then(function (r) { out.txt = r;
+      return take([], "empty.wav", "audio/wav"); }).then(function (r) { out.empty = r;
+      I.MEDIA_MAX_MB = 0.004;
+      return take(M.wav(0.3), "big.wav", "audio/wav", "", true); }).then(function (r) { out.big = r;
+      I.MEDIA_MAX_MB = keepMax;
+      I.MEDIA_PROBE_MS = 0;
+      return take(M.wav(0.3), "slow.wav", "audio/wav"); }).then(function (r) { out.slow = r;
+      I.MEDIA_PROBE_MS = keepMs;
+      return M.record("video", "video/webm", 900); }).then(function (vid) {
+      out.recorded = !!vid;
+      return vid ? take(vid, "screen.webm", "video/webm") : null; }).then(function (r) { out.video = r;
+      return out; }, function (e) { I.MEDIA_MAX_MB = keepMax; I.MEDIA_PROBE_MS = keepMs; return { error: e.message }; });
+  })()`, { awaitPromise: true });
+  const miNote = (said, kept) => "The browser called it " + said + ". It is kept as " + kept + ", from what the file holds.";
+  const MI_NOPLAY = "This browser cannot play it. The page still links the file, to download.";
+  const miTook = (kind, type, mime, from, size, playable, notes) => JSON.stringify({ kind, type, mime,
+    source: "blog/260918_media" + kind + "." + type, bytes: true, from, size, playable, notes, same: true });
+  check("intake: a WAV is a sound the browser plays, kept as one file with its bytes; a MIDI file has no test player; a recording is a video with its size",
+    JSON.stringify(mi2.wav) === miTook("audio", "wav", "audio/wav", "tone.wav", "0x0", true, "") &&
+    JSON.stringify(mi2.midi) === miTook("midi", "mid", "audio/midi", "song.mid", "0x0", false, "") &&
+    mi2.recorded === true && JSON.stringify(mi2.video) === miTook("video", "webm", "video/webm", "screen.webm", "160x90", true, ""),
+    JSON.stringify({ wav: mi2.wav, midi: mi2.midi, recorded: mi2.recorded, video: mi2.video, error: mi2.error }).slice(0, 900));
+  check("intake: a file that can be a video or a sound and says neither is asked about with the browser's word, the answer is kept, and no answer lets it go",
+    JSON.stringify(mi2.asked) === '[{"name":"mystery.mp4","ext":"mp4","mime":"video/mp4","hint":"video"},{"name":"again.mp4","ext":"mp4","mime":"","hint":""}]' &&
+    JSON.stringify(mi2.chosen) === miTook("audio", "mp4", "audio/mp4", "mystery.mp4", "0x0", false, MI_NOPLAY) && mi2.letGo === "let go" &&
+    JSON.stringify(mi2.talk) === miTook("audio", "mp4", "audio/mp4", "talk.mp4", "0x0", false, miNote("video/mp4", "audio/mp4") + " " + MI_NOPLAY),
+    JSON.stringify({ asked: mi2.asked, chosen: mi2.chosen, letGo: mi2.letGo, talk: mi2.talk }).slice(0, 900));
+  check("intake: the browser's other word for a file is a note, and a test player that says nothing in time leaves the file held with a note",
+    JSON.stringify(mi2.called) === miTook("audio", "wav", "audio/wav", "tone.wav", "0x0", true, miNote("video/webm", "audio/wav")) &&
+    JSON.stringify(mi2.slow) === miTook("audio", "wav", "audio/wav", "slow.wav", "0x0", false, MI_NOPLAY),
+    JSON.stringify({ called: mi2.called, slow: mi2.slow }).slice(0, 700));
+  check("intake: a picture in a sound-only file, a wrong format, another kind of file, an empty file and a file over the size limit are refused, the last before it is read",
+    mi2.picture === 'refused: "voice.weba" holds a picture, and a .weba file is sound. Give it the extension .webm or .mp4, then add it again.' &&
+    mi2.wrong === 'refused: "tone.mp3" ' + MI_EXT("a WAV file", "mp3") &&
+    mi2.txt === 'refused: "notes.txt" is not a media file the blog takes: .mp4, .webm, .weba, .mp3, .wav, .ogg, .mid and .midi.' &&
+    mi2.empty === 'refused: "empty.wav" is empty.' &&
+    mi2.big === 'refused: "big.wav" is 5 KB. A media file can be 0.004 MB at most. Make it smaller with a converter, then add it again.',
+    JSON.stringify({ picture: mi2.picture, wrong: mi2.wrong, txt: mi2.txt, empty: mi2.empty, big: mi2.big }).slice(0, 900));
+
+  // MI3. one drop: a photo, media files, a file the blog does not take,
+  // and two files that say nothing, one answered and one let go
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  const miStart = await evaluate(`AMH.images.index.load().then(function () { return AMH.publish.nextImg(); })`, { awaitPromise: true });
+  const miNums = await evaluate(`[0, 1, 2, 3, 4, 5].map(function (k) { return AMH.blog.counterText(${Number(miStart) || 1} + k); })`);
+  const miRecorded = await evaluate(`(function () {
+    var M = window.__media;
+    return M.record("video", "video/webm", 900).then(function (vid) {
+      var cv = document.createElement('canvas'); cv.width = 64; cv.height = 48;
+      cv.getContext('2d').fillRect(0, 0, 64, 48);
+      return new Promise(function (res) { cv.toBlob(function (png) {
+        var files = [new File([png], 'still.png', { type: 'image/png' }), M.file(M.wav(0.4), 'tone.wav', 'audio/wav'),
+          vid ? new File([vid], 'screen.webm', { type: 'video/webm' }) : M.file(M.webm([1]), 'screen.webm', 'video/webm'),
+          M.file(M.midi(), 'song.mid', 'audio/midi'), M.file(M.mp4(null), 'mystery.mp4', 'video/mp4'),
+          M.file([1, 2, 3], 'notes.txt', 'text/plain'), M.file(M.mp4(null), 'again.mp4', 'audio/mp4')];
+        var dt = new DataTransfer(); files.forEach(function (f) { dt.items.add(f); });
+        var zone = document.querySelector('.bc-drop');
+        if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        res(!!vid); }, 'image/png'); });
+    });
+  })()`, { awaitPromise: true });
+  const MI_ASK = `(function () { var a = document.querySelector('.bc-panel .bc-kindask'); if (!a) return null;
+    var f = document.activeElement;
+    return { says: [...a.querySelectorAll('p')].map(function (p) { return p.textContent; }), label: a.getAttribute('aria-label'),
+      btns: [...a.querySelectorAll('button')].map(function (b) { return b.textContent + (b.classList.contains('ced-btn--accent') ? '*' : ''); }),
+      focus: f && a.contains(f) ? f.textContent : '', tab: document.querySelector('.bc-panel').getAttribute('data-tab') }; })()`;
+  const mi3ask1 = await waitFor(MI_ASK, 20000);
+  await evaluate(miClick(".bc-kindask button", "Audio"));
+  const mi3ask2 = await waitFor(`(function () { var a = ${MI_ASK}; return a && /again\\.mp4/.test(a.label) ? a : null; })()`, 20000);
+  await evaluate(miClick(".bc-kindask button", "Skip"));
+  const mi3skip = await waitFor(`(function () { var s = (document.querySelector('.bc-status') || {}).textContent || '';
+    return /again\\.mp4/.test(s) ? s : null; })()`, 8000);
+  await evaluate(`(function () { var M = window.__media, dt = new DataTransfer(); dt.items.add(M.file(M.wav(0.2), 'late.wav', 'audio/wav'));
+    var zone = document.querySelector('.bc-drop');
+    if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); return !!zone; })()`);
+  await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 6`, 15000);
+  const MI_CARDS = `[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) {
+    var p = c.querySelector('.bc-card__player, .bc-card__file'), w = c.querySelector('.bc-card__warn');
+    return { num: c.getAttribute('data-num'), kind: c.getAttribute('data-kind'), meta: c.querySelector('.bc-card__meta').textContent,
+      tile: (c.querySelector('.bc-card__tile') || {}).textContent || '',
+      player: p ? p.tagName + (p.getAttribute('download') !== null ? ':' + p.getAttribute('download') : '') : '',
+      preload: p && p.preload || '', src: p ? (p.getAttribute('src') || p.getAttribute('href') || '').slice(0, 5) : '',
+      warn: !w || w.hidden ? '' : w.textContent,
+      opts: [...c.querySelectorAll('.bc-opt')].map(function (o) { return o.textContent.trim().replace(/^(Frame|Sound) .*$/, '$1'); }),
+      note: (c.querySelector('.bc-card__note') || {}).textContent || '', help: !!c.querySelector('.bc-opt-note'),
+      btns: [...c.querySelectorAll('.bc-card__btns button')].map(function (b) { return b.textContent; }) }; })`;
+  const mi3 = await evaluate(`({ tab: (document.querySelector('.bc-tab[data-tab="images"]') || {}).textContent || '', cards: ${MI_CARDS},
+    errs: [...document.querySelectorAll('.bc-panel div.bc-err')].map(function (e) { return e.textContent; }) })`);
+  const MI_ASKS = (name) => '"' + name + '" can hold a video or a sound, and nothing in it says which. What is it?';
+  check("composer: a file that says nothing is asked about on the Media view with the browser's word first and focused, and Skip lets it go with no number",
+    !!mi3ask1 && JSON.stringify(mi3ask1.says) === JSON.stringify([MI_ASKS("mystery.mp4"), "The browser calls it video/mp4."]) &&
+    mi3ask1.label === "What mystery.mp4 holds" && mi3ask1.btns.join() === "Video*,Audio,Skip" && mi3ask1.focus === "Video" &&
+    mi3ask1.tab === "images" && !!mi3ask2 && JSON.stringify(mi3ask2.says) === JSON.stringify([MI_ASKS("again.mp4"), "The browser calls it audio/mp4."]) &&
+    mi3ask2.btns.join() === "Audio*,Video,Skip" && mi3ask2.focus === "Audio" &&
+    mi3skip === "again.mp4 was not added, and it took no number." &&
+    JSON.stringify(mi3.cards.map((c) => c.num)) === JSON.stringify(miNums),
+    JSON.stringify({ ask1: mi3ask1, ask2: mi3ask2, skip: mi3skip, nums: mi3.cards.map((c) => c.num), want: miNums }).slice(0, 900));
+  const miCard = (k) => (mi3.cards || [])[k] || { opts: [], btns: [] };
+  const MI_PLAYS = "Display separately,Borderless,Frame,Hide player controls,Autoplay,Loop,Sound";
+  check("composer: the Media view gives each file a card in drop order, with its kind, its facts, its player or its link, its options, and what Insert tag writes",
+    mi3.tab === "Media" && mi3.cards.length === 6 && mi3.cards.map((c) => c.kind).join() === "image,audio,video,midi,audio,audio" &&
+    miCard(0).opts.join() === "Display separately,Borderless,Frame" && miCard(0).player === "" &&
+    miCard(0).note === "Placed nowhere yet. Insert tag writes [img" + miNums[0] + ",|still]." &&
+    miCard(1).meta === miNums[1] + " · audio · WAV · 6 KB · from tone.wav" && miCard(1).tile === "audio" &&
+    miCard(1).player === "AUDIO" && miCard(1).preload === "metadata" && miCard(1).src === "blob:" && miCard(1).warn === "" &&
+    miCard(1).opts.join() === MI_PLAYS && miCard(1).help && miCard(1).note === "Placed nowhere yet. Insert tag writes [audio" + miNums[1] + "]." &&
+    miRecorded === true && /^.{4} · video · WEBM · 160 x 90 · \d+ KB · from screen\.webm$/.test(miCard(2).meta) && miCard(2).player === "VIDEO" &&
+    miCard(2).warn === "" && miCard(3).meta === miNums[3] + " · MIDI · MID · 1 KB · from song.mid" && miCard(3).tile === "MIDI" &&
+    miCard(3).player === "A:song.mid" && miCard(3).opts.join() === "Display separately,Borderless,Frame" && !miCard(3).help &&
+    miCard(4).meta === miNums[4] + " · audio · MP4 · 1 KB · from mystery.mp4" && miCard(4).warn === MI_NOPLAY &&
+    mi3.cards.every((c) => c.btns.join() === "Insert tag,Remove"),
+    JSON.stringify(mi3.cards).slice(0, 1500));
+  check("composer: a file the blog does not take is refused in the drop with both lists, and the other files are taken",
+    JSON.stringify(mi3.errs) === JSON.stringify(['notes.txt: "notes.txt" is not a file the blog takes. It takes JPG, PNG, WebP and GIF photos, ' +
+      "and .mp4, .webm, .weba, .mp3, .wav, .ogg, .mid or .midi files."]),
+    JSON.stringify(mi3.errs));
+
+  // MI4. the tone's placements: the options wait for the next Insert tag,
+  // a second placement brings the chooser, an edit changes the chosen one
+  // alone, a body changed under the card changes nothing, and Remove
+  // placement takes out one placement
+  const miT = miNums[1];
+  const mi4 = await evaluate(`(function () {
+    var card = document.querySelector('.bc-panel .bc-card[data-num="${miT}"]');
+    var body = document.querySelector('.bc-write textarea');
+    var tab = document.querySelector('.bc-tab[data-tab="images"]');
+    if (!card || !body || !tab) return null;
+    try {
+      var opt = function (label) { return [...card.querySelectorAll('.bc-opt')].find(function (o) { return o.textContent.trim().indexOf(label) === 0; }); };
+      var box = function (label) { return opt(label).querySelector('input'); };
+      var pick = function (label) { return opt(label).querySelector('select'); };
+      var btn = function (label) { return [...card.querySelectorAll('.bc-card__btns button')].find(function (b) { return b.textContent === label; }) || { click: function () {} }; };
+      var note = function () { return card.querySelector('.bc-card__note').textContent; };
+      var said = function () { return document.querySelector('.bc-status').textContent; };
+      var btns = function () { return [...card.querySelectorAll('.bc-card__btns button')].map(function (b) { return b.textContent; }); };
+      var place = card.querySelector('.bc-place');
+      var cap = card.querySelector('.bc-card__mid input[type=text]');
+      var out = {};
+      body.value = 'Intro.\\n\\n'; body.selectionStart = body.selectionEnd = body.value.length;
+      tab.click();
+      box('Display separately').click();
+      pick('Sound').value = 'muted'; pick('Sound').dispatchEvent(new Event('change'));
+      out.pending = note();
+      btn('Insert tag').click();
+      out.one = body.value; out.oneSaid = said();
+      body.value += '\\n\\n'; body.selectionStart = body.selectionEnd = body.value.length;
+      tab.click();
+      out.placed = note();
+      btn('Insert tag').click();
+      out.two = body.value;
+      body.selectionStart = body.selectionEnd = body.value.length - 2;
+      tab.click();
+      out.chooser = { hidden: place.hidden, options: [...place.options].map(function (o) { return o.textContent; }), value: place.value };
+      out.btns = btns();
+      box('Loop').click();
+      cap.dispatchEvent(new Event('focus')); cap.value = 'Second one'; cap.dispatchEvent(new Event('input', { bubbles: true }));
+      out.edited = body.value; out.editNote = note();
+      place.value = '0'; place.dispatchEvent(new Event('change'));
+      out.first = { alone: box('Display separately').checked, sound: pick('Sound').value, loop: box('Loop').checked, cap: cap.value, note: note() };
+      body.value = body.value.replace('[nocarousel muted audio${miT}]', '[nocarousel audio${miT}]');
+      out.changed = body.value;
+      box('Loop').click();
+      out.stale = { body: body.value, said: said() };
+      place.value = '1'; place.dispatchEvent(new Event('change'));
+      btn('Remove placement').click();
+      out.removed = { body: body.value, said: said(), hidden: place.hidden, btns: btns() };
+      return out;
+    } catch (e) { return { error: e.message }; }
+  })()`);
+  const MI_STALE = "The body changed since this card was drawn, so nothing was changed. Choose the placement again.";
+  check("placements: options set before a file is placed go into its next Insert tag, and the tag after it is plain",
+    !!mi4 && mi4.pending === "Placed nowhere yet. Insert tag writes [nocarousel muted audio" + miT + "]." &&
+    mi4.one === "Intro.\n\n[nocarousel muted audio" + miT + "]" && mi4.oneSaid === "Tag for " + miT + " inserted at the cursor." &&
+    mi4.placed === "Line 3. On its own, outside any carousel." &&
+    mi4.two === "Intro.\n\n[nocarousel muted audio" + miT + "]\n\n[audio" + miT + "]",
+    JSON.stringify(mi4).slice(0, 900));
+  check("placements: a second placement brings the chooser on the placement the caret is in, and an option or a caption changes that placement alone",
+    !!mi4 && !!mi4.chooser && mi4.chooser.hidden === false &&
+    JSON.stringify(mi4.chooser.options) === '["Placement 1 of 2, line 3","Placement 2 of 2, line 5"]' && mi4.chooser.value === "1" &&
+    JSON.stringify(mi4.btns) === '["Insert tag","Remove","Remove placement"]' &&
+    mi4.edited === "Intro.\n\n[nocarousel muted audio" + miT + "]\n\n[loop audio" + miT + ",Second one]" &&
+    mi4.editNote === "Line 5. A carousel of one. Its frame follows its pictures." &&
+    JSON.stringify(mi4.first) === JSON.stringify({ alone: true, sound: "muted", loop: false, cap: "", note: "Line 3. On its own, outside any carousel." }),
+    JSON.stringify(mi4 && { chooser: mi4.chooser, btns: mi4.btns, edited: mi4.edited, note: mi4.editNote, first: mi4.first }).slice(0, 900));
+  check("placements: a placement whose tag changed under the card changes nothing and says so, and Remove placement takes out the chosen one and keeps the card",
+    !!mi4 && !!mi4.stale && mi4.stale.body === mi4.changed && mi4.stale.said === MI_STALE &&
+    mi4.changed === "Intro.\n\n[nocarousel audio" + miT + "]\n\n[loop audio" + miT + ",Second one]" && !!mi4.removed &&
+    mi4.removed.body === "Intro.\n\n[nocarousel audio" + miT + "]\n\n" &&
+    mi4.removed.said === "One placement of audio" + miT + " removed. Its other placements stay." &&
+    mi4.removed.hidden === true && JSON.stringify(mi4.removed.btns) === '["Insert tag","Remove"]',
+    JSON.stringify(mi4 && { changed: mi4.changed, stale: mi4.stale, removed: mi4.removed }).slice(0, 900));
+
+  // MI5. the preview plays each held file from its blob, the body keeps
+  // its paths, a view out of sight stops its players, and a view drawn
+  // again lets its old players go
+  const miBody = "Media.\n\n[img" + miNums[0] + ",Still]\n\n[audio" + miNums[1] + ",Tone]\n\n[video" + miNums[2] + ",Screen]\n\n[midi" +
+    miNums[3] + ",Song]\n\n[audio" + miNums[4] + ",Mystery]\n\n[audio" + miNums[5] + ",Late]";
+  await evaluate(`(function () { var body = document.querySelector('.bc-write textarea'); if (!body) return false;
+    body.value = ${JSON.stringify(miBody)}; body.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await waitFor(`document.querySelectorAll('.bc-preview .bs-post__body figure.bp-media').length === 5`, 8000);
+  const mi5 = await evaluate(`(function () { var root = document.querySelector('.bc-preview'); if (!root) return null;
+    return { figs: [...root.querySelectorAll('figure.bp-media')].map(function (f) { var s = f.querySelector('source'), a = f.querySelector('a.bp-media__file');
+        return f.getAttribute('data-kind') + ' ' + (s ? s.getAttribute('src').slice(0, 5) : '-') + ' ' +
+          (a ? a.getAttribute('href').slice(0, 5) + ' ' + a.getAttribute('download') : '-'); }),
+      imgs: [...root.querySelectorAll('.bs-post__body img.gallery__img, .bs-post__body img.bp-media__photo')]
+        .map(function (i) { return (i.getAttribute('src') || '').slice(0, 5); }),
+      body: document.querySelector('.bc-write textarea').value.indexOf('blob:') }; })()`);
+  /* a video, muted: a browser plays one with no gesture, and a sound it does not */
+  const mi5play = await evaluate(`(function () { var a = document.querySelector('.bc-preview figure.bp-media[data-kind="video"] video');
+    if (!a) return 'no player'; a.muted = true; window.__miPlayer = a;
+    return a.play().then(function () { return a.paused ? 'paused' : 'playing'; }, function (e) { return 'refused: ' + e.message; }); })()`,
+    { awaitPromise: true });
+  await evaluate(miClick(".bc-tab", "Write"));
+  const mi5stop = await evaluate(`window.__miPlayer ? window.__miPlayer.paused : null`);
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await waitFor(`document.querySelectorAll('.bc-preview .bs-post__body figure.bp-media').length === 5`, 8000);
+  const mi5again = await evaluate(`(function () { var gone = window.__miPlayer;
+    window.__miPlayer = document.querySelector('.bc-preview figure.bp-media[data-kind="video"] video');
+    var b = document.querySelector('.bc-pvagain'); if (b) b.click();
+    return { gone: !!gone && !gone.isConnected && !gone.querySelector('source').hasAttribute('src'), pressed: !!b }; })()`);
+  await sleep(300);
+  const mi5fresh = await evaluate(`(function () { var old = window.__miPlayer;
+    var now = document.querySelector('.bc-preview figure.bp-media[data-kind="video"] source');
+    return { old: !!old && !old.isConnected && !old.querySelector('source').hasAttribute('src') && !old.hasAttribute('src'),
+      now: now ? now.getAttribute('src').slice(0, 5) : '' }; })()`);
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="mobile"]'); if (b) b.click(); return !!b; })()`);
+  const mi5phone = await waitFor(`(function () { var f = document.querySelector('.bc-phone__screen'); var d = f && f.contentDocument;
+    if (!d || d.querySelectorAll('figure.bp-media').length !== 5) return null;
+    return { srcs: [...d.querySelectorAll('figure.bp-media source')].map(function (s) { return s.getAttribute('src').slice(0, 5); }),
+      links: [...d.querySelectorAll('figure.bp-media a.bp-media__file')].map(function (a) { return a.getAttribute('href').slice(0, 5); }),
+      scoped: [...d.querySelectorAll('script')].some(function (s) { return /viewerScope/.test(s.textContent); }) }; })()`, 10000);
+  const mi5phoneStop = await evaluate(`(function () { var f = document.querySelector('.bc-phone__screen'); var d = f && f.contentDocument;
+    var a = d && d.querySelector('video'); if (!a) return 'no player'; a.muted = true;
+    return a.play().then(function () { var t = [...document.querySelectorAll('.bc-tab')].find(function (x) { return x.textContent === 'Write'; });
+      if (t) t.click(); return a.paused; }, function (e) { return 'refused: ' + e.message; }); })()`, { awaitPromise: true });
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await sleep(300);
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="desktop"]'); if (b) b.click(); return !!b; })()`);
+  await sleep(300);
+  check("preview: every held file plays from its blob and downloads under the name it came with, the photo shows from its blob, and the body keeps its tags",
+    !!mi5 && JSON.stringify(mi5.figs) === JSON.stringify(["audio blob: blob: tone.wav", "video blob: blob: screen.webm", "midi - blob: song.mid",
+      "audio blob: blob: mystery.mp4", "audio blob: blob: late.wav"]) && mi5.imgs.length > 0 && mi5.imgs.every((s) => s === "blob:") &&
+    mi5.body === -1,
+    JSON.stringify(mi5));
+  check("preview: a player stops when its view goes out of sight, on the page and in the phone, and a view drawn again lets its old players go",
+    mi5play === "playing" && mi5stop === true && !!mi5again && mi5again.gone && mi5again.pressed && !!mi5fresh && mi5fresh.old &&
+    mi5fresh.now === "blob:" && !!mi5phone && mi5phone.srcs.join() === "blob:,blob:,blob:,blob:" && mi5phone.links.length === 5 &&
+    mi5phone.links.every((l) => l === "blob:") && mi5phone.scoped && mi5phoneStop === true,
+    JSON.stringify({ play: mi5play, stop: mi5stop, again: mi5again, fresh: mi5fresh, phone: mi5phone, phoneStop: mi5phoneStop }));
+
+  // MI6. a draft keeps the words and never the files, and names the
+  // files to add again
+  const mi6keep = await evaluate(`localStorage.getItem('amh-blog-draft')`);
+  await evaluate(miClick(".bc-tab", "Write"));
+  await evaluate(miClick(".bc-btns .ced-btn", "Save Draft"));
+  const mi6saved = await evaluate(`(document.querySelector('.bc-status') || {}).textContent || ''`);
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  await evaluate(miClick(".bc-btns .ced-btn", "Restore Draft"));
+  await sleep(300);
+  const mi6 = await evaluate(`({ said: (document.querySelector('.bc-status') || {}).textContent || '',
+    body: (document.querySelector('.bc-write textarea') || {}).value, cards: document.querySelectorAll('.bc-panel .bc-card').length })`);
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  await evaluate(mi6keep === null ? `localStorage.removeItem('amh-blog-draft'); true`
+    : `localStorage.setItem('amh-blog-draft', ${JSON.stringify(mi6keep)}); true`);
+  check("drafts: a draft says it keeps the words only, and a restored draft names the files to add again on the Media view",
+    mi6saved === "Draft saved. Text only: the photos and the media files do not persist, so keep the files. One slot." &&
+    mi6.body === miBody && mi6.cards === 0 &&
+    mi6.said === "Draft restored. Add these files again on the Media view: img" + miNums[0] + ", audio" + miNums[1] + ", video" +
+      miNums[2] + ", midi" + miNums[3] + ", audio" + miNums[4] + ", audio" + miNums[5] + ".",
+    JSON.stringify({ saved: mi6saved, said: mi6.said, cards: mi6.cards }));
+
+  // MI7. a copy the browser's storage refuses: the file is held on this
+  // page only, and its card and the status line say so
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  await evaluate(`(function () { window.__miIdb = Object.getOwnPropertyDescriptor(window, 'indexedDB');
+    Object.defineProperty(window, 'indexedDB', { value: null, configurable: true, writable: true });
+    var M = window.__media, dt = new DataTransfer(); dt.items.add(M.file(M.wav(0.4), 'kept here.wav', 'audio/wav'));
+    var zone = document.querySelector('.bc-drop');
+    if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); return !!zone; })()`);
+  const mi7 = await waitFor(`(function () { var c = document.querySelector('.bc-panel .bc-card'); var w = c && c.querySelector('.bc-card__warn');
+    return w && !w.hidden ? { num: c.getAttribute('data-num'), warn: w.textContent, said: document.querySelector('.bc-status').textContent } : null; })()`, 15000);
+  await evaluate(`(function () { if (window.__miIdb) Object.defineProperty(window, 'indexedDB', window.__miIdb); else delete window.indexedDB;
+    return !!window.indexedDB; })()`);
+  const MI_LOCAL = "audio" + miNums[0] + " is held on this page only: the browser's storage refused a copy. Publish it before you leave or reload this page.";
+  check("drafts: a file the browser's storage refuses to keep is held on this page only, and its card and the status line say so",
+    !!mi7 && mi7.num === miNums[0] && mi7.warn === MI_LOCAL && mi7.said === MI_LOCAL,
+    JSON.stringify(mi7));
+
+  // MI8. the bundle's size: refused before a byte of a file is read, and
+  // the built bundle checked again, text and all, before a byte is written
+  const miMax = await evaluate(`AMH.publish.BUNDLE_MAX_MB`);
+  /* the capture replaces every link's click, and the preview checks after
+     this block click links on this same page, so the real one comes back */
+  await evaluate(`window.__miLinkClick = HTMLAnchorElement.prototype.click; true`);
+  await evaluate(ZIP_CAPTURE);
+  await evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+    t.value = 'A file for a small bundle.\\n\\n[audio${miNums[0]},Kept here]'; t.dispatchEvent(new Event('input', { bubbles: true }));
+    AMH.publish.BUNDLE_MAX_MB = 0.004; return true; })()`);
+  await evaluate(miClick(".bc-btns .ced-btn", "Publish"));
+  await sleep(500);
+  const mi8a = await evaluate(`({ said: (document.querySelector('.bc-status') || {}).textContent || '', wizard: !!document.querySelector('.bc-wizard') })`);
+  await evaluate(`AMH.publish.BUNDLE_MAX_MB = 0.01; true`);
+  const mi8step = await pressPublish();
+  const mi8b = await waitFor(`(function () { var w = document.querySelector('.bc-wizard'); if (!w || w.getAttribute('data-step') !== 'failed') return null;
+    return { head: w.querySelector('.ced-modal__head').textContent, body: w.querySelector('.bc-wiz__body').textContent,
+      btns: [...w.querySelectorAll('.ced-modal__btns button')].map(function (b) { return b.textContent; }) }; })()`, 20000);
+  const mi8zip = await evaluate(`window.__zipB64`);
+  await evaluate(`HTMLAnchorElement.prototype.click = window.__miLinkClick; true`);
+  await evaluate(miClick(".bc-wizard .ced-modal__btns button", "Back to the post"));
+  await sleep(700);
+  const mi8back = await evaluate(`({ cards: document.querySelectorAll('.bc-panel .bc-card').length,
+    body: (document.querySelector('.bc-write textarea') || {}).value || '' })`);
+  await evaluate(`AMH.publish.BUNDLE_MAX_MB = ${Number(miMax) || 256}; true`);
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  check("bundle size: a post whose new files are over the bundle's limit is refused before a byte is read, with the post as it was",
+    mi8a.said === "Not published. The new files are 6 KB, and a bundle that carries a media file can be 0.004 MB at most. " +
+      "Place some of them in the next post, and publish this one with the rest." && mi8a.wizard === false && miMax === 256,
+    JSON.stringify({ a: mi8a, max: miMax }));
+  check("bundle size: a built bundle over the limit, text and all, fails before a byte is written or downloaded, and the composer keeps the post",
+    mi8step !== "timeout" && !!mi8b && /Publish failed/.test(mi8b.head) &&
+    /^This bundle is \d+ KB, and a bundle that carries a media file can be 0\.01 MB at most\. Place some of the files in the next post, and publish this one with the rest\./.test(mi8b.body) &&
+    /Nothing was written\./.test(mi8b.body) && (mi8b.body.match(/Nothing was written/g) || []).length === 1 &&
+    JSON.stringify(mi8b.btns) === '["Back to the post"]' && mi8zip === null && mi8back.cards === 1 &&
+    mi8back.body === "A file for a small bundle.\n\n[audio" + miNums[0] + ",Kept here]",
+    JSON.stringify({ step: mi8step, b: mi8b, zip: mi8zip !== null, back: mi8back }).slice(0, 700));
+
+  // MI9. what a classic zip cannot hold, named before a byte is written
+  const mi9 = await evaluate(`(function () {
+    var Z = AMH.tool.zipCheck, many = [];
+    for (var i = 0; i < 65535; i++) many.push({ name: "f" + i, bytes: { length: 0 } });
+    return { ok: Z([{ name: "a.txt", bytes: new Uint8Array(3) }]), many: Z(many),
+      big: Z([{ name: "big.mp4", bytes: { length: 4294967295 } }]),
+      long: Z([{ name: new Array(65537).join("a"), bytes: { length: 1 } }]),
+      whole: Z([{ name: "a.mp4", bytes: { length: 2147483648 } }, { name: "b.mp4", bytes: { length: 2147483648 } }]) };
+  })()`);
+  check("zip: a bundle a classic zip cannot hold is named before a byte is written: too many files, a file too large, a name too long, or too much in all",
+    mi9.ok === "" && mi9.many === "The bundle has 65535 files, and a zip holds fewer than 65535." &&
+    mi9.big === "big.mp4 is too large for a zip." && mi9.long === "The name " + "a".repeat(60) + "... is too long for a zip." &&
+    mi9.whole === "The bundle is too large for a zip.",
+    JSON.stringify(mi9).slice(0, 400));
+
+  // ============ PL. PLAYERS: SLIDES, FRAMES, ONE OWNER AND THE SCREEN ============
+  // A carousel's slides are its photos and its players, in the order the
+  // post writes them, and only the slide on screen takes input. A player
+  // keeps its own clicks and keys. A photo of its own is a step in its
+  // post's viewer, and a player never is. One player plays at a time: a
+  // Play takes the page, an autoplay asks once and only while nothing
+  // plays, and a pause the reader made is theirs. A player that nobody
+  // can see stops where it is, and nothing resumes by itself. The posts
+  // here are the suite's own, put at the top of the stream and taken out
+  // at the end.
+  const PL_IMG = (num) => ({ num: num, date: "260918", type: "png", ow: 800, oh: 600, bytes: 900 });
+  const PL_MAP = {
+    "0301": PL_IMG("0301"), "0302": PL_IMG("0302"), "0303": PL_IMG("0303"), "0304": PL_IMG("0304"),
+    "0305": PL_IMG("0305"), "0306": PL_IMG("0306"), "0307": PL_IMG("0307"), "0308": PL_IMG("0308"), "0309": PL_IMG("0309"),
+    "0311": { base: "blog/260918_media0311", num: "0311", date: "260918", kind: "video", type: "webm", mime: "video/webm",
+              from: "clip.webm", ow: 160, oh: 90, bytes: 5000 },
+    "0312": { base: "blog/260918_media0312", num: "0312", date: "260918", kind: "audio", type: "wav", mime: "audio/wav",
+              from: "tone.wav", ow: 0, oh: 0, bytes: 48044 },
+    "0313": { base: "blog/260918_media0313", num: "0313", date: "260918", kind: "midi", type: "mid", mime: "audio/midi",
+              from: "song.mid", ow: 0, oh: 0, bytes: 34 },
+    "0314": { base: "blog/260918_media0314", num: "0314", date: "260918", kind: "video", type: "webm", mime: "video/webm",
+              from: "tall.webm", ow: 1080, oh: 1920, bytes: 5000 }
+  };
+  /* a post of the suite's own at the top of the stream, its players on
+     files the page made: a recording for a video and a WAV for a sound.
+     build false leaves it unbuilt, for a check that must reach a player
+     before the runtime does. */
+  const PL_POST = (id, source, build = true) => `(function () {
+    var stream = document.getElementById('blogStream');
+    if (!stream || !window.__plUrls) return false;
+    var a = document.createElement('article');
+    a.className = 'bs-post'; a.id = 's${id}'; a.setAttribute('data-id', '${id}'); a.setAttribute('data-date', '260918');
+    a.innerHTML = '<div class="bs-post__body"><p class="pl-pad">The suite reads this post.</p>' +
+      AMH.blog.renderBody(${JSON.stringify(source)}, '260918', '', ${JSON.stringify(PL_MAP)}) + '</div>';
+    [].forEach.call(a.querySelectorAll('figure.bp-media source'), function (s) {
+      s.setAttribute('src', s.closest('figure').getAttribute('data-kind') === 'video' ? window.__plUrls.video : window.__plUrls.audio);
+    });
+    stream.insertBefore(a, stream.firstChild);
+    if (${build ? "true" : "false"}) AMH.work.buildGalleries();
+    return true;
+  })()`;
+  const PL_SEE = (sel) => `(function () { var el = document.querySelector(${JSON.stringify(sel)});
+    if (el) el.scrollIntoView({ block: 'center' }); return !!el; })()`;
+  const PL_FIG = (sel) => `(function () { var f = document.querySelector(${JSON.stringify(sel)}); if (!f) return null;
+    var el = f.querySelector('video, audio'), play = f.querySelector('.bp-play'), pause = f.querySelector('.bp-pause'),
+      bar = f.querySelector('.bp-audio'), say = f.querySelector('.bp-media__say');
+    return { state: f.getAttribute('data-state'), paused: el ? el.paused : null, muted: el ? el.muted : null,
+      loop: el ? el.loop : null, controls: el ? el.controls : null, inline: el ? el.hasAttribute('playsinline') : null,
+      time: el ? Math.round(el.currentTime * 10) / 10 : null, player: f.getAttribute('data-player'),
+      play: play ? [play.hidden, play.getAttribute('aria-label'), getComputedStyle(play.querySelector('.bp-play__say')).display] : null,
+      pause: pause ? [pause.hidden, pause.getAttribute('aria-label')] : null,
+      bar: bar ? [bar.querySelector('.bp-audio__btn').getAttribute('aria-label'), bar.querySelector('.bp-audio__name').textContent] : null,
+      say: say ? (say.hidden ? '' : say.textContent) : null, ratio: f.style.getPropertyValue('--bp-ratio'),
+      owner: !!el && AMH.work.mediaOwner() === el }; })()`;
+  const plPlay = (sel) => evaluate(`(function () { var el = document.querySelector(${JSON.stringify(sel)}); if (!el) return 'none';
+    return el.play().then(function () { return 'playing'; }, function (e) { return 'refused: ' + e.name; }); })()`, { awaitPromise: true });
+
+  /* a desktop window, so a figure and the one after it fit on screen */
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  await evaluate(`(function () {
+    window.__plUrls = {};
+    return window.__media.record("video", "video/webm", 1500).then(function (vid) {
+      window.__plUrls.video = vid ? URL.createObjectURL(vid) : "";
+      window.__plUrls.audio = URL.createObjectURL(new Blob([new Uint8Array(window.__media.wav(3))], { type: "audio/wav" }));
+      return !!vid;
+    });
+  })()`, { awaitPromise: true });
+
+  // PL1. the slides, their labels, the frames and the build that runs twice
+  await evaluate(PL_POST("9301", "[img0301,One|Photo one]\n[video0311,Clip|A clip]\n[audio0312,Tone]\n[midi0313,Song]\n[img0302,Two|Photo two]\n\n" +
+    "[portrait1:1 img0303]\n[img0304]\n\n[img0305]\n[img0306]\n\n[video0314]\n[audio0312]"));
+  const pl1 = await evaluate(`(function () {
+    var a = document.getElementById('s9301'); if (!a) return null;
+    var g = a.querySelectorAll('.gallery');
+    var slides = function (gal) { return [].map.call(gal.querySelector('.gallery__stage').children, function (s) {
+      return (s.classList.contains('gallery__img') ? 'img' : s.getAttribute('data-kind')) + (s.hasAttribute('inert') ? '*' : ''); }); };
+    var said = function (gal, sel) { return [].map.call(gal.querySelectorAll(sel), function (b) {
+      return b.getAttribute('aria-label') + (b.getAttribute('data-kind') ? ':' + b.getAttribute('data-kind') : '') + (b.querySelector('img') ? ':img' : ''); }); };
+    var ratio = function (gal) { return gal.querySelector('.gallery__holder').style.getPropertyValue('--gallery-ratio'); };
+    AMH.work.buildGalleries(); AMH.work.buildGalleries();
+    return { n: g.length, s1: slides(g[0]), nav1: said(g[0], '.gallery__nav--bar'), dots1: said(g[0], '.gallery__dot'),
+      nav3: said(g[2], '.gallery__nav--bar'), dots3: said(g[2], '.gallery__dot'),
+      square: [/gallery--square/.test(g[1].className), ratio(g[1])], tall: [/gallery--portrait/.test(g[3].className), ratio(g[3])],
+      hidden: [].map.call(g[0].querySelectorAll('.gallery__media'), function (s) { return s.getAttribute('aria-hidden'); }),
+      holders: a.querySelectorAll('.gallery__holder').length, plays: a.querySelectorAll('.bp-play').length,
+      boxes: a.querySelectorAll('.bp-media__box').length, players: a.querySelectorAll('[data-player]').length,
+      cap: (g[0].querySelector('.gallery__caption-text') || {}).textContent };
+  })()`);
+  check("players: a carousel's slides are its photos and its players in the order written, and only the slide on screen takes input",
+    !!pl1 && pl1.n === 4 && pl1.s1.join() === "img,video*,audio*,midi*,img" && pl1.hidden.join() === "true,true,true" &&
+    pl1.cap === "One",
+    JSON.stringify(pl1).slice(0, 700));
+  check("players: a carousel with a player counts items, with no picture on a player's dot, and a carousel of photos still counts images",
+    !!pl1 && pl1.nav1.join() === "Previous item,Next item" &&
+    pl1.dots1.join() === "Show item 1 of 5:img,Show item 2 of 5:video,Show item 3 of 5:audio,Show item 4 of 5:midi,Show item 5 of 5:img" &&
+    pl1.nav3.join() === "Previous image,Next image" && pl1.dots3.join() === "Show image 1 of 2:img,Show image 2 of 2:img",
+    JSON.stringify(pl1 && { nav1: pl1.nav1, dots1: pl1.dots1, nav3: pl1.nav3, dots3: pl1.dots3 }));
+  check("players: portrait1:1 is a square frame of exactly 1, a video's size shapes a frame as a photo's does, and a second build adds nothing",
+    !!pl1 && pl1.square[0] === true && pl1.square[1] === "1" && pl1.tall[0] === true && pl1.tall[1] === "0.5625" &&
+    pl1.holders === 4 && pl1.plays === 2 && pl1.boxes === 4 && pl1.players === 4,
+    JSON.stringify(pl1 && { square: pl1.square, tall: pl1.tall, holders: pl1.holders, plays: pl1.plays, boxes: pl1.boxes, players: pl1.players }));
+  const pl1f = await evaluate(`(function () {
+    var F = AMH.work.frameShape;
+    return [F([{ w: 800, h: 600 }], 'portrait1:1'), F([{ w: 600, h: 900 }], 'portrait1:1'), F([], 'portrait1:1'),
+      F([{ w: 0, h: 0 }, { w: 1080, h: 1920 }], '')].map(function (s) { return s.orientation + ' ' + s.ratio; });
+  })()`);
+  check("players: frameShape takes portrait1:1 as a square past every limit, and a slide with no size shapes nothing",
+    JSON.stringify(pl1f) === JSON.stringify(["square 1", "square 1", "square 1", "portrait 0.5625"]),
+    JSON.stringify(pl1f));
+
+  // PL2. a player keeps its own input, and the viewer shows photos only
+  const pl2 = await evaluate(`(function () {
+    var g = document.querySelector('#s9301 .gallery'); if (!g) return null;
+    var holder = g.querySelector('.gallery__holder');
+    var active = function () { var s = g.querySelector('.gallery__stage > .is-active');
+      return s.classList.contains('gallery__img') ? 'img' : s.getAttribute('data-kind'); };
+    g.querySelector('.gallery__nav--next').click();
+    var out = { onVideo: active(), media: holder.classList.contains('is-media'), inert: g.querySelector('.gallery__media[data-kind="video"]').hasAttribute('inert') };
+    var video = g.querySelector('.gallery__media[data-kind="video"] video');
+    holder.click();
+    out.viewer1 = AMH.work.lightbox.isOpen();
+    video.click();
+    out.viewer2 = AMH.work.lightbox.isOpen();
+    video.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    out.afterPlayerKey = active();
+    holder.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    out.afterHolderKey = active();
+    g.querySelectorAll('.gallery__dot')[0].click();
+    return out;
+  })()`);
+  check("players: on a player's slide a click opens no viewer, a key inside the player stays with it, and a key on the carousel turns it",
+    !!pl2 && pl2.onVideo === "video" && pl2.media && pl2.inert === false && pl2.viewer1 === false && pl2.viewer2 === false &&
+    pl2.afterPlayerKey === "video" && pl2.afterHolderKey === "audio",
+    JSON.stringify(pl2));
+  await evaluate(PL_POST("9302", "[img0307,A]\n\n[nocarousel img0308,B|Photo B]\n\n[video0311]\n\n[img0309,C]"));
+  const pl2b = await evaluate(`(function () {
+    var a = document.getElementById('s9302'); if (!a) return null;
+    var photo = a.querySelector('img.bp-media__photo');
+    var src = function () { return (document.querySelector('.lightbox__img--active') || { getAttribute: function () { return ''; } }).getAttribute('src') || ''; };
+    var out = { role: photo.getAttribute('role'), tab: photo.getAttribute('tabindex'), label: photo.getAttribute('aria-label') };
+    photo.click();
+    return new Promise(function (res) { setTimeout(function () {
+      out.open = AMH.work.lightbox.isOpen(); out.first = src();
+      document.querySelector('.lightbox__nav--next').click();
+      setTimeout(function () {
+        out.next = src();
+        document.querySelector('.lightbox__nav--next').click();
+        setTimeout(function () {
+          out.wrap = src();
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          setTimeout(function () { out.closed = !AMH.work.lightbox.isOpen(); res(out); }, 400);
+        }, 300);
+      }, 300);
+    }, 500); });
+  })()`, { awaitPromise: true });
+  check("players: a photo of its own opens its post's viewer where the post shows it, among the carousels' photos, and a player is never a step",
+    !!pl2b && pl2b.role === "button" && pl2b.tab === "0" && pl2b.label === "Photo B (enlarge)" && pl2b.open &&
+    /260918_img0308\.jpg$/.test(pl2b.first) && /260918_img0309\.jpg$/.test(pl2b.next) && /260918_img0307\.jpg$/.test(pl2b.wrap) && pl2b.closed,
+    JSON.stringify(pl2b));
+
+  // PL3. a player as it arrives: paused, with sound, with its controls,
+  // or with the runtime's own actions for nocontrols
+  await evaluate(PL_POST("9303", "[nocarousel video0311,Clip|A clip]\n\n[nocarousel muted loop video0311,Quiet]\n\n" +
+    "[nocarousel unmuted audio0312,Loud]\n\n[nocarousel nocontrols video0311,Bare|A bare clip]\n\n" +
+    "[nocarousel nocontrols audio0312,Bare tone]\n\n[nocarousel midi0313,Song]"));
+  await evaluate(`(function () { var figs = document.querySelectorAll('#s9303 figure.bp-media');
+    [].forEach.call(figs, function (f, i) { f.id = 'pl3f' + i; }); return figs.length; })()`);
+  const pl3f = [];
+  for (let i = 0; i < 6; i++) pl3f.push(await evaluate(PL_FIG("#pl3f" + i)));
+  const pl3v = pl3f[0] || {}, pl3q = pl3f[1] || {}, pl3a = pl3f[2] || {}, pl3b = pl3f[3] || {}, pl3s = pl3f[4] || {}, pl3m = pl3f[5] || {};
+  check("players: a video arrives paused, with sound, with its controls, playing inline, with a Play button named for it and its own shape",
+    pl3v.state === "paused" && pl3v.paused === true && pl3v.muted === false && pl3v.loop === false && pl3v.controls === true &&
+    pl3v.inline === true && JSON.stringify(pl3v.play) === JSON.stringify([false, "Play A clip", "none"]) && pl3v.pause === null &&
+    pl3v.say === "" && Math.abs(parseFloat(pl3v.ratio) - 160 / 90) < 1e-9,
+    JSON.stringify(pl3v));
+  check("players: muted and loop are the player's own, unmuted keeps the sound on, and a sound with its controls has no Play button over it",
+    pl3q.muted === true && pl3q.loop === true && pl3q.play && pl3q.play[1] === "Play Quiet" &&
+    pl3a.muted === false && pl3a.controls === true && pl3a.play === null && pl3a.bar === null,
+    JSON.stringify({ quiet: pl3q, loud: pl3a }));
+  check("players: with nocontrols a video has Play and a Pause button for while it plays, a sound is a named Play bar, and the browser's controls go only then",
+    pl3b.controls === false && JSON.stringify(pl3b.play) === JSON.stringify([false, "Play A bare clip", "none"]) &&
+    JSON.stringify(pl3b.pause) === JSON.stringify([true, "Pause A bare clip"]) &&
+    pl3s.controls === false && JSON.stringify(pl3s.bar) === JSON.stringify(["Play Bare tone", "Bare tone"]) &&
+    pl3m.player === null && pl3m.paused === null,
+    JSON.stringify({ bare: pl3b, bareTone: pl3s, midi: pl3m }));
+
+  // PL4. one owner. A real click first: a play with sound needs the
+  // reader's gesture, and a click from script is not one.
+  await evaluate(PL_POST("9304", "[nocarousel audio0312,Tone A]\n\n[nocarousel audio0312,Tone B]\n\n[nocarousel video0311,Clip C]"));
+  await evaluate(PL_SEE("#s9304 .pl-pad"));
+  await sleep(300);
+  const plPad = await evaluate(`(function () { var r = document.querySelector('#s9304 .pl-pad').getBoundingClientRect();
+    return { x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) }; })()`);
+  await realClick(plPad.x, plPad.y);
+  await evaluate(`(function () { var f = document.querySelectorAll('#s9304 figure.bp-media');
+    f[0].id = 'pl4a'; f[1].id = 'pl4b'; f[2].id = 'pl4c'; return true; })()`);
+  const pl4aPlay = await plPlay("#pl4a audio");
+  await sleep(400);
+  const pl4a1 = await evaluate(PL_FIG("#pl4a"));
+  const pl4bPlay = await plPlay("#pl4b audio");
+  await sleep(500);
+  const pl4a2 = await evaluate(PL_FIG("#pl4a"));
+  const pl4b2 = await evaluate(PL_FIG("#pl4b"));
+  await evaluate(`document.querySelector('#pl4b audio').pause(); AMH.work.mediaSync(); true`);
+  await sleep(400);
+  const pl4b3 = await evaluate(PL_FIG("#pl4b"));
+  check("players: a Play takes the page, the player before it pauses where it was, and a pause the reader makes leaves the page with no owner",
+    pl4aPlay === "playing" && pl4a1.owner && pl4a1.state === "playing" && pl4bPlay === "playing" &&
+    pl4a2.paused === true && pl4a2.state === "paused" && pl4a2.time > 0 && pl4b2.owner && pl4b2.state === "playing" &&
+    pl4b3.paused === true && pl4b3.state === "paused" && !pl4b3.owner && (await evaluate(`AMH.work.mediaOwner() === null`)),
+    JSON.stringify({ a: pl4aPlay, a1: pl4a1, b: pl4bPlay, a2: pl4a2, b2: pl4b2, b3: pl4b3 }).slice(0, 900));
+  // a request that answers after the runtime withdrew it starts nothing
+  const pl4c = await evaluate(`(function () {
+    var f = document.getElementById('pl4c'), el = f.querySelector('video'), real = HTMLMediaElement.prototype.play;
+    el.play = function () { var self = this; return new Promise(function (res, rej) {
+      setTimeout(function () { real.call(self).then(res, rej); }, 300); }); };
+    f.querySelector('.bp-play').click();
+    var asked = f.getAttribute('data-state');
+    AMH.work.mediaPause(f);
+    return new Promise(function (res) { setTimeout(function () {
+      delete el.play;
+      res({ asked: asked, paused: el.paused, owner: AMH.work.mediaOwner() === el, state: f.getAttribute('data-state') });
+    }, 900); });
+  })()`, { awaitPromise: true });
+  check("players: a play request the runtime withdrew cannot start its player when it answers late",
+    !!pl4c && pl4c.asked === "waiting" && pl4c.paused === true && pl4c.owner === false && pl4c.state !== "playing",
+    JSON.stringify(pl4c));
+
+  // PL5. autoplay: the first placement that asks and is on screen starts,
+  // once, and only while nothing plays; a refusal shows Play and keeps
+  // the sound asked for; a Play then starts it
+  await evaluate(PL_POST("9305", "[nocarousel muted autoplay video0311,Auto one]\n\n[nocarousel muted autoplay video0311,Auto two]"));
+  await evaluate(`(function () { var f = document.querySelectorAll('#s9305 figure.bp-media'); f[0].id = 'pl5a'; f[1].id = 'pl5b'; return true; })()`);
+  await evaluate(PL_SEE("#pl5a"));
+  const pl5a = await waitFor(`(function () { var s = ${PL_FIG("#pl5a")}; return s && s.state === 'playing' ? s : null; })()`, 8000);
+  const pl5b = await evaluate(PL_FIG("#pl5b"));
+  await evaluate(`document.querySelector('#pl5a video').pause(); true`);
+  await sleep(200);
+  await evaluate(PL_SEE("#pl5b"));
+  await evaluate(`AMH.work.mediaSync(); true`);
+  const pl5b2 = await waitFor(`(function () { var s = ${PL_FIG("#pl5b")}; return s && s.state === 'playing' ? s : null; })()`, 6000);
+  const pl5a2 = await evaluate(PL_FIG("#pl5a"));
+  await evaluate(`document.querySelector('#pl5b video').pause(); AMH.work.mediaSync(); true`);
+  await sleep(300);
+  const pl5a3 = await evaluate(PL_FIG("#pl5a"));
+  check("players: an autoplay starts once it is on screen, one at a time in the page's order, and never undoes a pause the reader made",
+    !!pl5a && pl5a.owner && pl5a.play && pl5a.play[0] === true && !!pl5b && pl5b.paused === true && pl5b.state === "paused" &&
+    !!pl5b2 && pl5b2.owner && pl5a2.paused === true && pl5a3.paused === true && pl5a3.state === "paused",
+    JSON.stringify({ a: pl5a, b: pl5b, b2: pl5b2, a2: pl5a2, a3: pl5a3 }).slice(0, 900));
+  await evaluate(PL_POST("9306", "[nocarousel unmuted autoplay video0311,Loud auto]", false));
+  await evaluate(`(function () { var f = document.querySelector('#s9306 figure.bp-media'); f.id = 'pl6';
+    var el = f.querySelector('video');
+    el.play = function () { return Promise.reject(new DOMException('play() is not allowed', 'NotAllowedError')); };
+    AMH.work.buildGalleries(); f.scrollIntoView({ block: 'center' }); return true; })()`);
+  const pl6 = await waitFor(`(function () { var s = ${PL_FIG("#pl6")}; return s && s.state === 'blocked' ? s : null; })()`, 8000);
+  await evaluate(`(function () { var el = document.querySelector('#pl6 video'); delete el.play;
+    document.querySelector('#pl6 .bp-play').click(); return true; })()`);
+  const pl6b = await waitFor(`(function () { var s = ${PL_FIG("#pl6")}; return s && s.state === 'playing' ? s : null; })()`, 6000);
+  check("players: an autoplay the browser refuses stays paused and says so, keeps the sound it asked for, and a Play starts it",
+    !!pl6 && pl6.paused === true && pl6.muted === false && pl6.play && pl6.play[0] === false && pl6.play[1] === "Play Loud auto" &&
+    pl6.play[2] !== "none" &&
+    pl6.say === "The browser did not start it by itself. Press Play." && !!pl6b && pl6b.owner && pl6b.muted === false,
+    JSON.stringify({ blocked: pl6, played: pl6b }).slice(0, 700));
+
+  // PL6. out of sight: a hidden post, a slide that leaves, and the viewer
+  // in front each stop a player where it is, and nothing resumes
+  const pl7 = await evaluate(`(function () {
+    var f = document.getElementById('pl6'), el = f.querySelector('video'), post = document.getElementById('s9306');
+    var before = el.currentTime;
+    post.hidden = true; AMH.work.mediaSync();
+    var out = { paused: el.paused, state: f.getAttribute('data-state'), kept: el.currentTime >= before && el.currentTime > 0 };
+    post.hidden = false; AMH.work.mediaSync();
+    return new Promise(function (res) { setTimeout(function () { out.still = el.paused; res(out); }, 600); });
+  })()`, { awaitPromise: true });
+  await evaluate(PL_SEE("#s9301 .gallery"));
+  await evaluate(`(function () { var g = document.querySelector('#s9301 .gallery'); g.querySelectorAll('.gallery__dot')[1].click(); return true; })()`);
+  const pl7play = await plPlay("#s9301 .gallery .gallery__media[data-kind='video'] video");
+  await sleep(300);
+  const pl7slide = await evaluate(`(function () { var g = document.querySelector('#s9301 .gallery'), v = g.querySelector('.gallery__media[data-kind="video"] video');
+    g.querySelector('.gallery__nav--next').click();
+    return { paused: v.paused, state: v.closest('figure').getAttribute('data-state'),
+      active: g.querySelector('.gallery__stage > .is-active').getAttribute('data-kind') }; })()`);
+  const pl7play2 = await plPlay("#s9301 .gallery .gallery__media[data-kind='audio'] audio");
+  await sleep(300);
+  const pl7view = await evaluate(`(function () { var a = document.querySelector('#s9301 .gallery .gallery__media[data-kind="audio"] audio');
+    var photoCarousel = document.querySelectorAll('#s9301 .gallery')[2];
+    photoCarousel.querySelector('.gallery__holder').click();
+    return new Promise(function (res) { setTimeout(function () {
+      var out = { open: AMH.work.lightbox.isOpen(), paused: a.paused };
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      setTimeout(function () { out.closed = !AMH.work.lightbox.isOpen(); out.still = a.paused; res(out); }, 600);
+    }, 500); });
+  })()`, { awaitPromise: true });
+  check("players: a player whose post is hidden stops where it is, a slide that leaves stops its player, the viewer in front stops the page's, and none resumes",
+    !!pl7 && pl7.paused === true && pl7.state === "paused" && pl7.kept && pl7.still === true &&
+    pl7play === "playing" && pl7slide.paused === true && pl7slide.state === "paused" && pl7slide.active === "audio" &&
+    pl7play2 === "playing" && pl7view.open && pl7view.paused === true && pl7view.closed && pl7view.still === true,
+    JSON.stringify({ hidden: pl7, slide: [pl7play, pl7slide], viewer: [pl7play2, pl7view] }));
+
+  // PL7. let go: a released post's players stop, own nothing and let go
+  // of their files, and a player the page left is let go at the next look
+  const pl8 = await evaluate(`(function () {
+    var post = document.getElementById('s9304'), el = post.querySelector('#pl4a audio');
+    return el.play().then(function () {
+      var owned = AMH.work.mediaOwner() === el;
+      AMH.work.mediaRelease(post);
+      return { owned: owned, paused: el.paused, owner: AMH.work.mediaOwner(), src: el.querySelector('source').hasAttribute('src') };
+    }, function (e) { return { error: e.name }; });
+  })()`, { awaitPromise: true });
+  check("players: a released part of the page stops its players, owns nothing, and lets go of their files",
+    !!pl8 && pl8.owned === true && pl8.paused === true && pl8.owner === null && pl8.src === false,
+    JSON.stringify(pl8));
+  await evaluate(`(function () { ['s9301', 's9302', 's9303', 's9304', 's9305', 's9306'].forEach(function (id) {
+    var a = document.getElementById(id); if (a) { AMH.work.mediaRelease(a); a.remove(); } });
+    AMH.work.mediaSync(); return AMH.work.mediaOwner() === null; })()`);
+
+  // PL7b. the Media box's player is one of the page's: its Play takes
+  // the page, and the box lets it go when it closes. The file is a real
+  // WAV in the served copy, because the box plays the site's own file.
+  const plWav = (seconds, rate = 8000) => {
+    const n = Math.floor(seconds * rate), data = n * 2, b = Buffer.alloc(44 + data);
+    b.write("RIFF", 0); b.writeUInt32LE(36 + data, 4); b.write("WAVE", 8); b.write("fmt ", 12); b.writeUInt32LE(16, 16);
+    b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 2, 28);
+    b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(data, 40);
+    for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / rate * 2 * Math.PI * 440) * 8000), 44 + i * 2);
+    return b;
+  };
+  mkdirSync(join(SERVE, "blog"), { recursive: true });
+  writeFileSync(join(SERVE, "blog", "260918_media0399.wav"), plWav(3));
+  await evaluate(`AMH.images.index.load().then(function () {
+    window.__plKeep = JSON.parse(JSON.stringify(AMH.images.index.get() || {}));
+    var rec = JSON.parse(JSON.stringify(window.__plKeep));
+    rec.images = (rec.images || []).concat([{ base: "blog/260918_media0399", num: "0399", date: "260918", kind: "audio", type: "wav",
+      mime: "audio/wav", from: "box tone.wav", ow: 0, oh: 0, bytes: 48044, added: "260918", used: [], words: {} }]);
+    AMH.images.index.set(rec); return true; })`, { awaitPromise: true });
+  await evaluate(`window.edit.images()`);
+  /* the box draws its rows again once its record is read, and a draw lets
+     go of every player in it, so the tile is opened after that */
+  await waitFor(`(function () { var b = document.querySelector('.ced-images'); var s = b && b.querySelector('.ced-modal__status');
+    return !!b && !!b.querySelector('.ced-image') && !!s && s.textContent !== 'Reading the record...'; })()`, 8000);
+  const pl10 = await evaluate(`(function () {
+    var li = [...document.querySelectorAll('.ced-images .ced-image')].find(function (l) {
+      return l.querySelector('.ced-image__name').textContent === 'audio0399'; });
+    var tile = li && li.querySelector('.ced-image__pic'); if (!tile) return { row: false };
+    var before = li.querySelectorAll('audio').length;
+    tile.click();
+    var el = li.querySelector('audio.ced-image__pic');
+    if (!el) return { row: true, opened: false };
+    return el.play().then(function () {
+      return { row: true, before: before, opened: true, owner: AMH.work.mediaOwner() === el, paused: el.paused };
+    }, function (e) { return { row: true, opened: true, refused: e.name }; });
+  })()`, { awaitPromise: true });
+  await evaluate(`(function () { var x = document.querySelector('.ced-images .ced-modal__x'); if (x) x.click(); return !!x; })()`);
+  await sleep(300);
+  const pl10b = await evaluate(`({ owner: AMH.work.mediaOwner(), box: !!document.querySelector('.ced-images') })`);
+  await evaluate(`AMH.images.index.set(window.__plKeep); true`);
+  check("players: the Media box loads no file until a tile is opened, its player then joins the page's one owner, and the box lets it go when it closes",
+    !!pl10 && pl10.row && pl10.before === 0 && pl10.opened && pl10.owner === true && pl10.paused === false &&
+    pl10b.owner === null && pl10b.box === false,
+    JSON.stringify({ open: pl10, closed: pl10b }));
+
+  // PL8. the composer's phone: its page waits for its host, then shares
+  // the host's one owner, and plays only while it is the phone on screen
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  await evaluate(`(function () { var M = window.__media;
+    return M.record("video", "video/webm", 1200).then(function (vid) {
+      var dt = new DataTransfer(); dt.items.add(new File([vid || new Blob([])], 'phone.webm', { type: 'video/webm' }));
+      var zone = document.querySelector('.bc-drop');
+      if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return !!vid; }); })()`, { awaitPromise: true });
+  await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 1`, 15000);
+  const pl9num = await evaluate(`document.querySelector('.bc-panel .bc-card').getAttribute('data-num')`);
+  await evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+    t.value = 'Phone.\\n\\n[nocarousel muted autoplay video${pl9num},On the phone]'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="mobile"]'); if (b) b.click(); return !!b; })()`);
+  const pl9 = await waitFor(`(function () { var f = document.querySelector('.bc-phone__screen'); var d = f && f.contentDocument;
+    var v = d && d.querySelector('figure.bp-media video');
+    if (!v || v.paused) return null;
+    return { host: f.getAttribute('data-media-host'), owner: AMH.work.mediaOwner() === v, state: v.closest('figure').getAttribute('data-state') }; })()`, 10000);
+  await evaluate(miClick(".bc-tab", "Write"));
+  const pl9b = await evaluate(`(function () { var f = document.querySelector('.bc-phone__screen'); var d = f && f.contentDocument;
+    var v = d && d.querySelector('figure.bp-media video');
+    return v ? { paused: v.paused, owner: AMH.work.mediaOwner() === v } : null; })()`);
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await sleep(400);
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="desktop"]'); if (b) b.click(); return !!b; })()`);
+  await sleep(400);
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  const pl9c = await evaluate(`({ owner: AMH.work.mediaOwner(), panel: !!document.querySelector('.bc-panel') })`);
+  check("players: the phone's page waits for its host, then plays as the host's one owner, stops when the phone leaves the screen, and the closed composer owns nothing",
+    !!pl9 && pl9.host === "wait" && pl9.owner === true && pl9.state === "playing" && !!pl9b && pl9b.paused === true &&
+    pl9b.owner === false && pl9c.owner === null && pl9c.panel === false,
+    JSON.stringify({ num: pl9num, playing: pl9, away: pl9b, closed: pl9c }));
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
 
   // ============ PV. THE PREVIEW AS A READER SEES IT ============
   // Desktop draws the post in the blog's own column. Mobile draws it in a
@@ -14086,7 +14928,398 @@ async function main() {
   await evaluate(`[...document.querySelectorAll(".bc-btns .ced-btn")].find(b => b.textContent === "Close")?.click()`);
   await sleep(400);
 
-  // ============ SD. THE IMAGES BOX, SUPER DELETE AND RESTORE ============
+  // ============ RF. REAL MEDIA FILES: WHAT A BROWSER DOES WITH THEM ============
+  // The suite's own media files, made once by tools/e2e/fixtures/media/make.py
+  // and checked here against their SHA-256. Each goes through intake and
+  // gets its kind, its type and its size from what it holds. A player
+  // really plays, pauses and seeks; the browser's own autoplay rule is met
+  // with no stub in the way; keys, touch and a pointer all reach the
+  // runtime's buttons; a player that leaves the screen stops, one in full
+  // screen does not; and the frames are measured at a desktop and a phone
+  // width. The posts are the suite's own, on a page of their own.
+  const RF_DIR = join(REPO, "tools", "e2e", "fixtures", "media");
+  const RF = JSON.parse(readFileSync(join(RF_DIR, "manifest.json"), "utf8"));
+  const rfSum = (b) => createHash("sha256").update(b).digest("hex");
+  const rfFact = (name) => RF.files.find((f) => f.name === name) || {};
+  const rfBad = RF.files.filter((f) => {
+    let b;
+    try { b = readFileSync(join(RF_DIR, f.name)); } catch { return true; }
+    return b.length !== f.bytes || rfSum(b) !== f.sha256;
+  }).map((f) => f.name);
+  check("media fixtures: every media file the suite plays is the file its manifest names, byte for byte",
+    RF.files.length === 15 && rfBad.length === 0,
+    JSON.stringify({ files: RF.files.length, bad: rfBad }));
+  const RF_MEDIA = (num, file, kind, mime, w, h) => ({ base: "tools/e2e/fixtures/media/" + file.replace(/\.[^.]+$/, ""),
+    num, date: "260918", kind, type: file.split(".").pop(), mime, from: file, ow: w, oh: h, bytes: rfFact(file).bytes || 1 });
+  const RF_MAP = {
+    "0401": RF_MEDIA("0401", "clip.mp4", "video", "video/mp4", 160, 90),
+    "0402": RF_MEDIA("0402", "square.mp4", "video", "video/mp4", 120, 120),
+    "0403": RF_MEDIA("0403", "tall.webm", "video", "video/webm", 90, 160),
+    "0404": RF_MEDIA("0404", "silent.webm", "video", "video/webm", 160, 90),
+    "0405": RF_MEDIA("0405", "sound.webm", "video", "video/webm", 160, 90),
+    "0407": RF_MEDIA("0407", "tone.mp3", "audio", "audio/mpeg", 0, 0),
+    "0410": RF_MEDIA("0410", "missing.webm", "video", "video/webm", 160, 90),
+    "0421": PL_IMG("0421")
+  };
+  const RF_POST = (id, source) => `(function () {
+    var stream = document.getElementById('blogStream');
+    if (!stream) return false;
+    var a = document.createElement('article');
+    a.className = 'bs-post'; a.id = 's${id}'; a.setAttribute('data-id', '${id}'); a.setAttribute('data-date', '260918');
+    a.innerHTML = '<div class="bs-post__body"><p class="pl-pad">The suite reads this post.</p>' +
+      AMH.blog.renderBody(${JSON.stringify(source)}, '260918', '', ${JSON.stringify(RF_MAP)}) + '</div>';
+    stream.insertBefore(a, stream.firstChild);
+    AMH.work.buildGalleries();
+    return true;
+  })()`;
+  const rfCenter = (sel) => evaluate(`(function () { var el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null;
+    var r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+
+  await send("Page.navigate", { url: BLOGPAGE + "?rf=1" });
+  await waitLoaded();
+  await waitFor(`typeof AMH !== "undefined" && !!AMH.images && !!AMH.work && !!AMH.blog`, 15000);
+  await evaluate(MEDIA_FIX);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+
+  // RF1. what the engine makes of each real file, and of a name or a
+  // browser's word that says something else
+  const rf1 = await evaluate(`(function () {
+    var I = AMH.images, asked = [];
+    var get = function (name) { return fetch('tools/e2e/fixtures/media/' + name).then(function (r) { return r.blob(); }); };
+    var take = function (blob, name, type, answer) {
+      return I.intakeMedia(new File([blob], name, { type: type || '' }), {
+        name: function (p) { return 'blog/260918_media' + p.kind; },
+        chooseKind: function (info) { asked.push(info.name); return answer || ''; } })
+        .then(function (ph) {
+          if (!ph) return 'let go';
+          URL.revokeObjectURL(ph.urls.source);
+          return ph.kind + ' ' + ph.mime + ' ' + ph.w + 'x' + ph.h + ' ' + (ph.playable ? 'plays' : 'no') + (ph.notes.length ? ' +note' : '');
+        }, function (e) { return 'refused: ' + e.message; });
+    };
+    var out = {};
+    return ${JSON.stringify(RF.files.map((f) => f.name))}.reduce(function (c, n) {
+      return c.then(function () { return get(n).then(function (b) { return take(b, n); }).then(function (r) { out[n] = r; }); });
+    }, Promise.resolve()).then(function () { return get('clip.mp4'); }).then(function (b) {
+      return take(b, 'CLIP.MP4').then(function (r) { out.upper = r; return take(b, 'clip.m4a'); }).then(function (r) { out.m4a = r; });
+    }).then(function () { return get('tone.mp3'); }).then(function (b) {
+      return take(b, 'tone.mp3', 'video/mp4');
+    }).then(function (r) {
+      out.conflict = r;
+      return take(new Blob([new Uint8Array(window.__media.ogg(['unknown']))]), 'mystery.ogg', 'application/ogg', 'audio');
+    }).then(function (r) { out.unknownOgg = r; out.asked = asked; return out; });
+  })()`, { awaitPromise: true });
+  const RF1_WANT = {
+    "clip.mp4": "video video/mp4 160x90 plays", "square.mp4": "video video/mp4 120x120 plays",
+    "tall.webm": "video video/webm 90x160 plays", "silent.webm": "video video/webm 160x90 plays",
+    "sound.webm": "video video/webm 160x90 plays", "voice.weba": "audio audio/webm 0x0 plays",
+    "tone.mp4": "audio audio/mp4 0x0 plays", "tone.webm": "audio audio/webm 0x0 plays",
+    "tone.mp3": "audio audio/mpeg 0x0 plays", "tone.wav": "audio audio/wav 0x0 plays",
+    "tone.ogg": "audio audio/ogg 0x0 plays", "theora.ogg": "video video/ogg 0x0 no +note",
+    "oldcodec.mp4": "video video/mp4 0x0 no +note", "song.mid": "midi audio/midi 0x0 no", "song.midi": "midi audio/midi 0x0 no"
+  };
+  check("real media: each real file gets its kind, its MIME type and its size from what it holds, a sound in MP4 or WebM is a sound, and a codec this browser cannot play is kept with a note",
+    Object.keys(RF1_WANT).every((k) => rf1 && rf1[k] === RF1_WANT[k]),
+    JSON.stringify(Object.keys(RF1_WANT).filter((k) => !rf1 || rf1[k] !== RF1_WANT[k]).map((k) => [k, rf1 && rf1[k]])));
+  check("real media: an extension in capitals is the same extension, one the list does not have is refused, the browser's other word is a note, and an Ogg that says nothing is asked about",
+    !!rf1 && rf1.upper === "video video/mp4 160x90 plays" &&
+    /^refused: "clip\.m4a" is not a media file the blog takes/.test(rf1.m4a) &&
+    rf1.conflict === "audio audio/mpeg 0x0 plays +note" && rf1.unknownOgg === "audio audio/ogg 0x0 no +note" &&
+    JSON.stringify(rf1.asked) === '["mystery.ogg"]',
+    JSON.stringify(rf1 && { upper: rf1.upper, m4a: rf1.m4a, conflict: rf1.conflict, ogg: rf1.unknownOgg, asked: rf1.asked }));
+
+  // RF2. the browser's own autoplay rule, on a page nobody has touched: a
+  // muted video starts, and a sound is refused until a real Play. The
+  // suite's Chrome runs with --mute-audio, which lets a video with sound
+  // start, so the refusal is met on a sound here; PL6 meets it on a video
+  // with a refusal the suite makes.
+  await evaluate(RF_POST("9401", "[nocarousel muted autoplay video0404,Silent auto]\n\n[nocarousel nocontrols autoplay audio0407,Loud tone]"));
+  await evaluate(`(function () { var f = document.querySelectorAll('#s9401 figure'); f[0].id = 'rf2a'; f[1].id = 'rf2b';
+    f[0].scrollIntoView({ block: 'center' }); return true; })()`);
+  const rf2a = await waitFor(`(function () { var f = document.getElementById('rf2a'), v = f && f.querySelector('video');
+    return v && !v.paused && v.currentTime > 0 ? { owner: AMH.work.mediaOwner() === v, muted: v.muted, state: f.getAttribute('data-state') } : null; })()`, 8000);
+  /* the reader's pause lets go of the page when its event comes */
+  await evaluate(`document.querySelector('#rf2a video').pause(); true`);
+  await waitFor(`AMH.work.mediaOwner() === null`, 3000);
+  await evaluate(`(function () { document.getElementById('rf2b').scrollIntoView({ block: 'center' }); AMH.work.mediaSync(); return true; })()`);
+  const rf2b = await waitFor(`(function () { var s = ${PL_FIG("#rf2b")}; return s && s.state === 'blocked' ? s : null; })()`, 8000);
+  const rf2at = await rfCenter("#rf2b .bp-audio__btn");
+  if (rf2at) await realClick(rf2at.x, rf2at.y);
+  const rf2c = await waitFor(`(function () { var s = ${PL_FIG("#rf2b")}; return s && s.state === 'playing' ? s : null; })()`, 6000);
+  await evaluate(`document.querySelector('#rf2b audio').pause(); true`);
+  check("real media: with no gesture the browser starts a muted video by itself, refuses a sound, which stays paused with its sound on and says so, and a real Play then starts it",
+    !!rf2a && rf2a.owner && rf2a.muted === true && !!rf2b && rf2b.paused === true && rf2b.muted === false &&
+    rf2b.say === "The browser did not start it by itself. Press Play." && !!rf2b.bar && rf2b.bar[0] === "Play Loud tone" &&
+    !!rf2c && rf2c.owner && rf2c.muted === false && rf2c.bar[0] === "Pause Loud tone",
+    JSON.stringify({ muted: rf2a, refused: rf2b, played: rf2c }).slice(0, 900));
+
+  // RF3. a real video plays, pauses where it is, and seeks
+  await evaluate(RF_POST("9402", "[nocarousel video0401,Clip|A clip]"));
+  await evaluate(`(function () { var f = document.querySelector('#s9402 figure'); f.id = 'rf3'; f.scrollIntoView({ block: 'center' }); return true; })()`);
+  const rf3a = await evaluate(PL_FIG("#rf3"));
+  const rf3 = await evaluate(`(function () {
+    var v = document.querySelector('#rf3 video'), out = {};
+    var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+    return v.play().then(function () { return wait(900); }).then(function () {
+      out.t1 = v.currentTime; v.pause(); return wait(60);
+    }).then(function () { out.t2 = v.currentTime; return wait(500); }).then(function () {
+      out.t3 = v.currentTime; out.duration = v.duration;
+      return new Promise(function (res) { v.addEventListener('seeked', function () { res(); }, { once: true }); v.currentTime = 2.2; });
+    }).then(function () {
+      out.seeked = v.currentTime; out.state = v.closest('figure').getAttribute('data-state'); return out;
+    }, function (e) { return { error: e.name }; });
+  })()`, { awaitPromise: true });
+  check("real media: an H.264 video arrives paused with sound and its controls, plays with its time moving, pauses where it is, and seeks",
+    rf3a.state === "paused" && rf3a.paused === true && rf3a.muted === false && rf3a.loop === false && rf3a.controls === true &&
+    !!rf3 && rf3.t1 > 0.3 && Math.abs(rf3.t3 - rf3.t2) < 0.05 && Math.abs(rf3.duration - 3) < 0.1 &&
+    Math.abs(rf3.seeked - 2.2) < 0.1 && rf3.state === "paused",
+    JSON.stringify({ first: rf3a, run: rf3 }).slice(0, 700));
+
+  // RF4. loop plays one file again and never turns the carousel; muted is
+  // silent; noborders keeps the browser's controls
+  await evaluate(RF_POST("9403", "[loop muted video0404,Looped]\n[img0421,Photo]\n\n[nocarousel noborders video0401,Bare frame]"));
+  const rf4 = await evaluate(`(function () {
+    var g = document.querySelector('#s9403 .gallery'), v = g.querySelector('video');
+    g.scrollIntoView({ block: 'center' });
+    return v.play().then(function () { return new Promise(function (r) { setTimeout(r, 2700); }); }).then(function () {
+      var bare = document.querySelector('#s9403 .bp-media--alone'), box = bare.querySelector('.bp-media__box');
+      var out = { playing: !v.paused, ended: v.ended, t: v.currentTime, loop: v.loop, muted: v.muted,
+        active: g.querySelector('.gallery__stage > .is-active') === v.closest('figure'),
+        bareControls: bare.querySelector('video').controls, bareBorder: getComputedStyle(box).borderTopWidth };
+      v.pause();
+      return out;
+    }, function (e) { return { error: e.name }; });
+  })()`, { awaitPromise: true });
+  check("real media: loop plays one file again past its end and never turns the carousel, muted is silent, and noborders keeps the browser's controls",
+    !!rf4 && rf4.playing === true && rf4.ended === false && rf4.t < 2 && rf4.loop === true && rf4.muted === true &&
+    rf4.active === true && rf4.bareControls === true && rf4.bareBorder === "0px",
+    JSON.stringify(rf4));
+
+  // RF5. nocontrols by keys, by touch and by a pointer, and the named bar
+  // of a sound; focus follows the button that shows
+  await evaluate(RF_POST("9404", "[nocarousel nocontrols muted loop video0404,Bare clip]\n\n[nocarousel nocontrols loop audio0407,Bare tone]"));
+  await evaluate(`(function () { var f = document.querySelectorAll('#s9404 figure'); f[0].id = 'rf5v'; f[1].id = 'rf5a';
+    f[0].scrollIntoView({ block: 'center' }); return true; })()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('#rf5v .bp-play').focus(); true`);
+  await pressKey("Enter", "Enter", 13, "\r");
+  const rf5k = await waitFor(`(function () { var s = ${PL_FIG("#rf5v")}; if (!s || s.state !== 'playing') return null;
+    s.focus = document.activeElement === document.querySelector('#rf5v .bp-pause'); return s; })()`, 5000);
+  await pressKey("Enter", "Enter", 13, "\r");
+  const rf5p = await waitFor(`(function () { var s = ${PL_FIG("#rf5v")}; if (!s || s.state !== 'paused') return null;
+    s.focus = document.activeElement === document.querySelector('#rf5v .bp-play'); return s; })()`, 5000);
+  await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const rf5tap = await rfCenter("#rf5v .bp-play");
+  if (rf5tap) {
+    await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: rf5tap.x, y: rf5tap.y }] });
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  }
+  const rf5t = await waitFor(`(function () { var s = ${PL_FIG("#rf5v")}; return s && s.state === 'playing' ? s : null; })()`, 5000);
+  await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  const rf5pic = await evaluate(`(function () { var r = document.querySelector('#rf5v video').getBoundingClientRect();
+    return { x: Math.round(r.left + 20), y: Math.round(r.top + 20) }; })()`);
+  await realClick(rf5pic.x, rf5pic.y);
+  const rf5c = await waitFor(`(function () { var s = ${PL_FIG("#rf5v")}; return s && s.state === 'paused' ? s : null; })()`, 5000);
+  await evaluate(`document.querySelector('#rf5a .bp-audio__btn').focus(); true`);
+  await pressKey("Enter", "Enter", 13, "\r");
+  const rf5a = await waitFor(`(function () { var s = ${PL_FIG("#rf5a")}; return s && s.state === 'playing' ? s : null; })()`, 5000);
+  await pressKey("Enter", "Enter", 13, "\r");
+  const rf5b = await waitFor(`(function () { var s = ${PL_FIG("#rf5a")}; return s && s.state === 'paused' ? s : null; })()`, 5000);
+  check("real media: with nocontrols, Enter plays and pauses and the focus moves to the button that shows, a tap plays, a click on the picture pauses, and a sound's named bar answers the keyboard",
+    !!rf5k && rf5k.play && rf5k.play[0] === true && rf5k.pause && rf5k.pause[0] === false && rf5k.focus === true &&
+    !!rf5p && rf5p.focus === true && rf5p.play && rf5p.play[0] === false && !!rf5t && !!rf5c &&
+    !!rf5a && rf5a.bar && rf5a.bar[0] === "Pause Bare tone" && !!rf5b && rf5b.bar && rf5b.bar[0] === "Play Bare tone",
+    JSON.stringify({ key: rf5k, keyPause: rf5p, tap: rf5t, click: rf5c, bar: rf5a, barPause: rf5b }).slice(0, 1200));
+
+  // RF6. out of view, a hidden tab, and full screen
+  await evaluate(RF_POST("9405", "[nocarousel loop video0401,Watched clip]"));
+  await evaluate(`(function () { var f = document.querySelector('#s9405 figure'); f.id = 'rf6'; f.scrollIntoView({ block: 'center' }); return true; })()`);
+  await sleep(400);
+  await plPlay("#rf6 video");
+  await sleep(600);
+  const rf6s = await evaluate(`(function () { var v = document.querySelector('#rf6 video'), before = v.currentTime;
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    return new Promise(function (res) { setTimeout(function () {
+      res({ paused: v.paused, kept: v.currentTime >= before && v.currentTime > 0, state: v.closest('figure').getAttribute('data-state') }); }, 1000); }); })()`,
+    { awaitPromise: true });
+  await evaluate(`document.getElementById('rf6').scrollIntoView({ block: 'center' }); true`);
+  await sleep(600);
+  const rf6back = await evaluate(`document.querySelector('#rf6 video').paused`);
+  await plPlay("#rf6 video");
+  await sleep(300);
+  const rf6h = await evaluate(`(function () { var v = document.querySelector('#rf6 video');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: function () { return 'hidden'; } });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return true; } });
+    document.dispatchEvent(new Event('visibilitychange'));
+    var out = { paused: v.paused };
+    delete document.visibilityState; delete document.hidden;
+    document.dispatchEvent(new Event('visibilitychange'));
+    return new Promise(function (res) { setTimeout(function () { out.still = v.paused; res(out); }, 500); }); })()`,
+    { awaitPromise: true });
+  await plPlay("#rf6 video");
+  const rf6pad = await rfCenter("#s9405 .pl-pad");
+  if (rf6pad) await realClick(rf6pad.x - 100, rf6pad.y);
+  const rf6f = await evaluate(`(function () { var v = document.querySelector('#rf6 video');
+    return v.requestFullscreen().then(function () {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      return new Promise(function (res) { setTimeout(function () {
+        var out = { full: document.fullscreenElement === v, playing: !v.paused };
+        document.exitFullscreen().then(function () { setTimeout(function () { out.after = v.paused; res(out); }, 800); },
+          function () { out.after = 'no exit'; res(out); });
+      }, 1000); });
+    }, function (e) { return { refused: e.name }; }); })()`, { awaitPromise: true });
+  check("real media: a player scrolled out of view stops and keeps its place, a hidden tab stops it, and neither resumes it",
+    !!rf6s && rf6s.paused === true && rf6s.kept && rf6s.state === "paused" && rf6back === true &&
+    !!rf6h && rf6h.paused === true && rf6h.still === true,
+    JSON.stringify({ scrolled: rf6s, back: rf6back, hidden: rf6h }));
+  check("real media: a video in full screen plays on while its place in the page is out of view, and stops when full screen ends there",
+    !!rf6f && rf6f.full === true && rf6f.playing === true && rf6f.after === true,
+    JSON.stringify(rf6f));
+
+  // RF7. the frames, measured on a desktop and on a phone
+  await evaluate(RF_POST("9406", "[portrait1:1 img0421]\n[video0402]\n\n[nocarousel portrait1:1 video0401,Square clip]\n\n" +
+    "[nocarousel portrait1:1 noborders video0401]\n\n[nocarousel audio0407,Tone]\n\n[nocarousel video0403,Tall]\n\n" +
+    "[noborders img0421,Bare photo]\n[video0401,Bare clip]"));
+  const RF_FRAMES = `(function () {
+    var a = document.getElementById('s9406'); if (!a) return null;
+    a.scrollIntoView({ block: 'start' });
+    var g = a.querySelectorAll('.gallery'), f = a.querySelectorAll('.bp-media--alone');
+    var ratio = function (el) { var r = el.getBoundingClientRect(); return r.height ? Math.round(r.width / r.height * 1000) / 1000 : 0; };
+    var cs = function (el) { return getComputedStyle(el); };
+    var bare = g[1], nav = bare.querySelector('.gallery__nav--bar'), frame = bare.querySelector('.gallery__frame');
+    if (nav) nav.focus({ focusVisible: true });
+    var out = { squareCarousel: ratio(g[0].querySelector('.gallery__view')),
+      squareAlone: ratio(f[0].querySelector('.bp-media__box')), squareBorder: cs(f[0].querySelector('.bp-media__box')).borderTopWidth,
+      squareFit: cs(f[0].querySelector('video')).objectFit,
+      bareSquare: ratio(f[1].querySelector('.bp-media__box')), bareBorder: cs(f[1].querySelector('.bp-media__box')).borderTopWidth,
+      bareRadius: cs(f[1].querySelector('.bp-media__box')).borderTopLeftRadius,
+      audioHeight: Math.round(f[2].getBoundingClientRect().height),
+      tall: ratio(f[3].querySelector('.bp-media__box')),
+      tallCapped: f[3].querySelector('.bp-media__box').getBoundingClientRect().height <= innerHeight * 0.85 + 1,
+      frame: [cs(frame).borderTopWidth, cs(frame).boxShadow, cs(frame).borderTopLeftRadius, cs(frame).backgroundImage],
+      inset: Math.abs(bare.querySelector('.gallery__stage').getBoundingClientRect().width - bare.querySelector('.gallery__view').getBoundingClientRect().width) < 1,
+      ambient: cs(bare.querySelector('.gallery__ambient')).display, strip: !!bare.querySelector('.gallery__strip'),
+      plate: cs(bare.querySelector('.gallery__caption')).backgroundImage,
+      ring: nav ? cs(nav).outlineStyle : 'no nav' };
+    if (nav) nav.blur();
+    return out; })()`;
+  const rf7d = await evaluate(RF_FRAMES);
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(700);
+  const rf7p = await evaluate(RF_FRAMES);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  const one = (r) => Math.abs(r - 1) < 0.02;
+  check("real media: portrait1:1 is square on a desktop and on a phone, in a carousel and on its own, with and without borders, and what it shows is contained",
+    !!rf7d && !!rf7p && one(rf7d.squareCarousel) && one(rf7d.squareAlone) && one(rf7d.bareSquare) &&
+    one(rf7p.squareCarousel) && one(rf7p.squareAlone) && one(rf7p.bareSquare) && rf7d.squareFit === "contain" &&
+    rf7d.squareBorder === "1px" && rf7d.bareBorder === "0px" && rf7d.bareRadius === "0px",
+    JSON.stringify({ desktop: rf7d, phone: rf7p }).slice(0, 1200));
+  check("real media: a sound of its own stays one player high, a video with no word keeps its own shape within the screen's height, and a bare carousel keeps its shape, its caption and its arrows' focus ring",
+    !!rf7d && rf7d.audioHeight < 140 && Math.abs(rf7d.tall - 0.5625) < 0.02 && rf7d.tallCapped &&
+    JSON.stringify(rf7d.frame) === JSON.stringify(["0px", "none", "0px", "none"]) && rf7d.inset && rf7d.ambient === "none" &&
+    rf7d.strip && rf7d.plate === "none" && rf7d.ring !== "none" && !!rf7p && rf7p.audioHeight < 140,
+    JSON.stringify({ desktop: rf7d, phone: rf7p && { audio: rf7p.audioHeight, tall: rf7p.tall } }).slice(0, 900));
+
+  // RF8. a file the site does not hold says so, and keeps its link
+  await evaluate(RF_POST("9407", "[nocarousel video0410,Missing]"));
+  await evaluate(`(function () { var f = document.querySelector('#s9407 figure'); f.id = 'rf8'; f.scrollIntoView({ block: 'center' });
+    var v = f.querySelector('video'); v.play().then(function () {}, function () {}); return true; })()`);
+  const rf8 = await waitFor(`(function () { var s = ${PL_FIG("#rf8")}; if (!s || s.state !== 'error') return null;
+    var a = document.querySelector('#rf8 .bp-media__file'); s.link = a && getComputedStyle(a).display !== 'none' ? a.getAttribute('download') : ''; return s; })()`, 8000);
+  check("real media: a file the site does not hold shows the error state and the line that says so, and its download link stays",
+    !!rf8 && rf8.state === "error" && rf8.say === "This browser cannot play this file. The link below downloads it." &&
+    rf8.link === "missing.webm" && rf8.play && rf8.play[0] === true,
+    JSON.stringify(rf8));
+
+  // RF9. the phone preview's viewer: the post's photos in order, a photo
+  // of its own among them and the video never
+  await evaluate(`if (!AMH.tool.editorOn()) window.edit(); true`);
+  await sleep(400);
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  await evaluate(`(function () {
+    var make = function (name, color) { return new Promise(function (res) {
+      var cv = document.createElement('canvas'); cv.width = 200; cv.height = 120;
+      var cx = cv.getContext('2d'); cx.fillStyle = color; cx.fillRect(0, 0, 200, 120);
+      cv.toBlob(function (b) { res(new File([b], name, { type: 'image/png' })); }, 'image/png'); }); };
+    return Promise.all([make('one.png', '#335577'), make('two.png', '#775533'), make('three.png', '#337755'),
+      fetch('tools/e2e/fixtures/media/silent.webm').then(function (r) { return r.blob(); })
+        .then(function (b) { return new File([b], 'silent.webm', { type: 'video/webm' }); })]).then(function (files) {
+      var dt = new DataTransfer(); files.forEach(function (f) { dt.items.add(f); });
+      document.querySelector('.bc-drop').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return true; });
+  })()`, { awaitPromise: true });
+  await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 4`, 20000);
+  const rf9nums = await evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) { return c.getAttribute('data-num'); })`);
+  await evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+    t.value = ${JSON.stringify("Phone viewer.\n\n[img" + rf9nums[0] + ",One]\n\n[nocarousel img" + rf9nums[1] + ",Two|Photo two]\n\n[video" +
+      rf9nums[3] + "]\n\n[img" + rf9nums[2] + ",Three]")};
+    t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await evaluate(miClick(".bc-tab", "Preview"));
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="mobile"]'); if (b) b.click(); return !!b; })()`);
+  await waitFor(`(function () { var f = document.querySelector('.bc-phone__screen'); var d = f && f.contentDocument;
+    return !!d && !!d.querySelector('img.bp-media__photo') && d.querySelectorAll('.gallery.is-ready').length === 3; })()`, 10000);
+  const rf9 = await evaluate(`(function () {
+    var f = document.querySelector('.bc-phone__screen'), d = f.contentDocument, w = f.contentWindow;
+    var photos = [].map.call(d.querySelectorAll('.gallery.is-ready .gallery__img, .bp-media__photo'), function (i) { return i.getAttribute('src'); });
+    var src = function () { var a = d.querySelector('.lightbox__img--active'); return a ? a.getAttribute('src') : ''; };
+    d.querySelector('img.bp-media__photo').click();
+    return new Promise(function (res) { setTimeout(function () {
+      var out = { photos: photos.length, open: w.AMH.work.lightbox.isOpen(), first: src() === photos[1] };
+      d.querySelector('.lightbox__nav--next').click();
+      setTimeout(function () {
+        out.next = src() === photos[2];
+        d.querySelector('.lightbox__nav--next').click();
+        setTimeout(function () {
+          out.wrap = src() === photos[0];
+          d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          setTimeout(function () { out.closed = !w.AMH.work.lightbox.isOpen(); res(out); }, 400);
+        }, 300);
+      }, 300);
+    }, 500); });
+  })()`, { awaitPromise: true });
+  await evaluate(`(function () { var b = document.querySelector('.bc-pvbtn[data-view="desktop"]'); if (b) b.click(); return !!b; })()`);
+  await sleep(300);
+  check("real media: in the phone preview a photo of its own opens the post's photos in order, the video never among them",
+    !!rf9 && rf9.photos === 3 && rf9.open && rf9.first && rf9.next && rf9.wrap && rf9.closed,
+    JSON.stringify({ nums: rf9nums, viewer: rf9 }));
+
+  // RF10. a file placed twice is counted once in the bundle's size
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  await evaluate(`window.edit.blog()`);
+  await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+  await evaluate(`fetch('tools/e2e/fixtures/media/tone.wav').then(function (r) { return r.blob(); }).then(function (b) {
+    var dt = new DataTransfer(); dt.items.add(new File([b], 'tone.wav', { type: 'audio/wav' }));
+    document.querySelector('.bc-drop').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return true; })`, { awaitPromise: true });
+  await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 1`, 15000);
+  const rf10num = await evaluate(`document.querySelector('.bc-panel .bc-card').getAttribute('data-num')`);
+  const rf10max = await evaluate(`AMH.publish.BUNDLE_MAX_MB`);
+  await evaluate(ZIP_CAPTURE);
+  await evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+    t.value = ${JSON.stringify("Twice.\n\n[audio" + rf10num + ",Once]\n\n[nocarousel audio" + rf10num + ",Twice]")};
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+    AMH.publish.BUNDLE_MAX_MB = 0.02; return true; })()`);
+  const rf10step = await pressPublish();
+  const rf10 = await waitFor(`(function () { var w = document.querySelector('.bc-wizard'); if (!w || w.getAttribute('data-step') !== 'failed') return null;
+    return { body: w.querySelector('.bc-wiz__body').textContent, said: document.querySelector('.bc-status').textContent }; })()`, 20000);
+  await evaluate(`AMH.publish.BUNDLE_MAX_MB = ${Number(rf10max) || 256}; true`);
+  await evaluate(miClick(".bc-wizard .ced-modal__btns button", "Back to the post"));
+  await sleep(700);
+  await evaluate(miClick(".bc-btns .ced-btn", "Close"));
+  await sleep(300);
+  check("real media: a file placed twice is counted once in the bundle's size, so the count before the build lets it pass and only the whole built bundle is over",
+    rf10step !== "timeout" && !!rf10 && /^This bundle is \d+ KB, and a bundle that carries a media file can be 0\.02 MB at most\./.test(rf10.body) &&
+    !/The new files are/.test(rf10.said),
+    JSON.stringify({ step: rf10step, failed: rf10 }).slice(0, 500));
+  await evaluate(`(function () { ['s9401', 's9402', 's9403', 's9404', 's9405', 's9406', 's9407'].forEach(function (id) {
+    var a = document.getElementById(id); if (a) { AMH.work.mediaRelease(a); a.remove(); } }); return true; })()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
+
+  // ============ SD. THE MEDIA BOX, SUPER DELETE AND RESTORE ============
   // Every image the site holds in one box, from the record and never from
   // a page. Super Delete is the one move that takes an image off the site:
   // it moves the three files into deletethese/, takes the entry out of the
@@ -14180,9 +15413,10 @@ async function main() {
   await evaluate(sdPut("blog/260917_img0007", "png"));
   await evaluate(sdPut("blog/260915_img0005", "gif"));
 
-  // SD1. the button, the console name, and the three ways out
-  const sd1 = await evaluate(`({ names: ${SD_FOOT}, api: typeof window.edit.images })`);
-  await sdOpen();
+  // SD1. the button, the console names, and the three ways out
+  const sd1 = await evaluate(`({ names: ${SD_FOOT}, api: typeof window.edit.images, media: typeof window.edit.media })`);
+  const sd1said = await evaluate(`window.edit.media()`);
+  await sleep(700);
   const sd1open = await evaluate(SD_STATE);
   await sdClose();
   const sd1x = await evaluate(`!!document.querySelector('.ced-images')`);
@@ -14194,9 +15428,10 @@ async function main() {
   await evaluate(`document.querySelector('.ced-scrim').click()`);
   await sleep(250);
   const sd1scrim = await evaluate(`({ box: !!document.querySelector('.ced-images'), scrim: !!document.querySelector('.ced-scrim') })`);
-  check("images: the panel's foot offers Images between Save to repo and New post, edit.images() opens the box, and the X, Escape and the scrim close it",
-    sd1.names.indexOf("Images") === sd1.names.indexOf("Save to repo") + 1 && sd1.names[sd1.names.indexOf("Images") + 1] === "New post" &&
-    sd1.api === "function" && !!sd1open && sd1open.tag === "IMAGES" && sd1open.title === "Every image the site holds" &&
+  check("images: the panel's foot offers Media between Save to repo and New post, edit.media() opens the box and edit.images() is its older name, and the X, Escape and the scrim close it",
+    sd1.names.indexOf("Media") === sd1.names.indexOf("Save to repo") + 1 && sd1.names[sd1.names.indexOf("Media") + 1] === "New post" &&
+    sd1.api === "function" && sd1.media === "function" && sd1said === "media box open" && !!sd1open && sd1open.tag === "MEDIA" &&
+    sd1open.title === "Every image and media file the site holds" &&
     sd1open.note === "as of the last save or publish" && !sd1x && !sd1esc && !sd1scrim.box && !sd1scrim.scrim,
     JSON.stringify({ names: sd1.names, api: sd1.api, open: !!sd1open, x: sd1x, esc: sd1esc, scrim: sd1scrim }));
 
@@ -14395,10 +15630,10 @@ async function main() {
     try { bs?.kill(); } catch {}
     bs = null;
   }
-  check("images: the Images button is on the gallery page, on the blog page between Rebuild and New post, and on a month page",
-    sdFootGal.labels.indexOf("Images") !== -1 && sdFootBlog.indexOf("Rebuild") !== -1 &&
-    sdFootBlog[sdFootBlog.indexOf("Rebuild") + 1] === "Images" && sdFootBlog[sdFootBlog.indexOf("Images") + 1] === "New post" &&
-    !!sdMonthFile && !!sdFootMonth && sdFootMonth.labels.indexOf("Images") !== -1,
+  check("images: the Media button is on the gallery page, on the blog page between Rebuild and New post, and on a month page",
+    sdFootGal.labels.indexOf("Media") !== -1 && sdFootBlog.indexOf("Rebuild") !== -1 &&
+    sdFootBlog[sdFootBlog.indexOf("Rebuild") + 1] === "Media" && sdFootBlog[sdFootBlog.indexOf("Media") + 1] === "New post" &&
+    !!sdMonthFile && !!sdFootMonth && sdFootMonth.labels.indexOf("Media") !== -1,
     JSON.stringify({ gallery: sdFootGal, blog: sdFootBlog, monthFile: sdMonthFile, month: sdFootMonth }));
 
   // SD10. from disk: the box opens on the record, and with no folder taken
@@ -14418,7 +15653,7 @@ async function main() {
     JSON.stringify({ rows: sd10 && sd10.rows.map((r) => r.name), after: sd10b }));
   await sdClose();
 
-  // ============ MS. A MEDIA FILE IN THE IMAGES BOX, AND THE WRITES THAT KEEP IT ============
+  // ============ MS. A MEDIA FILE IN THE MEDIA BOX, AND THE WRITES THAT KEEP IT ============
   // A media file is a row like an image's: named by its tag, with a tile
   // for its kind and no small copy to fetch. Super Delete moves its one
   // file and logs its typed entry; Restore brings both back with no
@@ -14471,6 +15706,24 @@ async function main() {
     ms1row.used === "Not used" && ms1row.acts.join() === "Copy tag,Super delete" && ms1clip === "[audio0013]" &&
     !ms1pics.some((s) => /undefined|media0013/.test(s)),
     JSON.stringify({ row: ms1row, clip: ms1clip, pics: ms1pics }).slice(0, 600));
+
+  // MS1b. the tile opens the browser's player for the file in its place,
+  // and closing the box lets the file go
+  const MS_ROW = `[...document.querySelectorAll('.ced-image')].find(function (l) { return l.querySelector('.ced-image__name').textContent === 'audio0013'; })`;
+  await evaluate(`(function () { var li = ${MS_ROW}; var tile = li && li.querySelector('.ced-image__pic'); if (!tile) return false;
+    window.__msTile = { tag: tile.tagName, label: tile.getAttribute('aria-label') }; tile.click(); return true; })()`);
+  const ms1open = await evaluate(`(function () { var li = ${MS_ROW}; var p = li && li.querySelector('.ced-image__pic'); window.__msPlayer = p;
+    return p ? { tile: window.__msTile || null, tag: p.tagName, cls: p.className, src: p.getAttribute('src'), controls: !!p.controls,
+      preload: p.preload, focused: document.activeElement === p } : null; })()`);
+  await sdClose();
+  const ms1shut = await evaluate(`({ src: window.__msPlayer ? window.__msPlayer.hasAttribute('src') : null,
+    paused: window.__msPlayer ? !!window.__msPlayer.paused : null })`);
+  check("media box: a media file's tile opens the browser's player for its file in its place, and closing the box lets the file go",
+    !!ms1open && !!ms1open.tile && ms1open.tile.tag === "BUTTON" && ms1open.tile.label === "Open a player for audio0013" &&
+    ms1open.tag === "AUDIO" && ms1open.cls === "ced-image__pic ced-image__pic--open" && ms1open.src === "blog/260918_media0013.weba" &&
+    ms1open.controls && ms1open.preload === "metadata" && ms1open.focused && ms1shut.src === false && ms1shut.paused === true,
+    JSON.stringify({ open: ms1open, shut: ms1shut }));
+  await sdOpen();
 
   // MS2. Super Delete: one file, the typed line in the log
   await evaluate(sdAct("audio0013", "Super delete"));
@@ -14575,6 +15828,88 @@ async function main() {
     ms5.save.box.title === "The save stopped" && JSON.stringify(ms5.save.box.lines) === JSON.stringify([MS5_WHY]) &&
     JSON.stringify(ms5.save.box.btns) === '["OK"]' && ms5.save.wrote.length === 0 && ms5.gone,
     JSON.stringify(ms5 && ms5.save).slice(0, 600));
+
+  // MS6. a move that stops partway. Super Delete moves the files it can,
+  // keeps the entry and names both lists; the second Super Delete skips
+  // the file it moved and finishes. Restore does the same the other way.
+  // A failed copy leaves no file at its destination, because that file
+  // would stop the move that finishes. A save whose folder write stops
+  // partway names the files it wrote.
+  await send("Page.navigate", { url: PAGE + "?ms=3" });
+  await sdEditorOn();
+  await evaluate(FAKE_REPO);
+  await evaluate(`AMH.images.index.load().then(function () { AMH.images.index.set(${JSON.stringify(MS_REC)}); return true; })`, { awaitPromise: true });
+  await evaluate(sdPut("blog/260917_img0007", "png"));
+  const MS6_TRIO = ["blog/260917_img0007_sd.webp", "blog/260917_img0007.jpg", "blog/260917_img0007_original.png"];
+  const MS6_SAID = (re) => `(function () { var s = ${SD_STATUS}; return ${re}.test(s.status || '') ? s : null; })()`;
+  await evaluate(`window.__refuse = { "deletethese/blog/260917_img0007.jpg": true }; true`);
+  await sdOpen();
+  await evaluate(sdAct("img0007", "Super delete"));
+  await sleep(900);
+  await evaluate(sdPress(".ced-ask", "Super delete"));
+  const ms6a = await waitFor(MS6_SAID("/could not be moved into/"), 10000);
+  const ms6aIx = await evaluate(`window.__wrote['images.js'] || ''`);
+  await evaluate(`window.__refuse = {}; true`);
+  await evaluate(sdAct("img0007", "Super delete"));
+  await sleep(900);
+  await evaluate(sdPress(".ced-ask", "Super delete"));
+  await waitFor(`!!document.querySelector('.ced-saved')`, 10000);
+  const ms6bSaved = await evaluate(SD_SAVED);
+  const ms6b = await sdWrote();
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(300);
+  const ms6bLog = imagesTable(ms6b.log);
+  const ms6bLine = ms6bLog && ms6bLog.deleted ? ms6bLog.deleted[ms6bLog.deleted.length - 1] : null;
+  check("partial moves: a Super Delete that stops partway keeps the entry, writes nothing, leaves no copy where it stopped, and names what moved and what did not",
+    !!ms6a && ms6a.status === "blog/260917_img0007.jpg could not be moved into deletethese/, so the index still names img0007. " +
+      "Moved: blog/260917_img0007_sd.webp. Not moved: blog/260917_img0007.jpg, blog/260917_img0007_original.png. " +
+      "Super delete it again to finish: a file already moved is skipped." && ms6aIx === "" &&
+    ms6a.folder.indexOf("deletethese/blog/260917_img0007_sd.webp") !== -1 && ms6a.folder.indexOf("blog/260917_img0007_sd.webp") === -1 &&
+    ms6a.folder.indexOf("blog/260917_img0007.jpg") !== -1 && ms6a.folder.indexOf("deletethese/blog/260917_img0007.jpg") === -1 &&
+    ms6a.folder.indexOf("blog/260917_img0007_original.png") !== -1,
+    JSON.stringify({ a: ms6a, ix: ms6aIx.slice(0, 80) }).slice(0, 900));
+  check("partial moves: the second Super Delete skips the file already moved, moves the rest, takes the entry out and logs every path",
+    !!ms6bSaved && JSON.stringify(ms6bSaved.movedFiles) === JSON.stringify(["blog/260917_img0007.jpg", "blog/260917_img0007_original.png"]) &&
+    MS6_TRIO.every((p) => ms6b.folder.indexOf("deletethese/" + p) !== -1 && ms6b.folder.indexOf(p) === -1) &&
+    !imagesTable(ms6b.ix).images.some((e) => e.base === "blog/260917_img0007") &&
+    !!ms6bLine && JSON.stringify(ms6bLine.paths) === JSON.stringify(MS6_TRIO),
+    JSON.stringify({ saved: ms6bSaved, folder: ms6b.folder, line: ms6bLine }).slice(0, 900));
+  await evaluate(sdPill("deleted"));
+  await sleep(250);
+  await evaluate(`window.__refuse = { "blog/260917_img0007.jpg": true }; true`);
+  await evaluate(sdAct("img0007", "Restore"));
+  const ms6c = await waitFor(MS6_SAID("/could not be moved back/"), 10000);
+  const ms6cIx = await evaluate(`window.__wrote['images.js'] || ''`);
+  await evaluate(`window.__refuse = {}; true`);
+  await evaluate(sdAct("img0007", "Restore"));
+  await waitFor(`!!document.querySelector('.ced-saved')`, 10000);
+  const ms6dSaved = await evaluate(SD_SAVED);
+  const ms6d = await sdWrote();
+  await evaluate(sdPress(".ced-saved", "OK! Done!"));
+  await sleep(300);
+  await sdClose();
+  check("partial moves: a Restore that stops partway names what moved back and what is still in deletethese/, and the second Restore skips the moved file and finishes",
+    !!ms6c && ms6c.status === "blog/260917_img0007.jpg could not be moved back, so the index does not name img0007 yet. " +
+      "Moved back: blog/260917_img0007_sd.webp. Still in deletethese/: blog/260917_img0007.jpg, blog/260917_img0007_original.png. " +
+      "Restore it again to finish." && ms6c.folder.indexOf("blog/260917_img0007.jpg") === -1 && ms6cIx === ms6b.ix &&
+    !!ms6dSaved && JSON.stringify(ms6dSaved.movedFiles) === JSON.stringify(["blog/260917_img0007.jpg", "blog/260917_img0007_original.png"]) &&
+    MS6_TRIO.every((p) => ms6d.folder.indexOf(p) !== -1 && ms6d.folder.indexOf("deletethese/" + p) === -1) &&
+    imagesTable(ms6d.ix).images.some((e) => e.base === "blog/260917_img0007"),
+    JSON.stringify({ c: ms6c, saved: ms6dSaved, folder: ms6d.folder }).slice(0, 900));
+  await msAddPhoto("MS Partial.png", "#5f3fa0");
+  await evaluate(`window.__refuse = { "index.html": true }; true`);
+  await evaluate(`(function () { var b = document.querySelector('.ced-panel__foot .ced-btn--save'); if (b) b.click(); return !!b; })()`);
+  const ms6e = await waitFor(`(function () { var a = ${MS_ASK}; return a && a.tag === 'NOT SAVED' ? a : null; })()`, 20000);
+  const ms6eBtn = await evaluate(`(document.querySelector('.ced-panel__foot .ced-btn--save') || {}).textContent || ''`);
+  await evaluate(sdPress(".ced-ask", "OK"));
+  await sleep(300);
+  await evaluate(`window.__refuse = {}; window.edit.pending.clear(); sessionStorage.clear(); true`);
+  check("partial moves: a save whose folder write stops partway says why and names the files it wrote before it stopped",
+    !!ms6e && ms6eBtn === "Not saved" && ms6e.title === "The save stopped" && ms6e.lines.length === 2 &&
+    /BLG-E14/.test(ms6e.lines[0]) && /index\.html/.test(ms6e.lines[0]) &&
+    /^These files were written before it stopped: images\.js, img\/work\/ms-partial-[0-9a-z]+\.jpg, img\/work\/ms-partial-[0-9a-z]+_original\.png, img\/work\/ms-partial-[0-9a-z]+_sd\.webp\. Save again to write the rest\.$/.test(ms6e.lines[1]) &&
+    JSON.stringify(ms6e.btns) === '["OK"]',
+    JSON.stringify({ box: ms6e, btn: ms6eBtn }).slice(0, 700));
 
   // ============ UL. AN IMAGE IN USE COMES OUT OF EVERY PLACE ============
   // A Super Delete leaves the site whole. The posts that showed the image
@@ -14841,7 +16176,7 @@ async function main() {
     JSON.stringify({ folder: ul8 && ul8.folder.filter((p) => p.indexOf("deletethese/") === 0),
       entry: ul8ix.images.filter((e) => e.base === (ulPick || {}).base), months: ul8 && ul8.months }).slice(0, 400));
 
-  // ============ IB. THE IMAGES BOX: ORDER, PAGES AND PLACES ============
+  // ============ IB. THE MEDIA BOX: ORDER, PAGES AND PLACES ============
   // The box reads the record and never a page, so every control here is a
   // view of the record: three sorts that turn with a second press, a page
   // size with Show more, lazy thumbnails, and the places as tags. The
@@ -15164,6 +16499,576 @@ async function main() {
     !!iw4.site && iw4.site.words["index.html#fr3-gallery"] === iwSiteWords && !!iwSiteWords,
     JSON.stringify({ num: iwNum, site: iwSiteBase, expect: iwSiteWords, pub: iw4pub, rebuild: iw4 }).slice(0, 700));
 
+  // ============ MQ. MEDIA FILES FROM THE COMPOSER, PUBLISHED ============
+  // On this run's own site. A post places three new files the composer
+  // holds, and its date changes after they are taken: the publish names
+  // each file for the post's date, and the bundle carries each one once,
+  // byte for byte as it was dropped. The index names each with its kind,
+  // its MIME type and the name it came with. The post opens again with a
+  // card for each file, from the index, and an option set on a card is
+  // written into its tag with no copy of the file in the next bundle. A
+  // folder write that stops partway names the files it wrote and the file
+  // it stopped at, and the zip that follows holds the whole bundle.
+  let mq = null;
+  if (existsSync(join(bdir, "blog.html"))) {
+    bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+    await sleep(1500);
+    mq = {};
+    try {
+      // MQ1. the publish
+      await send("Page.navigate", { url: B + "blog.html?mq=1" });
+      await sdEditorOn();
+      await evaluate(MEDIA_FIX);
+      await evaluate(ZIP_CAPTURE);
+      await evaluate(`window.confirm = function () { return true; };`);
+      await evaluate(`window.edit.blog()`);
+      await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+      await evaluate(`(function () { var d = document.querySelector('.bc-date'); if (d) d.value = '261020'; return !!d; })()`);
+      mq.recorded = await evaluate(`(function () {
+        var M = window.__media;
+        return M.record("video", "video/webm", 900).then(function (vid) {
+          window.__mqFiles = [M.file(M.wav(0.3), 'tone.wav', 'audio/wav'), M.file(M.midi(), 'song.mid', 'audio/midi'),
+            vid ? new File([vid], 'screen.webm', { type: 'video/webm' }) : M.file(M.webm([1]), 'screen.webm', 'video/webm')];
+          var dt = new DataTransfer(); window.__mqFiles.forEach(function (f) { dt.items.add(f); });
+          var zone = document.querySelector('.bc-drop');
+          if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          return !!vid; });
+      })()`, { awaitPromise: true });
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 3`, 20000);
+      mq.nums = await evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) { return c.getAttribute('data-num'); })`);
+      mq.held = await evaluate(`AMH.images.list().filter(function (p) { return /_media/.test(p.base); }).map(function (p) { return p.files.source; }).sort()`);
+      mq.sent = await evaluate(`Promise.all((window.__mqFiles || []).map(window.__media.base64))`, { awaitPromise: true });
+      const [mqT, mqS, mqV] = mq.nums;
+      await evaluate(`(function () {
+        var d = document.querySelector('.bc-date'), t = document.querySelector('.bc-write textarea');
+        if (!d || !t) return false;
+        d.value = '261022';
+        t.value = "Three new files.\\n\\n[audio${mqT},Tone|A tone]\\n\\n[midi${mqS},Song]\\n\\n[video${mqV},Screen|A screen]";
+        t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      await sleep(400);
+      await pressPublish();
+      const z1 = await capturePublish();
+      const man1 = z1 && z1["blog.html"] ? z1["blog.html"].toString("utf8") : "";
+      mq.post = (/\n(?:[^\n]*\|)?261022([0-9a-z]\d{3})Three new files/.exec(man1) || [])[1] || "";
+      mq.zip1 = z1 ? Object.keys(z1).sort() : null;
+      mq.got = z1 ? ["wav", "mid", "webm"].map((x, i) => {
+        const p = "blog/261022_media" + mq.nums[i] + "." + x;
+        return z1[p] ? z1[p].toString("base64") : null; }) : null;
+      mq.ix1 = z1 ? indexIn(z1) : null;
+      mq.month1 = z1 && z1["blog/2610.html"] ? z1["blog/2610.html"].toString("utf8") : "";
+      if (z1) writeBundle(z1);
+      // MQ2. the post opens again with a card for each file, and an option
+      // set on a card is written into its tag
+      await send("Page.navigate", { url: B + "blog.html?mq=2" });
+      await sdEditorOn();
+      await evaluate(ZIP_CAPTURE);
+      await evaluate(`window.confirm = function () { return true; };`);
+      await evaluate(`window.edit.blog.edit(${JSON.stringify(mq.post)})`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 3`, 10000);
+      mq.cards = await evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) {
+        var p = c.querySelector('.bc-card__player, .bc-card__file');
+        return { num: c.getAttribute('data-num'), kind: c.getAttribute('data-kind'), meta: c.querySelector('.bc-card__meta').textContent,
+          player: p ? p.tagName : '', src: p ? p.getAttribute('src') || p.getAttribute('href') || '' : '', preload: p && p.preload || '' }; })`);
+      await evaluate(`(function () { var t = document.querySelector('.bc-tab[data-tab="images"]'); if (t) t.click();
+        var c = document.querySelector('.bc-panel .bc-card[data-num="${mqT}"]');
+        var l = c && [...c.querySelectorAll('.bc-opt')].find(function (o) { return o.textContent.trim() === 'Loop'; });
+        if (l) l.querySelector('input').click(); return !!l; })()`);
+      mq.body2 = await evaluate(`(document.querySelector('.bc-write textarea') || {}).value || ''`);
+      await pressPublish();
+      const z2 = await capturePublish();
+      mq.zip2 = z2 ? Object.keys(z2).sort() : null;
+      mq.month2 = z2 && z2["blog/2610.html"] ? z2["blog/2610.html"].toString("utf8") : "";
+      mq.ix2 = z2 ? indexIn(z2) : null;
+      if (z2) writeBundle(z2);
+      // MQ3. a folder write that stops partway, after two files
+      await send("Page.navigate", { url: B + "blog.html?mq=3" });
+      await sdEditorOn();
+      await evaluate(MEDIA_FIX);
+      await evaluate(ZIP_CAPTURE);
+      await evaluate(`window.confirm = function () { return true; };`);
+      await evaluate(`(function () {
+        AMH.tool.repoWriteReady = function () { return false; };
+        AMH.tool.pickRepoWrite = function () { return Promise.resolve({ stub: true }); };
+        AMH.tool.writeRepo = function (files) {
+          var names = Object.keys(files).sort();
+          window.__mqNames = names;
+          var err = new Error("BLG-E14 - " + names[2] + " (the disk is full)");
+          err.written = names.slice(0, 2);
+          return Promise.reject(err);
+        };
+        return true; })()`);
+      await evaluate(`window.edit.blog()`);
+      await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+      await evaluate(`(function () { var d = document.querySelector('.bc-date'); if (d) d.value = '261024'; return !!d; })()`);
+      await evaluate(`(function () { var M = window.__media, dt = new DataTransfer(); dt.items.add(M.file(M.wav(0.2), 'late.wav', 'audio/wav'));
+        var zone = document.querySelector('.bc-drop');
+        if (zone) zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); return !!zone; })()`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 1`, 15000);
+      mq.late = await evaluate(`(document.querySelector('.bc-panel .bc-card') || { getAttribute: function () { return ''; } }).getAttribute('data-num')`);
+      await evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+        t.value = "A late file.\\n\\n[audio${mq.late},Late]"; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      await sleep(300);
+      await evaluate(`(function () { var b = [...document.querySelectorAll('.bc-btns .ced-btn')].find(function (x) { return x.textContent === 'Publish'; });
+        if (b) b.click(); return !!b; })()`);
+      await sleep(400);
+      mq.took = await pressRoute("Write into my repo folder");
+      mq.partial = await waitFor(`(function () { var box = document.querySelector('.bc-wizard');
+        if (!box || box.getAttribute('data-step') !== 'done' || window.__zipB64 === null) return null;
+        var rec = AMH.publish.record() || {};
+        return { fell: [...box.querySelectorAll('.bc-wiz__fell')].map(function (p) { return p.textContent; }),
+          rec: rec.partial || null, names: window.__mqNames || [],
+          kept: AMH.images.list().some(function (p) { return p.base === "blog/261024_media${mq.late}" && !p.saved; }) }; })()`, 20000);
+      const z3 = await capturePublish();
+      mq.zip3 = z3 ? Object.keys(z3).sort() : null;
+      await evaluate(`(function () { var b = [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')]
+        .find(function (x) { return x.textContent === 'OK! Done!'; }); if (b) b.click(); return !!b; })()`);
+      /* this bundle never reaches the site, so its staging layer goes, and
+         the next publish builds on the site as it is served */
+      await evaluate(`AMH.tool.layerSave(null); true`);
+    } finally {
+      try { bs?.kill(); } catch {}
+      bs = null;
+    }
+  }
+  const mqE = mq && mq.ix1 && mq.nums ? mq.nums.map((n) => entryIn(mq.ix1, n)) : [];
+  const mqLine = (e) => e ? [e.base, e.kind, e.type, e.mime, e.from, e.ow + "x" + e.oh, e.date, JSON.stringify(e.used), JSON.stringify(e.words)].join(" ") : "";
+  const mqUse = (words) => JSON.stringify(["p" + (mq && mq.post)]) + " " + JSON.stringify({ ["p" + (mq && mq.post)]: words });
+  check("media publish: new files are named for the post's date when it is published, and the bundle carries each once, byte for byte as it was dropped",
+    !!mq && !!mq.nums && mq.nums.length === 3 && mq.recorded === true &&
+    JSON.stringify(mq.held) === JSON.stringify(["blog/261020_media" + mq.nums[0] + ".wav", "blog/261020_media" + mq.nums[1] + ".mid",
+      "blog/261020_media" + mq.nums[2] + ".webm"].sort()) &&
+    !!mq.post && !!mq.zip1 && !mq.zip1.some((n) => /261020_media/.test(n)) && mq.zip1.filter((n) => /_media/.test(n)).length === 3 &&
+    !!mq.got && mq.got.every(Boolean) && JSON.stringify(mq.got) === JSON.stringify(mq.sent),
+    JSON.stringify(mq && { nums: mq.nums, held: mq.held, post: mq.post, zip: mq.zip1 && mq.zip1.filter((n) => /^blog\//.test(n)),
+      same: mq.got && mq.sent && mq.got.map((g, i) => g === mq.sent[i]) }).slice(0, 900));
+  check("media publish: the index names each new file with its kind, its MIME type, the name it came with, its size, the post's date and its words",
+    mqE.length === 3 && mqE.every(Boolean) &&
+    mqLine(mqE[0]) === "blog/261022_media" + mq.nums[0] + " audio wav audio/wav tone.wav 0x0 261022 " + mqUse("Tone · A tone") &&
+    mqLine(mqE[1]) === "blog/261022_media" + mq.nums[1] + " midi mid audio/midi song.mid 0x0 261022 " + mqUse("Song") &&
+    mqLine(mqE[2]) === "blog/261022_media" + mq.nums[2] + " video webm video/webm screen.webm 160x90 261022 " + mqUse("Screen · A screen") &&
+    mqE[0].bytes === Buffer.from(mq.sent[0], "base64").length,
+    JSON.stringify(mqE).slice(0, 1000));
+  check("media publish: the month file plays each new file from the site, with its type and a link under the name it came with",
+    !!mq && mq.month1.indexOf('<audio controls preload="none" aria-label="A tone"><source src="../blog/261022_media' + mq.nums[0] +
+      '.wav" type="audio/wav" /></audio>') !== -1 &&
+    mq.month1.indexOf('<a class="bp-media__file" href="../blog/261022_media' + mq.nums[1] + '.mid" download="song.mid" type="audio/midi">' +
+      "Download song.mid (1 KB)</a>") !== -1 &&
+    mq.month1.indexOf('<video controls preload="none" playsinline width="160" height="90" aria-label="A screen"><source src="../blog/261022_media' +
+      mq.nums[2] + '.webm" type="video/webm" /></video>') !== -1,
+    (mq && mq.month1 ? mq.month1.slice(mq.month1.indexOf("bp-media") - 40, mq.month1.indexOf("bp-media") + 900) : "no month file").slice(0, 1000));
+  check("media publish: the post opens again with a card for each file from the index, each player on the site's file and loading nothing",
+    !!mq && !!mq.cards && mq.cards.length === 3 &&
+    mq.cards[0].meta === mq.nums[0] + " · published · audio · WAV · 5 KB · from tone.wav" && mq.cards[0].player === "AUDIO" &&
+    mq.cards[0].src === "blog/261022_media" + mq.nums[0] + ".wav" && mq.cards[0].preload === "none" &&
+    mq.cards[1].meta === mq.nums[1] + " · published · MIDI · MID · 1 KB · from song.mid" && mq.cards[1].player === "A" &&
+    mq.cards[1].src === "blog/261022_media" + mq.nums[1] + ".mid" &&
+    /^.{4} · published · video · WEBM · 160 x 90 · \d+ KB · from screen\.webm$/.test(mq.cards[2].meta) && mq.cards[2].player === "VIDEO" &&
+    mq.cards[2].preload === "none",
+    JSON.stringify(mq && mq.cards).slice(0, 900));
+  check("media publish: an option set on a published file's card is written into its tag, and the next bundle carries no copy of any file",
+    !!mq && mq.body2 === "Three new files.\n\n[loop audio" + mq.nums[0] + ",Tone|A tone]\n\n[midi" + mq.nums[1] + ",Song]\n\n[video" +
+      mq.nums[2] + ",Screen|A screen]" && !!mq.zip2 && !mq.zip2.some((n) => /_media/.test(n)) &&
+    mq.month2.indexOf('<figure class="bp-media" data-kind="audio" data-loop="1" data-caption="Tone"><audio controls preload="none" loop aria-label="A tone">') !== -1 &&
+    !!mq.ix2 && !!entryIn(mq.ix2, mq.nums[0]) && entryIn(mq.ix2, mq.nums[0]).base === "blog/261022_media" + mq.nums[0],
+    JSON.stringify(mq && { body: mq.body2, zip: mq.zip2, fig: ((mq.month2 || "").match(/<figure class="bp-media" data-kind="audio"[^>]*>/) || [""])[0] }).slice(0, 900));
+  const mqPartial = mq && mq.partial ? mq.partial : null;
+  const mqWrote = mqPartial && mqPartial.names ? mqPartial.names.slice(0, 2) : [];
+  const mqFell = mqPartial ? mqPartial.fell.find((t) => t.indexOf("The folder write stopped partway.") === 0) || "" : "";
+  check("media publish: a folder write that stops partway names the files it wrote and the file it stopped at, keeps the held file, and the zip that follows holds the whole bundle",
+    !!mq && mq.took === true && !!mqPartial && !!mqPartial.rec && mqPartial.names.length > 3 &&
+    JSON.stringify(mqPartial.rec.wrote) === JSON.stringify(mqWrote) && mqPartial.rec.stopped === mqPartial.names[2] &&
+    mqFell === "The folder write stopped partway. 2 files were written into the folder before it stopped at " + mqPartial.names[2] + ": " +
+      mqWrote.join(" ") + ". The zip holds the whole bundle. Extract it at the repo root to finish: it writes those files again with the same bytes." &&
+    mqPartial.kept === true && JSON.stringify(mq.zip3) === JSON.stringify(mqPartial.names) &&
+    mq.zip3.indexOf("blog/261024_media" + mq.late + ".wav") !== -1,
+    JSON.stringify(mq && { took: mq.took, partial: mqPartial, zip: mq.zip3, late: mq.late }).slice(0, 1000));
+
+  // ============ RD. MEDIA DELIVERY: A POST WITH EVERY KIND, FROM DROP TO SITE ============
+  // On this run's own site, with the suite's real media files. One post
+  // holds a photo, every kind of media file, two MIDI files and one video
+  // placed twice. Its bundle is checked file by file against the files as
+  // they were dropped, on the way to the folder and in the zip. The site
+  // then works over HTTP, from disk and with no script; one placement is
+  // edited; the post moves to another month; a second post reuses a file;
+  // placements come out until a file is unused, a rebuild keeps it, and a
+  // new post takes it again with no upload. Last, a folder write stops
+  // after real writes, and then its zip fails as well.
+  // Every date here is in 2610 or 2611. The stream shows the newest month,
+  // and MP, next, looks for its own 2611 post in the stream.
+  const RD_FILES = ["clip.mp4", "sound.webm", "voice.weba", "tone.mp4", "tone.mp3", "tone.wav", "tone.ogg", "song.mid", "song.midi"];
+  const RD_WORDS = ["nocarousel", "noborders", "nocontrols", "autoplay", "unmuted", "portrait1:1"];
+  let rd = null;
+  /* An entry for one of this post's files. MQ placed files with the same
+     names earlier in this run, so the entry must have the post's first date. */
+  const rdEntry = (ix, name) => ((ix && ix.images) || []).find((e) => e.from === name && e.kind !== "image" &&
+    e.base.indexOf("blog/261030_media") === 0) || null;
+  const rdPath = (name) => { const e = rdEntry(rd && rd.ix1, name); return e ? e.base + "." + e.type : ""; };
+  const rdWant = (name) => rfFact(name).bytes + " " + rfFact(name).sha256;
+  /* One post's article in a month file. MQ's post is in the same month. */
+  const rdPostOf = (html, id) => {
+    const a = id && html ? html.indexOf('<article class="bs-post" id="p' + id + '"') : -1;
+    const b = a === -1 ? -1 : html.indexOf("</article>", a);
+    return b === -1 ? "" : html.slice(a, b);
+  };
+  if (existsSync(join(bdir, "blog.html"))) {
+    cpSync(RF_DIR, join(bdir, "tools", "e2e", "fixtures", "media"), { recursive: true });
+    bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
+    await sleep(1500);
+    rd = {};
+    /* the composer on a page of the bundle site, with the suite's helpers */
+    const rdOpen = async (tag) => {
+      await send("Page.navigate", { url: B + "blog.html?rd=" + tag });
+      await sdEditorOn();
+      await evaluate(MEDIA_FIX);
+      await evaluate(ZIP_CAPTURE);
+      await evaluate(`window.confirm = function () { return true; }; true`);
+    };
+    const rdBody = (text) => evaluate(`(function () { var t = document.querySelector('.bc-write textarea'); if (!t) return false;
+      t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    const rdDate = (d) => evaluate(`(function () { var el = document.querySelector('.bc-date'); if (el) el.value = '${d}'; return !!el; })()`);
+    const rdDrop = (names, photo) => evaluate(`(function () {
+      var names = ${JSON.stringify(names)};
+      var png = ${photo ? "true" : "false"} ? new Promise(function (res) { var cv = document.createElement('canvas'); cv.width = 320; cv.height = 200;
+        var cx = cv.getContext('2d'); cx.fillStyle = '#446688'; cx.fillRect(0, 0, 320, 200);
+        cv.toBlob(function (b) { res(new File([b], 'photo.png', { type: 'image/png' })); }, 'image/png'); }) : Promise.resolve(null);
+      return png.then(function (p) {
+        return Promise.all(names.map(function (n) { return fetch('tools/e2e/fixtures/media/' + n).then(function (r) { return r.blob(); })
+          .then(function (b) { return new File([b], n, { type: '' }); }); })).then(function (files) {
+          var dt = new DataTransfer(); if (p) dt.items.add(p); files.forEach(function (f) { dt.items.add(f); });
+          document.querySelector('.bc-drop').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          return true; }); });
+    })()`, { awaitPromise: true });
+    const rdCards = () => evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) { return c.getAttribute('data-num'); })`);
+    const rdPostId = (zip, re) => zip && zip["blog.html"] ? ((re.exec(zip["blog.html"].toString("utf8")) || [])[1] || "") : "";
+    const rdMedia = (zip) => zip ? Object.keys(zip).filter((n) => /_media[0-9a-z]\d{3}\./.test(n)).sort() : null;
+    const rdPublish = () => evaluate(`(function () { var b = [...document.querySelectorAll('.bc-btns .ced-btn')].find(function (x) { return x.textContent === 'Publish'; });
+      if (b) b.click(); return !!b; })()`);
+    /* a route button, pressed as soon as the confirm step shows it */
+    const rdRoute = async (label) => {
+      for (let i = 0; i < 40; i++) {
+        if (await pressRoute(label)) return true;
+        await sleep(150);
+      }
+      return false;
+    };
+    try {
+      // RD1. the post, published on the folder route, which the suite
+      // refuses once it has the bytes, so the zip follows with the same
+      await rdOpen("1");
+      await evaluate(`(function () {
+        AMH.tool.repoWriteReady = function () { return false; };
+        AMH.tool.pickRepoWrite = function () { return Promise.resolve({ stub: true }); };
+        AMH.tool.writeRepo = function (files) {
+          window.__rdFolder = files;
+          var err = new Error("BLG-E14 - the suite keeps the bytes the folder was sent, and writes none of them");
+          err.written = [];
+          return Promise.reject(err);
+        };
+        return true; })()`);
+      await evaluate(`window.edit.blog()`);
+      await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+      await rdDate("261030");
+      await rdDrop(RD_FILES, true);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 10`, 30000);
+      rd.nums = await rdCards();
+      const [n0, n1, n2, n3, n4, n5, n6, n7, n8, n9] = rd.nums;
+      rd.n = { photo: n0, clip: n1, wav: n6 };
+      await rdBody("Every kind.\n\n[img" + n0 + ",A photo|The photo]\n[video" + n1 + ",First clip|A clip]\n[video" + n2 + ",Sound clip]\n" +
+        "[audio" + n3 + ",Voice]\n[audio" + n4 + ",AAC tone]\n\n[audio" + n5 + ",MP3 tone]\n\n[nocarousel audio" + n6 + ",WAV tone]\n\n" +
+        "[audio" + n7 + ",Ogg tone]\n[midi" + n8 + ",Song]\n[midi" + n9 + ",Song two]\n\n[nocarousel loop muted video" + n1 + ",Second clip]");
+      await sleep(400);
+      await rdPublish();
+      rd.took = await rdRoute("Write into my repo folder");
+      const z1 = await capturePublish();
+      rd.folder = await evaluate(`(function () { var f = window.__rdFolder; if (!f) return null;
+        var names = Object.keys(f).filter(function (n) { return /_media[0-9a-z]\\d{3}\\./.test(n); }).sort();
+        return Promise.all(names.map(function (n) { return crypto.subtle.digest('SHA-256', f[n]).then(function (h) {
+          return n + ' ' + f[n].length + ' ' + [].map.call(new Uint8Array(h), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); }); })); })()`,
+        { awaitPromise: true });
+      rd.post = rdPostId(z1, /\n(?:[^\n]*\|)?261030([0-9a-z]\d{3})Every kind/);
+      rd.ix1 = z1 ? indexIn(z1) : null;
+      rd.zip1 = z1 ? rdMedia(z1).map((n) => n + " " + z1[n].length + " " + rfSum(z1[n])) : null;
+      rd.month1 = z1 && z1["blog/2610.html"] ? z1["blog/2610.html"].toString("utf8") : "";
+      rd.stream1 = z1 && z1["blog.html"] ? z1["blog.html"].toString("utf8") : "";
+      if (z1) writeBundle(z1);
+
+      // RD2. the site as published: over HTTP, from disk, and with no script
+      await send("Page.navigate", { url: B + "blog/2610.html" });
+      await waitLoaded();
+      await waitFor(`typeof AMH !== "undefined" && !!AMH.work`, 10000);
+      const RD_ART = `document.getElementById(${JSON.stringify("p" + rd.post)})`;
+      const RD_PLAYS = `(function () {
+        var art = ${RD_ART};
+        if (!art) return { figs: -1, players: -1 };
+        var figs = art.querySelectorAll('figure.bp-media');
+        var wav = [].filter.call(figs, function (f) { return /\\.wav$/.test((f.querySelector('source') || {}).getAttribute ? f.querySelector('source').getAttribute('src') : ''); })[0];
+        var out = { figs: figs.length, players: art.querySelectorAll('figure.bp-media[data-player]').length };
+        if (!wav) return out;
+        wav.scrollIntoView({ block: 'center' });
+        var r = wav.getBoundingClientRect(); out.at = { x: Math.round(r.left + 10), y: Math.round(r.bottom - 6) };
+        wav.id = 'rdwav';
+        return out; })()`;
+      rd.http = await evaluate(RD_PLAYS);
+      const rdCap = await evaluate(`(function () { var c = document.querySelector('#rdwav .bp-media__cap'); if (!c) return null;
+        var r = c.getBoundingClientRect(); return { x: Math.round(r.left + 5), y: Math.round(r.top + r.height / 2) }; })()`);
+      if (rdCap) await realClick(rdCap.x, rdCap.y);
+      rd.httpPlay = await evaluate(`(function () { var a = document.querySelector('#rdwav audio'); if (!a) return 'none';
+        return a.play().then(function () { return new Promise(function (res) { setTimeout(function () { var t = a.currentTime; a.pause(); res(t > 0.2 ? 'plays' : 'stuck ' + t); }, 700); }); },
+          function (e) { return 'refused ' + e.name; }); })()`, { awaitPromise: true });
+      await send("Page.navigate", { url: pathToFileURL(join(bdir, "blog", "2610.html")).href });
+      await waitLoaded();
+      await waitFor(`typeof AMH !== "undefined" && !!AMH.work`, 10000);
+      rd.disk = await evaluate(RD_PLAYS);
+      const rdCapD = await evaluate(`(function () { var c = document.querySelector('#rdwav .bp-media__cap'); if (!c) return null;
+        var r = c.getBoundingClientRect(); return { x: Math.round(r.left + 5), y: Math.round(r.top + r.height / 2) }; })()`);
+      if (rdCapD) await realClick(rdCapD.x, rdCapD.y);
+      rd.diskPlay = await evaluate(`(function () { var a = document.querySelector('#rdwav audio'); if (!a) return 'none';
+        return a.play().then(function () { return new Promise(function (res) { setTimeout(function () { var t = a.currentTime; a.pause(); res(t > 0.2 ? 'plays' : 'stuck ' + t); }, 700); }); },
+          function (e) { return 'refused ' + e.name; }); })()`, { awaitPromise: true });
+      await send("Emulation.setScriptExecutionDisabled", { value: true });
+      try {
+        await send("Page.navigate", { url: B + "blog/2610.html?rd=noscript" });
+        await waitLoaded();
+        rd.noScript = await evaluate(`(function () { var art = ${RD_ART} || document.createElement('div');
+          return { players: [].map.call(art.querySelectorAll('figure.bp-media video, figure.bp-media audio'), function (el) {
+              return el.hasAttribute('controls'); }).join(), ready: document.querySelectorAll('[data-player]').length,
+            links: [].map.call(art.querySelectorAll('figure.bp-media a.bp-media__file'), function (a) { return !!a.getAttribute('download'); }).join() }; })()`);
+      } finally {
+        await send("Emulation.setScriptExecutionDisabled", { value: false });
+      }
+
+      // RD3. one placement edited: the other keeps its words, and no file moves
+      await rdOpen("3");
+      await evaluate(`window.edit.blog.edit(${JSON.stringify(rd.post)})`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 10`, 15000);
+      await evaluate(miClick(".bc-tab", "Media"));
+      rd.edit = await evaluate(`(function () {
+        var card = document.querySelector('.bc-panel .bc-card[data-num="${rd.n.clip}"]'); if (!card) return null;
+        var place = card.querySelector('.bc-place');
+        var out = { chooser: place.hidden ? 'hidden' : [].map.call(place.options, function (o) { return o.textContent; }).join(' / ') };
+        place.value = '0'; place.dispatchEvent(new Event('change'));
+        var sound = [...card.querySelectorAll('.bc-opt')].find(function (o) { return o.textContent.trim().indexOf('Sound') === 0; }).querySelector('select');
+        sound.value = 'muted'; sound.dispatchEvent(new Event('change'));
+        out.body = document.querySelector('.bc-write textarea').value;
+        return out; })()`);
+      await pressPublish();
+      const z3 = await capturePublish();
+      rd.zip3 = z3 ? rdMedia(z3) : null;
+      rd.month3 = z3 && z3["blog/2610.html"] ? z3["blog/2610.html"].toString("utf8") : "";
+      rd.post3 = rdPostId(z3, /\n(?:[^\n]*\|)?261030([0-9a-z]\d{3})Every kind/);
+      if (z3) writeBundle(z3);
+      rd.onDisk = RD_FILES.map((name) => {
+        const p = rdPath(name) ? join(bdir, rdPath(name)) : "";
+        return name + " " + (p && existsSync(p) && rfSum(readFileSync(p)) === rfFact(name).sha256 ? "same" : "differs");
+      });
+
+      // RD4. the post moves to another month, and a second post reuses a file
+      await rdOpen("4");
+      await evaluate(`window.edit.blog.edit(${JSON.stringify(rd.post)})`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 10`, 15000);
+      await rdDate("261105");
+      await pressPublish();
+      const z4 = await capturePublish();
+      rd.zip4 = z4 ? rdMedia(z4) : null;
+      rd.month4 = z4 && z4["blog/2611.html"] ? z4["blog/2611.html"].toString("utf8") : "";
+      rd.stream4 = z4 && z4["blog.html"] ? z4["blog.html"].toString("utf8") : "";
+      if (z4) writeBundle(z4);
+      await rdOpen("5");
+      await evaluate(`window.edit.blog()`);
+      await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+      await rdDate("261108");
+      await rdBody("Reused.\n\n[nocarousel audio" + rd.n.wav + ",Reused tone]");
+      await sleep(500);
+      rd.reuseCards = await evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) { return c.getAttribute('data-num') + ':' + c.getAttribute('data-kind'); })`);
+      await pressPublish();
+      const z5 = await capturePublish();
+      rd.reuse = rdPostId(z5, /\n(?:[^\n]*\|)?261108([0-9a-z]\d{3})Reused/);
+      rd.zip5 = z5 ? rdMedia(z5) : null;
+      rd.month5 = z5 && z5["blog/2611.html"] ? z5["blog/2611.html"].toString("utf8") : "";
+      rd.ix5 = z5 ? indexIn(z5) : null;
+      if (z5) writeBundle(z5);
+
+      // RD5. placements come out: one, then the last; the file stays; a
+      // rebuild keeps it unused; a new post takes it again with no upload
+      await rdOpen("6");
+      await evaluate(`window.edit.blog.edit(${JSON.stringify(rd.post)})`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 10`, 15000);
+      await evaluate(miClick(".bc-tab", "Media"));
+      await evaluate(`(function () { var card = document.querySelector('.bc-panel .bc-card[data-num="${rd.n.clip}"]'); if (!card) return false;
+        var place = card.querySelector('.bc-place'); place.value = '1'; place.dispatchEvent(new Event('change'));
+        var b = [...card.querySelectorAll('.bc-card__btns button')].find(function (x) { return x.textContent === 'Remove placement'; });
+        if (b) b.click(); return !!b; })()`);
+      await pressPublish();
+      const z6 = await capturePublish();
+      rd.ix6 = z6 ? indexIn(z6) : null;
+      if (z6) writeBundle(z6);
+      await rdOpen("7");
+      await evaluate(`window.edit.blog.edit(${JSON.stringify(rd.post)})`);
+      await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 10`, 15000);
+      await evaluate(miClick(".bc-tab", "Media"));
+      await evaluate(`(function () { var card = document.querySelector('.bc-panel .bc-card[data-num="${rd.n.clip}"]'); if (!card) return false;
+        var b = [...card.querySelectorAll('.bc-card__btns button')].find(function (x) { return x.textContent === 'Remove'; });
+        if (b) b.click(); return !!b; })()`);
+      await pressPublish();
+      const z7 = await capturePublish();
+      rd.ix7 = z7 ? indexIn(z7) : null;
+      if (z7) writeBundle(z7);
+      await rdOpen("8");
+      await evaluate(`window.edit.blog.rebuild()`);
+      await passRouteStep();
+      const z8 = await capturePublish();
+      rd.ix8 = z8 ? indexIn(z8) : null;
+      rd.search8 = z8 && z8["search.js"] ? searchTable(z8["search.js"].toString("utf8")) : null;
+      rd.feed8 = z8 && z8["feed.xml"] ? z8["feed.xml"].toString("utf8") : "";
+      if (z8) writeBundle(z8);
+      await rdOpen("9");
+      await evaluate(`window.edit.blog()`);
+      await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+      await rdDate("261110");
+      await rdBody("Back again.\n\n[video" + rd.n.clip + ",Back again]");
+      await sleep(500);
+      rd.againCards = await evaluate(`[...document.querySelectorAll('.bc-panel .bc-card')].map(function (c) { return c.getAttribute('data-num') + ':' + c.getAttribute('data-kind') + ':' + /published/.test(c.textContent); })`);
+      await pressPublish();
+      const z9 = await capturePublish();
+      rd.again = rdPostId(z9, /\n(?:[^\n]*\|)?261110([0-9a-z]\d{3})Back again/);
+      rd.zip9 = z9 ? rdMedia(z9) : null;
+      rd.ix9 = z9 ? indexIn(z9) : null;
+      if (z9) writeBundle(z9);
+
+      // RD6. a folder write that stops after real writes, and then a zip
+      // that fails as well. Neither bundle reaches the site, so each run
+      // clears the staging layer it leaves.
+      const RD_STEP = `(function () { var w = document.querySelector('.bc-wizard');
+          var step = w && w.getAttribute('data-step');
+          if (step !== 'done' && step !== 'failed') return null;
+          /* the page reads a zip after the Done step draws */
+          if (step === 'done' && (AMH.publish.record() || {}).route === 'zip' && window.__zipB64 === null) return null;
+          var line = document.querySelector('.ced-publish');
+          return { step: step, partial: (AMH.publish.record() || {}).partial || null, folder: window.__folder(),
+            zipped: window.__zipB64 !== null, staged: !!AMH.publish.record(), route: (AMH.publish.record() || {}).route || '',
+            line: line ? !line.hidden : 'none', dirty: AMH.publish.dirty(),
+            ids: (window.__wrote['blog.html'] || '').match(/261112[0-9a-z]\\d{3}Partly/g) || [],
+            fell: [...w.querySelectorAll('.bc-wiz__fell')].map(function (p) { return p.textContent; }),
+            body: w.querySelector('.bc-wiz__body').textContent }; })()`;
+      const rdPartial = async (tag, zipFails) => {
+        await send("Page.navigate", { url: B + "blog.html?rd=" + tag });
+        await sdEditorOn();
+        await evaluate(FAKE_REPO);
+        await evaluate(MEDIA_FIX);
+        await evaluate(ZIP_CAPTURE);
+        await evaluate(`window.confirm = function () { return true; }; true`);
+        if (zipFails) await evaluate(`window.__rdZip = AMH.tool.zip; AMH.tool.zip = function () { throw new Error("the zip has no room"); }; true`);
+        await evaluate(`window.edit.blog()`);
+        await waitFor(`!!document.querySelector('.bc-panel .bc-drop')`, 8000);
+        await rdDate("261112");
+        await rdDrop(["tone.ogg"], false);
+        await waitFor(`document.querySelectorAll('.bc-panel .bc-card').length === 1`, 15000);
+        const num = (await rdCards())[0];
+        await rdBody("Partly.\n\n[nocarousel audio" + num + ",Partly]");
+        await sleep(400);
+        await evaluate(`window.__refuse = { ${JSON.stringify("blog/261112_media" + num + ".ogg")}: true }; true`);
+        await rdPublish();
+        const took = await rdRoute("Write into my repo folder");
+        const shown = await waitFor(RD_STEP, 20000);
+        let again = null;
+        if (zipFails) {
+          /* the cause is gone, and the post goes back to the composer and is
+             published again from there */
+          await evaluate(`(function () { AMH.tool.zip = window.__rdZip; window.__refuse = {};
+            var b = [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')].find(function (x) { return x.textContent === 'Back to the post'; });
+            if (b) b.click(); return !!b; })()`);
+          await waitFor(`!document.querySelector('.bc-wizard')`, 5000);
+          await rdPublish();
+          const tookAgain = await rdRoute("Write into my repo folder");
+          again = await waitFor(RD_STEP, 20000);
+          if (again) again.took = tookAgain;
+        }
+        await evaluate(`AMH.tool.layerSave(null); true`);
+        return { num, took, shown, again };
+      };
+      rd.partial = await rdPartial("10", false);
+      rd.zipFailed = await rdPartial("11", true);
+    } finally {
+      try { bs?.kill(); } catch {}
+      bs = null;
+    }
+  }
+  check("media delivery: every media file of a post goes to the folder and into the zip byte for byte as it was dropped, each once, named for the post's date",
+    !!rd && rd.took === true && !!rd.folder && !!rd.zip1 && rd.folder.length === 9 && rd.zip1.length === 9 &&
+    RD_FILES.every((name) => { const p = rdPath(name); return /^blog\/261030_media[0-9a-z]\d{3}\.[a-z0-9]+$/.test(p) &&
+      rd.folder.indexOf(p + " " + rdWant(name)) !== -1 && rd.zip1.indexOf(p + " " + rdWant(name)) !== -1; }),
+    JSON.stringify(rd && { took: rd.took, paths: RD_FILES.map(rdPath), folder: rd.folder, zip: rd.zip1 }).slice(0, 1400));
+  const rdFig = (html, n) => ((html || "").match(new RegExp('<figure class="bp-media[^"]*"[^>]*>(?:(?!</figure>)[\\s\\S])*_media' + n + '\\.[\\s\\S]*?</figure>', "g")) || []);
+  const rdArt1 = rd ? rdPostOf(rd.month1, rd.post) : "";
+  check("media delivery: the month file and the stream draw every file with its kind, its words and its options, and a file placed twice twice, each placement its own",
+    !!rd && !!rdArt1 && rdFig(rdArt1, rd.n.clip).length === 2 &&
+    /data-caption="First clip"/.test(rdFig(rdArt1, rd.n.clip)[0]) && !/data-loop/.test(rdFig(rdArt1, rd.n.clip)[0]) &&
+    /bp-media--alone[^>]*data-sound="muted" data-loop="1" data-caption="Second clip"/.test(rdFig(rdArt1, rd.n.clip)[1]) &&
+    (rdArt1.match(/<figure class="bp-media[^"]*" data-kind="midi"/g) || []).length === 2 &&
+    (rdArt1.match(/<figure class="bp-media[^"]*" data-kind="audio"/g) || []).length === 5 &&
+    (rdArt1.match(/<figure class="bp-media[^"]*" data-kind="video"/g) || []).length === 3 &&
+    rdArt1.indexOf('src="../' + rdPath("tone.wav") + '"') !== -1 && rd.stream1.indexOf('src="' + rdPath("tone.wav") + '"') !== -1 &&
+    rdArt1.indexOf('download="song.midi"') !== -1,
+    JSON.stringify(rd && { post: rd.post, art: rdArt1.length, wav: rdPath("tone.wav"), clip: rdFig(rdArt1, rd.n.clip).map((f) => f.slice(0, 200)) }).slice(0, 900));
+  check("media delivery: the published month works over HTTP and from disk, a sound there plays, and with no script every player keeps its controls and every file its link",
+    !!rd && rd.http && rd.http.figs === 10 && rd.http.players === 8 && rd.httpPlay === "plays" &&
+    rd.disk && rd.disk.players === 8 && rd.diskPlay === "plays" && !!rd.noScript && rd.noScript.ready === 0 &&
+    rd.noScript.players === "true,true,true,true,true,true,true,true" &&
+    rd.noScript.links === "true,true,true,true,true,true,true,true,true,true",
+    JSON.stringify(rd && { http: rd.http, play: rd.httpPlay, disk: rd.disk, diskPlay: rd.diskPlay, noScript: rd.noScript }));
+  check("media delivery: one placement of a file placed twice is edited on its own, the post keeps its id, and the next bundle moves and copies no file",
+    !!rd && !!rd.edit && rd.edit.chooser === "Placement 1 of 2, line 4 / Placement 2 of 2, line 17" &&
+    rd.edit.body.indexOf("[muted video" + rd.n.clip + ",First clip|A clip]") !== -1 &&
+    rd.edit.body.indexOf("[nocarousel loop muted video" + rd.n.clip + ",Second clip]") !== -1 && !!rd.zip3 && rd.zip3.length === 0 &&
+    /data-sound="muted" data-caption="First clip"/.test(rdPostOf(rd.month3, rd.post)) && rd.post3 === rd.post &&
+    rd.onDisk.every((s) => / same$/.test(s)),
+    JSON.stringify(rd && { edit: rd.edit, zip: rd.zip3, post: [rd.post, rd.post3], disk: rd.onDisk }).slice(0, 900));
+  check("media delivery: a post moved to another month keeps every file's path and date, and a second post reuses a file from the index with no upload",
+    !!rd && !!rd.zip4 && rd.zip4.length === 0 && rdPostOf(rd.month4, rd.post).indexOf('src="../' + rdPath("tone.wav") + '"') !== -1 &&
+    rd.stream4.indexOf('src="' + rdPath("clip.mp4") + '"') !== -1 && !!rd.reuse && rd.zip5 && rd.zip5.length === 0 &&
+    JSON.stringify(rd.reuseCards) === JSON.stringify([rd.n.wav + ":audio"]) &&
+    rdPostOf(rd.month5, rd.reuse).indexOf('src="../' + rdPath("tone.wav") + '"') !== -1 &&
+    JSON.stringify(((rdEntry(rd.ix5, "tone.wav") || {}).used || []).slice().sort()) === JSON.stringify(["p" + rd.post, "p" + rd.reuse].sort()),
+    JSON.stringify(rd && { zip4: rd.zip4, reuse: rd.reuse, cards: rd.reuseCards, used: (rdEntry(rd.ix5, "tone.wav") || {}).used }).slice(0, 700));
+  check("media delivery: a file loses one placement and stays used, loses its last and is unused with its file where it was, a rebuild keeps it, and a new post takes it again with no upload",
+    !!rd && JSON.stringify((rdEntry(rd.ix6, "clip.mp4") || {}).used) === JSON.stringify(["p" + rd.post]) &&
+    JSON.stringify((rdEntry(rd.ix7, "clip.mp4") || {}).used) === "[]" && existsSync(join(bdir, rdPath("clip.mp4"))) &&
+    JSON.stringify((rdEntry(rd.ix8, "clip.mp4") || {}).used) === "[]" && (rdEntry(rd.ix8, "clip.mp4") || {}).kind === "video" &&
+    (rdEntry(rd.ix8, "clip.mp4") || {}).base === rdPath("clip.mp4").replace(/\.mp4$/, "") &&
+    JSON.stringify(rd.againCards) === JSON.stringify([rd.n.clip + ":video:true"]) && !!rd.again && rd.zip9 && rd.zip9.length === 0 &&
+    JSON.stringify((rdEntry(rd.ix9, "clip.mp4") || {}).used) === JSON.stringify(["p" + rd.again]),
+    JSON.stringify(rd && { six: (rdEntry(rd.ix6, "clip.mp4") || {}).used, seven: (rdEntry(rd.ix7, "clip.mp4") || {}).used,
+      eight: rdEntry(rd.ix8, "clip.mp4"), cards: rd.againCards, nine: (rdEntry(rd.ix9, "clip.mp4") || {}).used }).slice(0, 900));
+  const rdPostText = (rd && rd.search8 && (rd.search8.posts || []).find((p) => p.id === rd.post)) || null;
+  const rdReuseText = (rd && rd.search8 && (rd.search8.posts || []).find((p) => p.id === rd.reuse)) || null;
+  check("media delivery: the search index and the feed carry a post's words and never its tag options, and a post's small picture is a photo's or none",
+    !!rdPostText && !RD_WORDS.some((w) => rdPostText.text.indexOf(w) !== -1) && /^blog\/\d{6}_img[0-9a-z]\d{3}_sd\.webp$/.test(rdPostText.thumb) && rdPostText.thumb.indexOf("_img" + rd.n.photo + "_sd.webp") !== -1 &&
+    !!rdReuseText && rdReuseText.thumb === "" && !!rd.feed8 && !RD_WORDS.some((w) => rd.feed8.indexOf(w) !== -1),
+    JSON.stringify({ post: rdPostText && { text: rdPostText.text, thumb: rdPostText.thumb }, reuse: rdReuseText && rdReuseText.thumb }).slice(0, 600));
+  const rdP = rd && rd.partial, rdZ = rd && rd.zipFailed;
+  const rdPartWords = (p) => "The folder write stopped partway. 2 files were written into the folder before it stopped at blog/261112_media" +
+    p.num + ".ogg: blog.html blog/2611.html.";
+  /* the facts first, and the wizard's long body last, where a cut falls */
+  const rdSaid = (p) => JSON.stringify(p && { num: p.num, took: p.took, again: p.again && Object.assign({}, p.again, { body: "", fell: [] }),
+    shown: p.shown && Object.assign({}, p.shown, { body: p.shown.body.slice(0, 300) }) }).slice(0, 1400);
+  check("media delivery: a folder write that stops after real writes names the files it wrote and the one it stopped at, leaves no empty file there, and the zip holds the whole bundle",
+    !!rdP && rdP.took === true && !!rdP.shown && rdP.shown.step === "done" && !!rdP.shown.partial &&
+    JSON.stringify(rdP.shown.partial.wrote) === '["blog.html","blog/2611.html"]' &&
+    rdP.shown.partial.stopped === "blog/261112_media" + rdP.num + ".ogg" &&
+    rdP.shown.folder.indexOf("blog/2611.html") !== -1 && rdP.shown.folder.indexOf("blog/261112_media" + rdP.num + ".ogg") === -1 &&
+    rdP.shown.zipped === true && rdP.shown.line === true && rdP.shown.fell.some((t) => t.indexOf(rdPartWords(rdP)) === 0),
+    rdSaid(rdP));
+  check("media delivery: when the zip after a partial folder write fails as well, the failed step names the files the folder holds, the tab keeps no bundle, and the post published again keeps its id",
+    !!rdZ && rdZ.took === true && !!rdZ.shown && rdZ.shown.step === "failed" &&
+    /^The zip that should hold the whole bundle could not be made: the zip has no room/.test(rdZ.shown.body) &&
+    rdZ.shown.fell.some((t) => t.indexOf(rdPartWords(rdZ)) === 0 && t.indexOf("Put those files back as they were before you publish again") !== -1) &&
+    rdZ.shown.body.indexOf("Nothing was written") === -1 && rdZ.shown.zipped === false &&
+    rdZ.shown.staged === false && rdZ.shown.line === false && rdZ.shown.dirty === true && rdZ.shown.ids.length === 1 &&
+    !!rdZ.again && rdZ.again.took === true && rdZ.again.step === "done" && rdZ.again.route === "folder" &&
+    JSON.stringify(rdZ.again.ids) === JSON.stringify(rdZ.shown.ids) &&
+    rdZ.again.folder.indexOf("blog/261112_media" + rdZ.num + ".ogg") !== -1,
+    rdSaid(rdZ));
+
   // ============ MP. MEDIA FILES ON A PUBLISHED SITE ============
   // On this run's own site. A post places a video the index holds: its
   // month file carries the browser's player and a link to the file, and
@@ -15307,8 +17212,8 @@ async function main() {
     'width="640" height="360" aria-label="A short orbit"><source src="../blog/260712_media0093.mp4" type="video/mp4" /></video>' +
     '<figcaption class="bp-media__cap">Orbit clip</figcaption><a class="bp-media__file" href="../blog/260712_media0093.mp4" ' +
     'download="orbit clip.mp4" type="video/mp4">Download orbit clip.mp4 (1 KB)</a></figure>';
-  check("media publish: a post places a video the index holds with no card, its month file carries the player and the link, the stream the same one step up, and the bundle carries no copy of the file",
-    !!mp && mp.cards === 0 && !!mp.post && mp.month1.indexOf('<div class="gallery">' + MP_PLAYER + "</div>") !== -1 &&
+  check("media publish: a post places a video the index holds with its card from the index, its month file carries the player and the link, the stream the same one step up, and the bundle carries no copy of the file",
+    !!mp && mp.cards === 1 && !!mp.post && mp.month1.indexOf('<div class="gallery">' + MP_PLAYER + "</div>") !== -1 &&
     mp.stream1.indexOf('<source src="blog/260712_media0093.mp4" type="video/mp4" />') !== -1 &&
     !!mp.zip1 && !mp.zip1.some((n) => /media0093/.test(n)) && !!mp.entry1 && mp.entry1.kind === "video" &&
     JSON.stringify(mp.entry1.used) === JSON.stringify(["p" + mp.post]) &&
