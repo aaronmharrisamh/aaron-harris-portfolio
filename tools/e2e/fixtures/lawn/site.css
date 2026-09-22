@@ -1,0 +1,138 @@
+/* ============================================================
+   site.css - Greenline Mowing's own style: the theme in a light
+   green palette, and the layout of its three pages.
+
+   Every page links the engine's engine.css first and this file
+   second, so a token set here wins. This file sets every token the
+   engine reads. Each text color reads at a contrast of 4.5 to 1 or
+   better on each of the four surfaces.
+
+   Sections:
+     1. THEME TOKENS
+     2. PAGE LAYOUT
+   ============================================================ */
+
+/* ============================================================
+   1. THEME TOKENS
+   ------------------------------------------------------------
+   The engine's theme contract, all 26 tokens, in the order of its
+   README table.
+   ============================================================ */
+:root {
+  /* surfaces: a pale green ground and white panels */
+  --bg:        #f1f7ee;
+  --bg-deep:   #e2eedc;
+  --panel:     #ffffff;
+  --panel-2:   #f5faf2;
+  --line:      rgba(23, 58, 34, .16);
+  --line-soft: rgba(23, 58, 34, .08);
+
+  /* text: dark greens */
+  --text:      #173a22;
+  --text-soft: #2c5236;
+  --muted:     #48664f;
+  --dim:       #56705c;
+
+  /* accent: a mid green, darker where it is text on a panel */
+  --accent:        #28722d;
+  --accent-bright: #1f6a25;
+  --accent-deep:   #1b5320;
+  --accent-glow:   rgba(40, 114, 45, .30);
+  --accent-faint:  rgba(40, 114, 45, .10);
+
+  /* second colors, deep enough to hold black text */
+  --c-orange: #e07b28;
+  --c-yellow: #e8b100;
+  --c-lime:   #7cb518;
+
+  /* type: the system's own sans, so the site loads no font */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+
+  /* space */
+  --section-pad: clamp(2.5rem, 6vw, 4.5rem);
+  --gutter:      clamp(1rem, 4vw, 2rem);
+  --maxw:        960px;
+
+  /* shape and motion */
+  --radius:    12px;
+  --radius-sm: 8px;
+  --ease:      cubic-bezier(.22, 1, .36, 1);
+  --ease-soft: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ============================================================
+   2. PAGE LAYOUT
+   ------------------------------------------------------------
+   The header, the intro, the services, the photo and the footer.
+   The carousel and the gallery grid are the engine's.
+   ============================================================ */
+.wrap {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem 1.5rem;
+  padding: .9rem var(--gutter);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.brand__title {
+  font-weight: 800;
+  letter-spacing: .14em;
+  color: var(--accent-deep);
+}
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+.nav a { color: var(--text-soft); font-weight: 600; }
+.nav a:hover { color: var(--accent); }
+.nav a[aria-current="page"] { color: var(--accent); }
+
+.intro { padding: var(--section-pad) 0 1.5rem; }
+.intro h1 {
+  font-size: clamp(1.9rem, 4vw, 2.8rem);
+  line-height: 1.15;
+  color: var(--accent-deep);
+}
+.intro p {
+  max-width: 40rem;
+  margin-top: 1rem;
+  color: var(--text-soft);
+}
+
+.services { padding-bottom: var(--section-pad); }
+.service-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+}
+.service {
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.service h2 { font-size: 1.15rem; }
+.service p { margin-top: .5rem; color: var(--text-soft); }
+
+.photo { padding-bottom: var(--section-pad); }
+
+.site-footer { border-top: 1px solid var(--line); }
+.endbar {
+  padding: 1.5rem var(--gutter);
+  text-align: center;
+  font-size: .9rem;
+  color: var(--muted);
+}

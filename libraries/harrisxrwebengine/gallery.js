@@ -828,10 +828,14 @@
      data-span is written as the tile's PREFERENCE, not as whatever the
      packer drew it at. Widening and reordering are decisions about one
      viewport; the file keeps what the author asked for. A reader with no
-     script then gets the preference, which is the honest fallback. */
-  function serializeTrain(entries, indent, head) {
+     script then gets the preference, which is the honest fallback.
+
+     page is the page the markup is written into, and each path is written
+     from it. With no page it is the page on screen. */
+  function serializeTrain(entries, indent, head, page) {
     var h = head || { label: "Section", title: "", year: "" };
     var esc = TOOL.escAttr;
+    var from = { prefix: AMH.site.prefixOf(page || AMH.site.pagePath()) };
     var band =
       indent + '  <header class="gal-train__head">\n' +
       indent + '    <span class="gal-train__n"><i class="gal-train__i"></i>' +
@@ -851,7 +855,7 @@
       /* the src is the contract's too: with Display Maximum UHD on, it is
          the original and not the entry's display copy */
       var src = e.src, shown = "", notes = "";
-      AMH.images.attrs(e, slotFor(w)).forEach(function (a) {
+      AMH.images.attrs(e, slotFor(w), from).forEach(function (a) {
         if (a[0] === "src") { src = a[1]; return; }
         var line = pad + a[0] + '="' + esc(a[1]) + '"';
         if (a[0].indexOf("data-") === 0) notes += line;
@@ -890,8 +894,8 @@
       var held = entry.photo ? AMH.images.preview(entry.photo) : null;
       if (held) { held.uhd = entry.uhd; held.truesize = entry.truesize; }
       if (held) setAttrs(img, AMH.images.attrs(held, null));
-      else if (entry.preview && entry.preview !== entry.src) img.src = entry.preview;
-      else setAttrs(img, AMH.images.attrs(entry, slotFor(w)));
+      else if (entry.preview && entry.preview !== entry.src) img.src = AMH.site.onPage(entry.preview);
+      else setAttrs(img, AMH.images.attrs(entry, slotFor(w), { prefix: AMH.site.prefix() }));
     }
     img.alt = entry.alt || "";
     img.setAttribute("loading", "lazy");

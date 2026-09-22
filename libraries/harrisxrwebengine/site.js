@@ -253,7 +253,40 @@
   function prefix() {
     var p = pathOf(location.href);
     if (p === null) return "";
-    return new Array(p.split("/").length).join("../");
+    return prefixOf(p);
+  }
+  /* The same way up, from any page. page is a path from the site root. */
+  function prefixOf(page) {
+    return new Array(String(page || "").split("/").length).join("../");
+  }
+  /* True for an address that is not a path from a page: one with a scheme,
+     such as https: or blob:, or one that starts at the server's root. It
+     means the same on every page, so it is written as it is. */
+  function isAddress(ref) {
+    return ref.charAt(0) === "/" || /^[a-z][a-z0-9+.-]*:/i.test(ref);
+  }
+  /* A path written on page, as a path from the site root. page is a path
+     from the root. This is text arithmetic and reads no address, so it can
+     read a page that is not on screen. A path that climbs out of the root
+     keeps one "../" for each folder it climbs. An address, and a path that
+     is only a query or a fragment, come back as they are. */
+  function fromPage(page, ref) {
+    var s = String(ref || "");
+    var cut = s.search(/[?#]/);
+    if (!s || cut === 0 || isAddress(s)) return s;
+    var tail = cut === -1 ? "" : s.slice(cut);
+    var out = String(page || "").split("/").slice(0, -1), up = [];
+    (cut === -1 ? s : s.slice(0, cut)).split("/").forEach(function (seg) {
+      if (seg === "..") { if (out.length) out.pop(); else up.push(".."); }
+      else if (seg !== ".") out.push(seg);
+    });
+    return up.concat(out).join("/") + tail;
+  }
+  /* A path from the site root, as this page writes it. An address goes as
+     it is. */
+  function onPage(path) {
+    var s = String(path || "");
+    return !s || isAddress(s) ? s : prefix() + s;
   }
 
   /* Write the address and keep what the page remembers. */
@@ -579,10 +612,16 @@
      The absolute address of the site root and of the engine's folder,
      each with a trailing slash.
 
-     AMH.site.prefix()
-     The way from this page up to the site root: "" at the root, "../"
-     one folder down. prefix() in front of a path from the root makes a
-     path from this page.
+     AMH.site.prefix(), AMH.site.prefixOf(page)
+     The way from this page, or from page, up to the site root: "" at the
+     root, "../" one folder down. The prefix in front of a path from the
+     root makes a path from that page.
+
+     AMH.site.fromPage(page, ref), AMH.site.onPage(path)
+     The two ends of a path the engine keeps. fromPage turns ref, a path
+     written on page, into a path from the site root, and onPage turns a
+     path from the root into the path this page writes. An address with a
+     scheme, such as a blob: URL, passes through both as it is.
 
      AMH.site.pagePath()
      This page's path from the site root: "index.html" for the root's own
@@ -606,6 +645,9 @@
     root: root,
     libraryRoot: libraryRoot,
     prefix: prefix,
+    prefixOf: prefixOf,
+    fromPage: fromPage,
+    onPage: onPage,
     pagePath: pagePath,
     pathOf: pathOf,
     key: key

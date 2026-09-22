@@ -15,10 +15,17 @@ Three families share one page:
 
 They share one stack, so a close marker that crosses a family boundary is an
 error here rather than a silent reinterpretation at export time.
-"""
-import io, os, re, sys
 
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+The site is the repo root unless --site names another site's root:
+
+    py -3 tools/e2e/check_markers.py --site tools/e2e/fixtures/lawn
+"""
+import argparse, io, os, re, sys
+
+REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+ARGS = argparse.ArgumentParser(description="Validate the marker families in every managed page.")
+ARGS.add_argument("--site", default=REPO, help="the site root to check (default: the repo root)")
+ROOT = os.path.abspath(ARGS.parse_args().site)
 
 def config_pages(root):
     """Every path in the pages list of site.config.js, in its order."""

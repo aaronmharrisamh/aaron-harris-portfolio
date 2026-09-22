@@ -2,7 +2,7 @@
 // Run:  node tools/e2e/e2e_test.mjs   (from anywhere; paths self-locate)
 // Requires: node 22+ (native WebSocket/fetch), Chrome, py launcher (http.server).
 // The harness starts its own local server and Chrome, and cleans both up.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, mkdtempSync, writeFileSync, copyFileSync, cpSync, existsSync, unlinkSync } from "node:fs";
 import vm from "node:vm";
 import { tmpdir } from "node:os";
@@ -51,6 +51,22 @@ for (const page of ["index.html", "gallery.html", "blog.html"]) {
 for (const d of ["img", "tools", "libraries"]) {
   try { cpSync(join(REPO, d), join(SERVE, d), { recursive: true }); } catch {}
 }
+// The engine's second site, Greenline Mowing, from tools/e2e/fixtures/lawn/.
+// It is served at /lawn/ on this origin with this commit's engine copied
+// under it, because the fixture holds no engine of its own. lawnpin is the
+// same site pinned to a release no engine has, and amhpin is this site's
+// blog page pinned the same way. The LW section reads all three.
+const LAWN_FIXTURE = join(REPO, "tools", "e2e", "fixtures", "lawn");
+const LAWN_CONFIG_TEXT = readFileSync(join(LAWN_FIXTURE, "site.config.js"), "utf8");
+const wrongPin = (text) => text.replace(/engineVersion: "[^"]*"/, 'engineVersion: "0.0.0"');
+for (const d of ["lawn", "lawnpin"]) {
+  cpSync(LAWN_FIXTURE, join(SERVE, d), { recursive: true });
+  cpSync(join(REPO, LIB), join(SERVE, d, LIB), { recursive: true });
+}
+writeFileSync(join(SERVE, "lawnpin", "site.config.js"), wrongPin(LAWN_CONFIG_TEXT));
+cpSync(join(REPO, LIB), join(SERVE, "amhpin", LIB), { recursive: true });
+for (const f of ["blog.html", "site.css"]) copyFileSync(join(SERVE, f), join(SERVE, "amhpin", f));
+writeFileSync(join(SERVE, "amhpin", "site.config.js"), wrongPin(SITE_CONFIG_TEXT));
 const server = spawn("py", ["-3", "-m", "http.server", String(SERVER_PORT), "--bind", "127.0.0.1"],
   { cwd: SERVE, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 1500));
@@ -420,7 +436,12 @@ function listItems(txt, name) {
 }
 
 function exportIsByteExact(page, exported, editedSlugs, listNames = []) {
-  const src = servedSource(page);
+  return sameOutside(page, servedSource(page), exported, editedSlugs, listNames);
+}
+
+// The same comparison against any source text: the lawn's pages are compared
+// with the fixture's own files. page names the page in the detail.
+function sameOutside(page, src, exported, editedSlugs, listNames = []) {
   const srcNoLists = stripLists(src, listNames);
   const expNoLists = stripLists(exported, listNames);
   if (srcNoLists === null) return { ok: false, detail: page + ": a list is missing from the source" };
@@ -9986,7 +10007,8 @@ async function main() {
     await sleep(2200);
     await evaluate(ZIP_CAPTURE);
     await evaluate(`window.edit.blog.edit(${JSON.stringify(mayId || "0000")})`);
-    await sleep(1200);
+    // The composer opens a post only after a read, so wait for its button.
+    await waitFor(`!![...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post')`, 8000);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
     await passRouteStep();
     const zipMayGone = await capturePublish();
@@ -11229,7 +11251,8 @@ async function main() {
     const ixBefore5 = indexIn(null);
     const basesBefore5 = (ixBefore5.images || []).filter((e) => e.num).map((e) => e.num + ":" + e.base).sort().join("|");
     await evaluate(`window.edit.blog.edit("0002")`);
-    await sleep(1200);
+    // The composer opens a post only after a read, so wait for its button.
+    await waitFor(`!![...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post')`, 8000);
     await evaluate(`[...document.querySelectorAll('.bc-btns .ced-btn')].find(b => b.textContent === 'Delete post').click()`);
     await passRouteStep();
     const zip5 = await capturePublish();
@@ -17729,6 +17752,414 @@ async function main() {
     JSON.stringify({ cards: [il6a.view, il6a.cards, il6a.term, il6a.pill, il6a.filterOn, il6a.more],
       list: [il6b.view, il6b.lines.length, il6b.pill, il6b.names] }));
   await sdClose();
+
+  // ============ LW. THE ENGINE'S SECOND SITE ============
+  // Greenline Mowing, a fictional lawn care site in tools/e2e/fixtures/lawn/,
+  // served at /lawn/ on this origin with this commit's engine under it: see
+  // the serve step at the top. It has another siteId, no blog, a light theme
+  // and a page one folder down, which is the first nested page the engine
+  // writes. The section runs last, because it writes the lawn's own storage
+  // on the origin that every check before it shares. It clears what it
+  // stages when it ends.
+  const LAWN = `http://127.0.0.1:${SERVER_PORT}/lawn/`;
+  const LAWN_PAGES = ["index.html", "services/mowing.html", "photos.html"];
+  const lawnFile = (page) => readFileSync(join(LAWN_FIXTURE, page), "utf-8");
+  // Every file of the fixture, as paths from its root. A folder ends in "/".
+  const lawnTree = [];
+  (function walk(dir, rel) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      lawnTree.push(rel + e.name + (e.isDirectory() ? "/" : ""));
+      if (e.isDirectory()) walk(join(dir, e.name), rel + e.name + "/");
+    }
+  })(LAWN_FIXTURE, "");
+  // The --panel token a site's site.css sets, as the rgb() a browser reports.
+  const panelOf = (file) => {
+    const hex = (/--panel:\s*#([0-9a-fA-F]{6})/.exec(readFileSync(file, "utf8")) || [])[1] || "000000";
+    return "rgb(" + [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ") + ")";
+  };
+  // Open a page and wait for its engine. The first read of AMH goes through
+  // waitFor, because a page that has not run its scripts yet throws on it.
+  async function siteOpen(url) {
+    exceptions.length = 0;
+    await send("Page.navigate", { url });
+    await waitLoaded();
+    return !!(await waitFor(`!!(window.AMH && AMH.site && AMH.tool && AMH.tool.pages)`, 8000));
+  }
+  // Every name this origin keeps under one site's id, with its value, and
+  // the site's databases.
+  const storedUnder = (id) => `(async function () {
+    var pre = ${JSON.stringify(id + "-")}, keys = {};
+    [localStorage, sessionStorage].forEach(function (s, i) {
+      Object.keys(s).sort().forEach(function (k) {
+        if (k.indexOf(pre) === 0) keys[(i ? "session:" : "local:") + k] = s.getItem(k);
+      });
+    });
+    var dbs = indexedDB.databases ? (await indexedDB.databases()).map(function (d) { return d.name; }) : [];
+    return { keys: keys, dbs: dbs.filter(function (n) { return n.indexOf(pre) === 0; }).sort() };
+  })()`;
+  // One region edit through its chip. quick presses Quicksave before Apply.
+  async function chipEdit(slug, html, quick) {
+    await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === ${JSON.stringify(slug)}).click()`);
+    await sleep(200);
+    await evaluate(`document.querySelector('.ced-modal textarea').value = ${JSON.stringify(html)}`);
+    if (quick) {
+      await evaluate(`[...document.querySelectorAll('.ced-modal__btns .ced-btn')].find(b => b.textContent === 'Quicksave').click()`);
+    }
+    await evaluate(`document.querySelector('.ced-modal__btns .ced-btn--accent').click()`);
+    await sleep(200);
+    await evaluate(`(function () { var x = document.querySelector('.ced-modal__x'); if (x) x.click(); return true; })()`);
+    await sleep(150);
+  }
+  // Export, and read the download as { path: Buffer }.
+  async function exportZip() {
+    await evaluate(`window.__zipB64 = null; window.edit.export()`);
+    const b64 = await waitFor(`window.__zipB64`, 10000);
+    return b64 ? unzipStore(Buffer.from(b64, "base64")) : {};
+  }
+  const textOf = (files, path) => (files[path] ? files[path].toString("utf8") : "");
+
+  // LW1. the fixture holds no engine: no libraries folder, and no file
+  // named like an engine file anywhere in it. Its photos are the files
+  // make.py recorded, and its pin is the release this commit holds.
+  const ENGINE_NAMES = ["site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js", "gallery.js",
+    "tool.js", "publish.js", "release.js", "engine.css"];
+  const lawnEngine = lawnTree.filter((p) => p.split("/")[0] === "libraries" ||
+    ENGINE_NAMES.includes(p.replace(/\/$/, "").split("/").pop()));
+  check("lawn: the fixture holds no libraries folder and no file named like an engine file",
+    lawnEngine.length === 0 && lawnTree.includes("services/mowing.html"),
+    lawnEngine.join(", ") || lawnTree.length + " entries");
+  const lawnMan = JSON.parse(readFileSync(join(LAWN_FIXTURE, "manifest.json"), "utf8"));
+  const lawnBad = lawnMan.files.filter((f) => {
+    const b = readFileSync(join(LAWN_FIXTURE, f.name));
+    return b.length !== f.bytes || createHash("sha256").update(b).digest("hex") !== f.sha256;
+  });
+  check("lawn: each photo is the file make.py recorded in manifest.json",
+    lawnMan.files.length === 3 && lawnBad.length === 0, lawnBad.map((f) => f.name).join(", "));
+  const lawnRelease = (/version:\s*"([^"]+)"/.exec(readFileSync(join(REPO, LIB, "release.js"), "utf8")) || [])[1];
+  const lawnPin = (/engineVersion:\s*"([^"]+)"/.exec(LAWN_CONFIG_TEXT) || [])[1];
+  check("lawn: the fixture pins the release this commit holds",
+    !!lawnPin && lawnPin === lawnRelease, "pin " + lawnPin + ", release " + lawnRelease);
+
+  // LW2. the marker checker reads another site's root when --site names
+  // it, and the repo root when nothing does
+  const markersRun = (args) => spawnSync("py", ["-3", join(REPO, "tools", "e2e", "check_markers.py")].concat(args),
+    { cwd: REPO, encoding: "utf8" });
+  const lawnMarkers = markersRun(["--site", join("tools", "e2e", "fixtures", "lawn")]);
+  const ownMarkers = markersRun([]);
+  const lastLine = (r) => String(r.stdout || "").trim().split("\n").pop().trim();
+  check("lawn: check_markers.py --site checks the fixture's three pages, and they pass",
+    lawnMarkers.status === 0 && /^OK: \d+ regions across 3 page\(s\)\.$/.test(lastLine(lawnMarkers)) &&
+    /OK services\/mowing\.html/.test(lawnMarkers.stdout),
+    lastLine(lawnMarkers) + " " + String(lawnMarkers.stderr || "").slice(0, 160));
+  check("lawn: check_markers.py with no --site still checks the repo root",
+    ownMarkers.status === 0 && /OK blog\.html/.test(ownMarkers.stdout) && !/mowing/.test(ownMarkers.stdout),
+    lastLine(ownMarkers));
+
+  // LW3. the fixture names no real person and no real address. The
+  // library's own sweep is the contract check near the top of this file.
+  const lawnFound = [];
+  for (const p of lawnTree.filter((x) => /\.(html|js|css|md|py|json)$/.test(x))) {
+    const text = readFileSync(join(LAWN_FIXTURE, p), "utf8");
+    if (/aaron|michaelharris|portrait-transparent/i.test(text)) lawnFound.push(p + ": a name");
+    const mails = (text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || []).filter((m) => !/\.example$/i.test(m));
+    if (mails.length) lawnFound.push(p + ": " + mails.join(" "));
+    if (text.includes(String.fromCharCode(0x2014))) lawnFound.push(p + ": an em dash");
+  }
+  check("lawn: no fixture file names a real person, the portrait or a real email address, or has an em dash",
+    lawnFound.length === 0, lawnFound.join(", "));
+
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  try {
+    // What the portfolio keeps on this origin, read from a page that runs no
+    // engine, before the lawn's pages load. LW13 reads it again.
+    exceptions.length = 0;
+    await send("Page.navigate", { url: LAWN + "manifest.json" });
+    await waitLoaded();
+    const amhBefore = await evaluate(storedUnder("amh"), { awaitPromise: true });
+    const lawnBefore = await evaluate(storedUnder("lawn"), { awaitPromise: true });
+
+    // LW4. each page loads the engine from the library and no
+    // blog trunk, links the two stylesheets and no other, and knows its
+    // site and its place under the root
+    for (const page of LAWN_PAGES) {
+      const up = page.indexOf("/") === -1 ? "" : "../";
+      const want = [up + LIB + "release.js", up + "site.config.js"].concat(
+        trunks(["site.js", "work.js", "imagesengine.js", "tool.js"]
+          .concat(page === "photos.html" ? ["gallery.js"] : []), up));
+      const listed = scriptSrcs(lawnFile(page));
+      const ready = await siteOpen(LAWN + page);
+      const at = await evaluate(`(function () {
+        if (!(window.AMH && AMH.site && AMH.tool)) return null;
+        return { sheets: [].map.call(document.styleSheets, function (s) { return s.href; }).filter(Boolean),
+          blog: typeof AMH.blog, publish: typeof AMH.publish, slot: AMH.tool.blog,
+          id: AMH.config.siteId, problem: AMH.site.problem, root: AMH.site.root(),
+          prefix: AMH.site.prefix(), path: AMH.site.pagePath() };
+      })()`);
+      check("lawn: " + page + " loads the release, the site's config and its trunks from the library, and no blog trunk",
+        ready && !!at && JSON.stringify(listed) === JSON.stringify(want) && at.blog === "undefined" &&
+        at.publish === "undefined" && at.slot === null && exceptions.length === 0 &&
+        JSON.stringify(at.sheets) === JSON.stringify([LAWN + LIB + "engine.css", LAWN + "site.css"]),
+        JSON.stringify({ listed, at, errors: exceptions.slice(0, 2) }).slice(0, 600));
+      check("lawn: " + page + " is siteId lawn with the right pin, and knows its place under the root",
+        !!at && at.id === "lawn" && at.problem === "" && at.root === LAWN && at.path === page && at.prefix === up,
+        JSON.stringify(at));
+    }
+
+    // LW5. a wrong pin leaves the page readable and draws the corner mark,
+    // and pressing the mark says why the editor stays shut
+    await siteOpen(`http://127.0.0.1:${SERVER_PORT}/lawnpin/index.html`);
+    await evaluate(`(function () { var m = document.querySelector('.amh-edit'); if (m) m.click(); return !!m; })()`);
+    await sleep(500);
+    const pinned = await evaluate(`(function () {
+      var h1 = document.querySelector('.intro h1'), ask = document.querySelector('.ced-ask');
+      return { problem: window.AMH && AMH.site ? AMH.site.problem : "",
+        release: window.AMH && AMH.release ? AMH.release.version : "",
+        read: h1 ? h1.textContent : "", shown: !!h1 && h1.getBoundingClientRect().height > 0,
+        mark: !!document.querySelector('.amh-edit'), ask: ask ? ask.textContent : "",
+        panel: !!document.querySelector('.ced-panel'),
+        on: !!(window.AMH && AMH.tool && AMH.tool.editorOn && AMH.tool.editorOn()) };
+    })()`);
+    check("lawn: a wrong pin leaves the page readable, draws the corner mark, and the mark says why the editor stays shut",
+      pinned.read === "Lawn care for the north side." && pinned.shown && pinned.mark &&
+      /0\.0\.0/.test(pinned.problem) && !!pinned.release && pinned.problem.indexOf(pinned.release) !== -1 &&
+      pinned.ask.indexOf(pinned.problem) !== -1 && !pinned.panel && !pinned.on, JSON.stringify(pinned));
+    // The same pin on a site with a blog: an address that names a post
+    // opens neither the editor nor the composer.
+    await siteOpen(`http://127.0.0.1:${SERVER_PORT}/amhpin/blog.html?edit=p0001`);
+    await sleep(800);
+    const pinnedBlog = await evaluate(`(function () {
+      var ask = document.querySelector('.ced-ask');
+      return { problem: window.AMH && AMH.site ? AMH.site.problem : "",
+        composer: !!document.querySelector('.bc-panel'),
+        on: !!(window.AMH && AMH.tool && AMH.tool.editorOn && AMH.tool.editorOn()),
+        ask: ask ? ask.textContent : "", search: location.search };
+    })()`);
+    check("lawn: on a wrong pin, a blog address that names a post opens neither the editor nor the composer, and says why",
+      /0\.0\.0/.test(pinnedBlog.problem) && !pinnedBlog.composer && !pinnedBlog.on &&
+      pinnedBlog.ask.indexOf(pinnedBlog.problem) !== -1 && !/edit=/.test(pinnedBlog.search),
+      JSON.stringify(pinnedBlog));
+
+    // LW6. the editor opens on the nested page, and the bytes it reads for
+    // the page are the file the server holds
+    await siteOpen(LAWN + "services/mowing.html");
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(PHOTO_HELPER);
+    await evaluate(`window.edit()`);
+    await sleep(500);
+    const lw6 = await evaluate(`AMH.tool.pristine("services/mowing.html").then(function (text) {
+      return { on: AMH.tool.editorOn(), panel: !!document.querySelector('.ced-panel'), text: text,
+        chips: [].map.call(document.querySelectorAll('.ced-chip'), function (c) { return c.title; }).filter(Boolean) };
+    }, function (e) { return { err: String(e) }; })`, { awaitPromise: true });
+    const lw6same = lw6.text === lawnFile("services/mowing.html");
+    check("lawn: the editor opens on the nested page, and the bytes it reads for the page are the served file",
+      lw6.on === true && lw6.panel === true && lw6same &&
+      ["brand-title", "nav-home", "mow-intro"].every((s) => (lw6.chips || []).includes(s)),
+      JSON.stringify({ on: lw6.on, panel: lw6.panel, same: lw6same, chips: lw6.chips, err: lw6.err }));
+
+    // LW7. a site with no blog: the panel offers no New post, and every
+    // blog command says there is no blog
+    const lw7 = await evaluate(`({
+      foot: [].map.call(document.querySelectorAll('.ced-panel__foot .ced-btn'), function (b) { return b.textContent.trim(); }),
+      says: [window.edit.blog(), window.edit.blog.edit("0001"), window.edit.blog.rebuild()] })`);
+    check("lawn: the panel offers no New post, and the console's blog commands say this site has no blog",
+      JSON.stringify(lw7.foot) === '["Export","Save to repo","Media","Revert all","Exit"]' &&
+      lw7.says.every((s) => s === "This site has no blog."), JSON.stringify(lw7));
+
+    // LW8. the editor draws with the lawn's tokens: its panel is the
+    // lawn's --panel and not the portfolio's
+    const lw8 = await evaluate(`({ panel: getComputedStyle(document.querySelector('.ced-panel')).backgroundColor,
+      ground: getComputedStyle(document.body).backgroundColor })`);
+    const lawnPanel = panelOf(join(LAWN_FIXTURE, "site.css")), amhPanel = panelOf(join(REPO, "site.css"));
+    check("lawn: the editor's panel takes the lawn's --panel token, not the portfolio's",
+      lw8.panel === lawnPanel && lawnPanel !== amhPanel && lw8.ground === "rgb(241, 247, 238)",
+      JSON.stringify({ lw8, lawnPanel, amhPanel }));
+
+    // LW9. an edit to the nested page's intro and one to the
+    // shared wordmark, in one zip: every byte outside an edited region is
+    // the served file's, and the wordmark is new on all three pages. The
+    // intro's draft goes to the quicksave slot on the way, for LW13.
+    await chipEdit("mow-intro", "<p>We come on the same day each week. EDITED ON A NESTED PAGE.</p>", true);
+    await chipEdit("brand-title", '<span class="brand__title">GREENLINE LAWN CARE</span>');
+    const zip9 = await exportZip();
+    const mow9 = textOf(zip9, "services/mowing.html");
+    const exact9 = sameOutside("services/mowing.html", lawnFile("services/mowing.html"), mow9, ["brand-title", "mow-intro"]);
+    check("lawn: an edit on the nested page, exported by zip, changes the page only between its markers",
+      LAWN_PAGES.every((p) => p in zip9) && regionOf(mow9, "mow-intro").includes("EDITED ON A NESTED PAGE") && exact9.ok,
+      Object.keys(zip9).join(", ") + " | " + exact9.detail);
+    const brand9 = LAWN_PAGES.map((p) => ({ p, has: regionOf(textOf(zip9, p), "brand-title").includes("GREENLINE LAWN CARE"),
+      exact: sameOutside(p, lawnFile(p), textOf(zip9, p),
+        p === "services/mowing.html" ? ["brand-title", "mow-intro"] : ["brand-title"]) }));
+    check("lawn: a shared edit made on the nested page reaches all three pages of the same zip",
+      brand9.every((b) => b.has && b.exact.ok), JSON.stringify(brand9.map((b) => [b.p, b.has, b.exact.detail])));
+    await evaluate(`(function () { var real = window.confirm; window.confirm = function () { return true; };
+      window.edit.revertAll(); window.confirm = real; return true; })()`);
+    await sleep(300);
+    // A shared edit was staged for every page, so Revert all takes it off
+    // every page, as one region's Revert does. It used to stay staged for
+    // the other two pages, and the next export wrote them with it.
+    const lw9r = await evaluate(`({ pending: sessionStorage.getItem('lawn-pending-edits') || "",
+      changed: AMH.tool.changedPages() })`);
+    check("lawn: Revert all takes a shared edit off every page, as one region's Revert does",
+      !/brand-title/.test(lw9r.pending) && lw9r.changed.length === 0, JSON.stringify(lw9r));
+
+    // LW10. a photo added to the nested page's carousel is held and named
+    // from the site root, the editor draws every path from this page, and
+    // the export writes the photo with its "../" and its three files at
+    // their root paths
+    await batchInto("mow-gallery", `__photo('Front Yard.png', 1600, 900, '#3a7a3a')`, 1);
+    await batchAdd();
+    const lw10 = await evaluate(`(function () {
+      var g = AMH.tool.regionFor('mow-gallery');
+      var en = g.model[g.model.length - 1];
+      return { n: g.model.length, first: g.model[0].src, src: en.src, held: !!en.photo,
+        drawn: [].map.call(document.querySelectorAll('.gallery__stage img'), function (im) {
+          return im.getAttribute('src') || ''; }) };
+    })()`);
+    const base10 = (/^img\/work\/(front-yard-[a-z0-9]{6})\.jpg$/.exec(lw10.src) || [])[1] || "none";
+    await evaluate(`AMH.tool.regionFor('mow-gallery').chip.click()`);
+    const box10 = await waitFor(`(function () {
+      var pics = [].slice.call(document.querySelectorAll('.ced-photos .ced-photo__pic'));
+      if (pics.length !== 2 || !pics.every(function (p) { return p.complete; })) return null;
+      return pics.map(function (p) { return { src: (p.getAttribute('src') || '').slice(0, 30), w: p.naturalWidth }; });
+    })()`, 8000);
+    await evaluate(`(function () { var c = [...document.querySelectorAll('.ced-photos .ced-modal__btns > .ced-btn')]
+      .find(b => b.textContent === 'Cancel'); if (c) c.click(); return true; })()`);
+    await sleep(300);
+    check("lawn: a photo added on the nested page is held under img/work from the root, and the editor draws every path from the page",
+      lw10.n === 2 && lw10.first === "img/yard-1.png" && base10 !== "none" && lw10.held &&
+      lw10.drawn.includes("../img/yard-1.png") && lw10.drawn.some((s) => s.indexOf("blob:") === 0) &&
+      !lw10.drawn.some((s) => s.indexOf("img/") === 0) &&
+      !!box10 && box10.every((p) => p.w > 0) && box10[0].src === "../img/yard-1.png",
+      JSON.stringify({ lw10, box10 }).slice(0, 600));
+    const zip10 = await exportZip();
+    const mow10 = textOf(zip10, "services/mowing.html");
+    const reg10 = regionOf(mow10, "mow-gallery");
+    const exact10 = sameOutside("services/mowing.html", lawnFile("services/mowing.html"), mow10, ["mow-gallery"]);
+    check("lawn: the nested page is written with a ../ in front of every path of the photo, and nothing else changes",
+      reg10.includes('src="../img/yard-1.png"') && reg10.includes(`src="../img/work/${base10}.jpg"`) &&
+      reg10.includes(`srcset="../img/work/${base10}_sd.webp 480w, ../img/work/${base10}.jpg 1600w"`) &&
+      reg10.includes(`data-sd="../img/work/${base10}_sd.webp"`) &&
+      reg10.includes(`data-original="../img/work/${base10}_original.png"`) &&
+      !/="img\//.test(reg10) && exact10.ok,
+      exact10.detail + " | " + reg10.replace(/\s+/g, " ").slice(0, 400));
+    check("lawn: the zip holds the photo's three files at their root paths, and the index says the nested page shows it",
+      Object.keys(zip10).sort().join() === ["images.js", `img/work/${base10}.jpg`, `img/work/${base10}_original.png`,
+        `img/work/${base10}_sd.webp`, "services/mowing.html"].sort().join() &&
+      textOf(zip10, "images.js").includes('"used":["services/mowing.html#mow-gallery"]'),
+      Object.keys(zip10).join(", "));
+
+    // LW11. the folder route knows a site by the siteId in the folder's own
+    // site.config.js: the lawn's is taken, and the portfolio's and none are
+    // refused. Then a save from the nested page writes the page into its
+    // folder and the photo's files at their root paths.
+    const lw11 = await evaluate(`(function () {
+      function fileH(text, name) { return { kind: 'file', getFile: function () {
+        return Promise.resolve(new File([text], name, { type: 'text/plain' })); } }; }
+      function folder(configText) {
+        var files = { 'index.html': fileH('<html></html>', 'index.html') };
+        if (configText !== null) files['site.config.js'] = fileH(configText, 'site.config.js');
+        return { name: 'site', queryPermission: function () { return Promise.resolve('granted'); },
+          getFileHandle: function (n) {
+            return files[n] ? Promise.resolve(files[n]) : Promise.reject(new Error('NotFoundError')); } };
+      }
+      return Promise.all([
+        AMH.tool.repoVerify(folder(${JSON.stringify(LAWN_CONFIG_TEXT)})),
+        AMH.tool.repoVerify(folder(${JSON.stringify(SITE_CONFIG_TEXT)})),
+        AMH.tool.repoVerify(folder(null))
+      ]).then(function (v) { return { lawn: v[0], amh: v[1], none: v[2] }; });
+    })()`, { awaitPromise: true });
+    check("lawn: the folder route takes a folder whose site.config.js says lawn, and refuses the portfolio's and one with none",
+      lw11.lawn.ok === true && !lw11.lawn.warn && /lawn/.test(lw11.lawn.why) &&
+      lw11.amh.ok === false && /"amh"/.test(lw11.amh.why) && /"lawn"/.test(lw11.amh.why) &&
+      lw11.none.ok === false && /site\.config\.js/.test(lw11.none.why), JSON.stringify(lw11));
+    await evaluate(FAKE_REPO.replace(JSON.stringify(SITE_CONFIG_TEXT), JSON.stringify(LAWN_CONFIG_TEXT)));
+    await evaluate(`document.querySelector('.ced-panel__foot .ced-btn--save').click()`);
+    const saved11 = await waitFor(`(function () {
+      if (!document.querySelector('.ced-saved')) return null;
+      return { wrote: Object.keys(window.__wrote).sort(), page: window.__wrote["services/mowing.html"] || "" };
+    })()`, 12000);
+    await evaluate(`(function () { var b = document.querySelector('.ced-saved .ced-modal__btns .ced-btn--accent');
+      if (b) b.click(); return true; })()`);
+    await sleep(300);
+    check("lawn: a save from the nested page writes the page into its folder, unchanged outside its region, and the photo at its root paths",
+      !!saved11 && ["services/mowing.html", `img/work/${base10}.jpg`, `img/work/${base10}_sd.webp`,
+        `img/work/${base10}_original.png`].every((p) => saved11.wrote.includes(p)) &&
+      !saved11.wrote.includes("index.html") && !saved11.wrote.includes("photos.html") &&
+      saved11.page.includes(`src="../img/work/${base10}.jpg"`) &&
+      sameOutside("services/mowing.html", lawnFile("services/mowing.html"), saved11.page, ["mow-gallery"]).ok,
+      JSON.stringify(saved11 && saved11.wrote));
+
+    // LW12. the gallery page: the packer lays the three tiles out, and a
+    // tile added through the editor is written into the section's list
+    await siteOpen(LAWN + "photos.html");
+    await evaluate(ZIP_CAPTURE);
+    await evaluate(PHOTO_HELPER);
+    const lw12 = await waitFor(`(function () {
+      var tiles = [].slice.call(document.querySelectorAll('[data-section="yards"] .gal-tile'));
+      if (!tiles.length || !tiles.every(function (t) { return !!t.style.gridColumn; })) return null;
+      return { n: tiles.length, srcs: tiles.map(function (t) { return t.querySelector('img').getAttribute('src'); }) };
+    })()`, 8000);
+    await evaluate(`window.edit()`);
+    await sleep(500);
+    await evaluate(`__photo('Back Yard.png', 1200, 900, '#2f6b2f').then(function (f) {
+      __dropOn(document.querySelector('[data-section="yards"] .gal-tile'), f); return true; })`, { awaitPromise: true });
+    await waitFor(`${ROWS}.length === 1 && !${NEXT}.disabled`, 12000);
+    await batchAdd();
+    const zip12 = await exportZip();
+    const pho12 = textOf(zip12, "photos.html");
+    const reg12 = regionOf(pho12, "gal-yards");
+    const items12 = listItems(pho12, "gallery");
+    const exact12 = sameOutside("photos.html", lawnFile("photos.html"), pho12, ["gal-yards"]);
+    check("lawn: on the gallery page the tiles pack, and a tile added through the editor is written into the section's list",
+      !!lw12 && lw12.n === 3 && lw12.srcs.join() === "img/yard-1.png,img/yard-2.png,img/yard-3.png" &&
+      (reg12.match(/<figure/g) || []).length === 4 && /src="img\/work\/back-yard-[a-z0-9]{6}\.jpg"/.test(reg12) &&
+      reg12.includes('<span class="gal-train__count">4 images</span>') &&
+      !!items12 && Object.keys(items12).join() === "yards" && items12.yards.includes("back-yard-") && exact12.ok,
+      JSON.stringify({ lw12, files: Object.keys(zip12), exact: exact12.detail }).slice(0, 500));
+
+    // LW13. the two sites keep their storage apart on one origin. The
+    // lawn's quicksave and held photos are under lawn- names, and not one
+    // of the portfolio's names changed while the lawn was edited.
+    const lawnStored = await evaluate(storedUnder("lawn"), { awaitPromise: true });
+    const amhAfter = await evaluate(storedUnder("amh"), { awaitPromise: true });
+    const lawnQuick = JSON.parse(lawnStored.keys["local:lawn-copy-editor-quicksave"] || "null");
+    check("lawn: the lawn's quicksave and held photos are kept under lawn- names, and no amh- name changed",
+      Object.keys(lawnBefore.keys).length === 0 && !!lawnQuick && lawnQuick.slug === "mow-intro" &&
+      lawnStored.dbs.includes("lawn-images") && JSON.stringify(amhAfter) === JSON.stringify(amhBefore),
+      JSON.stringify({ lawnKeys: Object.keys(lawnStored.keys), lawnDbs: lawnStored.dbs, amhDbs: amhAfter.dbs,
+        amhSame: JSON.stringify(amhAfter) === JSON.stringify(amhBefore) }));
+    // A pending edit on one site is never seen by the other. Both sites
+    // have an index.html, which is where one shared name would put the
+    // lawn's edit on the portfolio's page, or drop the portfolio's.
+    await siteOpen(LAWN + "index.html");
+    await evaluate(`window.edit()`);
+    await sleep(400);
+    await chipEdit("home-title", "<h1>Lawn care, kept apart.</h1>");
+    await siteOpen(PAGE);
+    const sep1 = await evaluate(`({ h1: (document.querySelector('.hero h1') || {}).textContent || "",
+      lawn: sessionStorage.getItem('lawn-pending-edits') || "",
+      amh: sessionStorage.getItem('amh-pending-edits') || "" })`);
+    await evaluate(`window.edit()`);
+    await sleep(400);
+    await chipEdit("hero-h1", "<h1>Kept apart from the lawn.</h1>");
+    await siteOpen(LAWN + "index.html");
+    const sep2 = await evaluate(`({ h1: (document.querySelector('.intro h1') || {}).textContent || "",
+      lawn: sessionStorage.getItem('lawn-pending-edits') || "",
+      amh: sessionStorage.getItem('amh-pending-edits') || "" })`);
+    check("lawn: a pending edit on one site is not seen by the other, though both have an index.html",
+      /Lawn care, kept apart/.test(sep1.lawn) && !/Lawn care, kept apart/.test(sep1.amh) &&
+      !/Lawn care, kept apart/.test(sep1.h1) && sep2.h1 === "Lawn care, kept apart." &&
+      /Kept apart from the lawn/.test(sep2.amh) && !/Kept apart from the lawn/.test(sep2.lawn),
+      JSON.stringify({ sep1, sep2 }).slice(0, 600));
+  } catch (e) {
+    check("lawn: the LW section runs to its end", false, e.message);
+  }
+  // Nothing of this section waits in either site's store.
+  try {
+    await evaluate(`(function () { sessionStorage.removeItem('lawn-pending-edits');
+      sessionStorage.removeItem('amh-pending-edits'); return true; })()`);
+  } catch {}
+  await send("Emulation.clearDeviceMetricsOverride");
 
   const failed = results.filter((r) => !r.ok).length;
   console.log("\n" + (results.length - failed) + "/" + results.length + " checks passed" + (failed ? " - " + failed + " FAILED" : ""));

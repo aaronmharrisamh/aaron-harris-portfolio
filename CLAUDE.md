@@ -144,6 +144,10 @@ project only. It does not repeat the baseline.
   that is a launcher.
 - The site must work when a person opens it from disk. Reading works offline.
   The blog stream and the publish tool need HTTP or the file hand-off.
+- The engine is made in this repository, and every other site takes
+  `libraries/harrisxrwebengine/` whole and never edits it. Edit the engine
+  here only, and make each change work for any site: `tools/e2e/fixtures/lawn/`
+  is a second site on the engine, and the suite runs it on every commit.
 
 ### File Map
 
@@ -163,16 +167,16 @@ The site's own files are at the root. The engine is in
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |
-| `tools/e2e/` | The test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. |
+| `tools/e2e/` | The test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. `fixtures/lawn/` is Greenline Mowing, a second site on the engine with a page in a folder, no blog and a light theme; the LW section runs it beside this site to prove the engine is not tied to it. |
 
 In `libraries/harrisxrwebengine/`:
 
 | File | Job |
 | --- | --- |
-| `README.md` | The files, the load order for each kind of page, the host's two files, and the theme tokens. |
+| `README.md` | The integration guide: the layout, the load order, `site.config.js`, the theme, the page contract, the blog contract, delivery, the upgrade, and the worked example. |
 | `release.js` | The engine release: its id, its version and its folder. The one place the engine's version is written. Every page loads it first. |
 | `engine.css` | The style of everything the engine draws or drives, with a default for every theme token. |
-| `site.js` | Shared page behavior for every page, the site root, the pin check, and the site's storage names. |
+| `site.js` | Shared page behavior for every page, the site root, the pin check, the site's storage names, and the paths from a page to the root and back. |
 | `work.js` | Carousels of photos and players, the deep-dive drawer, the shared lightbox, and the players' rules: one at a time, and none out of sight. |
 | `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes, and the grammar of the tag that places a file in a post. Every page. |
 | `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
@@ -222,6 +226,9 @@ the page it is on.
 - A delete never leaves a page naming a file the site does not hold. An
   image still in use comes out of every place that uses it first, and the
   files move only after those places are written.
+- A path the engine keeps is a path from the site root. The engine converts
+  a path only where it reads one from a page or writes one into a page, so a
+  page in a folder names the same file as a page at the root.
 
 ### Project Conventions
 

@@ -1874,7 +1874,9 @@
      the innermost region's. Only the site scheme counts: a blog image's
      use is its post, which the publish records, and the stream on
      blog.html is a copy. usageOf and wordsOf both read this, so the places
-     an image is used and the places its words come from cannot differ. */
+     an image is used and the places its words come from cannot differ.
+     Each path is read from the page it is on, so a page in a folder names
+     the same file as a page at the root. */
   function siteImagesOf(pageText, path) {
     var text = String(pageText || "");
     var regions = [];
@@ -1890,7 +1892,7 @@
     while ((i = im.exec(text))) {
       var orig = /\sdata-original="([^"]*)"/.exec(i[0]);
       if (!orig) continue;
-      var base = baseOf(orig[1]);
+      var base = baseOf(AMH.site.fromPage(path, orig[1]));
       if (base.indexOf(SITE_DIR) !== 0) continue;
       var best = null;
       regions.forEach(function (r) {

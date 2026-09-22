@@ -581,7 +581,9 @@
        imgId     "IMG07", assigned in document order for this session
        isSeed    true while the region is showing placeholder filler
        empty     true for an unfilled slot, which is never exported
-       preview   a blob: URL, valid for this document only, never exported
+       preview   what the page shows: a blob: URL for a photo no save has
+                 written, valid for this document only, or the path of
+                 an image the page names. Never exported.
        photo     the engine's photo for src, until a save writes it
 
      The fields from sd to uhd are the file fields. imagesengine.js reads
@@ -595,6 +597,12 @@
      field except preview and photo survives a page navigation, which is
      what carries an edit across pages; the held photo comes back from the
      engine's store.
+
+     Every path in an entry is a path from the site root, whatever page it
+     was read on: see rootOf. A page in a folder names the same file as a
+     page at the root, so the model does not change with the page. The
+     page's own way to the root goes back in front only where a path is
+     drawn on this page or written into a file.
 
      The core owns the model and the export form. A consumer owns its DOM:
      how many images it shows at once is not the core's business.
@@ -617,6 +625,9 @@
      it owns when it claims them, so this is a lookup rather than a guess. */
   var slugKinds = {};
   function kindForSlug(slug) { return slugKinds[slug] || null; }
+
+  /* A path read off this page, as a path from the site root. */
+  function rootOf(path) { return AMH.site.fromPage(currentPage(), path); }
 
   var imageRegion = {
 
@@ -647,8 +658,9 @@
          read() takes the display copy from data-hd. An entry built from the
          attribute wrote the original into data-hd at the next save, and the
          display copy was then an orphan. */
-      var shown = im.getAttribute("src") || "";
+      var shown = rootOf(im.getAttribute("src") || "");
       var files = engine().read(im);
+      ["src", "sd", "original"].forEach(function (k) { files[k] = rootOf(files[k]); });
       var src = files.src || shown;
       var en = {
         src: src, alt: im.getAttribute("alt") || "",
@@ -771,12 +783,16 @@
        read from the source span, so the output matches the file's own
        hand-written style. Returns the inner text for spliceRegion.
 
+       page is the page the markup is written into, as a path from the site
+       root, and each path is written from that page. With no page it is
+       the page on screen.
+
        A kind that is not a list of <img> supplies its own; this is the
        default, and the two carousel kinds use it. */
-    serializeFor: function (entries, indent, kind, head) {
+    serializeFor: function (entries, indent, kind, head, page) {
       return (kind && kind.serialize)
-        ? kind.serialize(entries, indent, head)
-        : imageRegion.serialize(entries, indent, kind);
+        ? kind.serialize(entries, indent, head, page)
+        : imageRegion.serialize(entries, indent, kind, page);
     },
 
     /* The attributes a region's head writes onto the region's own open tag,
@@ -794,14 +810,15 @@
        pick and place a copy, then the words, then the editor's notes on the
        files. A seed comes out as src, alt and caption, as it always has.
        The kind's slot is what lets srcset be written. */
-    serialize: function (entries, indent, kind) {
+    serialize: function (entries, indent, kind, page) {
       var slot = kind ? kind.slot : null;
+      var from = { prefix: AMH.site.prefixOf(page || currentPage()) };
       var pad = "\n" + indent + "       ";
       var lines = entries.map(function (en) {
         /* the src is the contract's too: with Display Maximum UHD on, it is
            the original and not the entry's display copy */
         var src = en.src, shown = "", notes = "";
-        engine().attrs(en, slot).forEach(function (a) {
+        engine().attrs(en, slot, from).forEach(function (a) {
           if (a[0] === "src") { src = a[1]; return; }
           var line = pad + a[0] + '="' + escAttr(a[1]) + '"';
           if (a[0].indexOf("data-") === 0) notes += line;
@@ -1190,7 +1207,7 @@
         var held = preview && en.photo;
         var shown = held ? engine().preview(en.photo) : en;
         if (held) { shown.uhd = en.uhd; shown.truesize = en.truesize; }
-        engine().attrs(shown, held ? null : slot)
+        engine().attrs(shown, held ? null : slot, { prefix: AMH.site.prefix() })
           .forEach(function (a) { im.setAttribute(a[0], a[1]); });
       }
       im.alt = en.alt || "";
@@ -4623,7 +4640,7 @@
     var last = g.model.filter(realEntry).length === 1;
     return askBox({
       tag: "DELETE", title: "Delete this photo?", danger: true,
-      thumb: en.preview || en.src, code: en.src,
+      thumb: AMH.site.onPage(en.preview || en.src), code: en.src,
       lines: [en.caption ? "Caption: " + en.caption : "",
               last ? g.kind.lastImageNote(g).trim() : ""],
       yes: "Delete photo"
@@ -4909,7 +4926,7 @@
             strip.appendChild(cell);
           });
         }
-        if (i < list.length) strip.appendChild(placePic(list[i].preview || list[i].src, false));
+        if (i < list.length) strip.appendChild(placePic(AMH.site.onPage(list[i].preview || list[i].src), false));
       }
       if (list.length) {
         askWhere.textContent = (many ? "Where do they go in the " : "Where does it go in the ") +
@@ -5284,7 +5301,7 @@
         });
       }
       return photoRow({
-        n: i + 1, pic: r.swap ? r.swap.urls.sd : (r.en.preview || r.en.src),
+        n: i + 1, pic: r.swap ? r.swap.urls.sd : AMH.site.onPage(r.en.preview || r.en.src),
         caption: r.caption, alt: r.alt, autoAlt: r.autoAlt, file: file,
         facts: photoFacts(photo, r.en),
         /* the switches are for a photo that has an original to show */
@@ -5358,7 +5375,7 @@
     function trash(r) {
       askBox({
         tag: "DELETE", title: "Delete this photo?", danger: true,
-        thumb: r.swap ? r.swap.urls.hd : (r.en.preview || r.en.src),
+        thumb: r.swap ? r.swap.urls.hd : AMH.site.onPage(r.en.preview || r.en.src),
         code: r.swap ? r.swap.files.hd : r.en.src,
         lines: [r.caption ? "Caption: " + r.caption : "",
                 rows.length === 1 ? g.kind.lastImageNote(g).trim() : "",
@@ -6006,7 +6023,7 @@
          would export empty and the drawer would open on nothing. */
       (photos || []).forEach(function (en) {
         var im = doc.createElement("img");
-        engine().attrs(en, KIND.deepdive.slot).forEach(function (a) {
+        engine().attrs(en, KIND.deepdive.slot, { prefix: AMH.site.prefix() }).forEach(function (a) {
           im.setAttribute(a[0], a[1]);
         });
         im.setAttribute("loading", "lazy");
@@ -6249,7 +6266,7 @@
           shown.forEach(function (en) {
             var li = doc.createElement("li");
             var im = doc.createElement("img");
-            im.src = en.preview || en.src;
+            im.src = AMH.site.onPage(en.preview || en.src);
             im.alt = en.alt || "";
             im.title = en.caption || en.src;
             li.appendChild(im);
@@ -9807,7 +9824,7 @@
       var out = spliceRegion(src, slug, kept !== undefined
         ? indentBlock(kept, ind)
         : imageRegion.serializeFor(galleries[slug], ind, kindForSlug(slug),
-                                   (more.heads || {})[slug]),
+                                   (more.heads || {})[slug], more.page),
         imageRegion.openAttrs((more.heads || {})[slug]));
       if (out === null) failed.push(slug);
       else src = out;
@@ -9830,7 +9847,7 @@
       var before = src;
       if (path === currentPage()) src = spliceAllEdits(src);
       return { path: path, before: before, text: spliceStaged(src, texts, waiting.gallery,
-        { lists: waiting.list, heads: waiting.heads, bytes: waiting.bytes }) };
+        { lists: waiting.list, heads: waiting.heads, bytes: waiting.bytes, page: path }) };
     });
   }
   /* apply every outstanding copy/gallery edit to a pristine source string.
@@ -10156,13 +10173,18 @@
   };
 
   /* Put the page being viewed back to its published content, and forget what
-     was pending for it. Shared by revertAll and by clearing every page. */
+     was pending for it. Shared by revertAll and by clearing every page.
+
+     A shared region's edit was staged for every page, so its revert goes to
+     every page too, as one region's Revert does. The region then reads the
+     same on each page again. */
   function revertThisPage() {
     if (viewing === "before") viewing = "after";
     regions.forEach(function (r) {
       if (r.edited || r.current !== r.original) {
         r.el.innerHTML = r.original;
         r.current = r.original; r.edited = false;
+        pendingSyncRegion(r);
         relinkTplGalleries(r);
       }
     });

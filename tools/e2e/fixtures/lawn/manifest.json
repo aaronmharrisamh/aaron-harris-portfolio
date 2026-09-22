@@ -1,0 +1,29 @@
+{
+  "made_by": "tools/e2e/fixtures/lawn/make.py",
+  "files": [
+    {
+      "name": "img/yard-1.png",
+      "purpose": "the mowing page's carousel photo, a wide frame",
+      "bytes": 2781,
+      "sha256": "2f8a581e1d319c0237d4db41411e8d262321a9bb77e33665cf2f6a538e2ad9dc",
+      "width": 640,
+      "height": 360
+    },
+    {
+      "name": "img/yard-2.png",
+      "purpose": "a gallery tile in a four by three frame",
+      "bytes": 2753,
+      "sha256": "29fc6e50b5c5e4adbccb03b3842b7ec83b23e35966c22f3db304806e717ffbab",
+      "width": 480,
+      "height": 360
+    },
+    {
+      "name": "img/yard-3.png",
+      "purpose": "a square gallery tile",
+      "bytes": 2081,
+      "sha256": "670ecd4ae61d160615cfb810dae20dc06f159c99d1adc5703b7b7e0674cdd922",
+      "width": 360,
+      "height": 360
+    }
+  ]
+}

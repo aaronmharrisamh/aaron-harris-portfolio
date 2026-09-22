@@ -5910,14 +5910,14 @@
   /* The site's images on one managed page, as entries by base, with the
      regions that show them: the migration's read of a page it did not
      write. The facts come off each image's own markup, through the
-     engine's contract. */
+     engine's contract, and each path is read from the page it is on. */
   function bcSiteEntries(text, path) {
     var out = {};
     var dom = new DOMParser().parseFromString(text, "text/html");
     var uses = AMH.images.usageOf(text, path);
     Array.prototype.forEach.call(dom.querySelectorAll("img[data-original]"), function (im) {
       var f = AMH.images.read(im);
-      var base = AMH.images.baseOf(f.original);
+      var base = AMH.images.baseOf(AMH.site.fromPage(path, f.original));
       if (base.indexOf("img/work/") !== 0 || out[base]) return;
       out[base] = { base: base, type: f.type, ow: f.ow, oh: f.oh, bytes: f.bytes,
                     animated: f.type === "gif", added: bcTodayYYMMDD(), used: uses[base] || [] };
