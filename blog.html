@@ -2,8 +2,9 @@
 <!-- ============================================================
      blog.html - the blog page.
 
-     Markup only. Style lives in site.css and behavior lives in the
-     four script trunks, loaded in a fixed order from the head.
+     Markup only. Style lives in the engine's engine.css and this site's
+     site.css, and behavior lives in the engine's script trunks, loaded
+     in a fixed order from the head.
 
      Copy the editor can change is fenced by [edit:slug] comment
      pairs, each wrapping exactly one element. Do not nest a pair
@@ -68,24 +69,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
 
+  <!-- The engine's style first and this site's second, so this site's
+       tokens set the theme. -->
+  <link rel="stylesheet" href="libraries/harrisxrwebengine/engine.css" />
   <link rel="stylesheet" href="site.css" />
 
   <!-- The site's script, in a fixed order. defer keeps document order and runs
        each file after parsing, so every trunk sees the whole page.
-       site.js creates window.AMH, the one namespace the trunks share.
+       release.js names the engine release and creates window.AMH, the one
+       namespace the trunks share, and site.config.js holds this site's
+       facts. Both come first. The trunks are the engine's, in
+       libraries/harrisxrwebengine/.
        publish.js is the blog composer. It is on this page only, because the
        manifest and the reading engine are, and it loads after tool.js because
        it builds on the editor kit that tool.js publishes.
        imagesengine.js is the image engine. Every image the site takes in
        goes through it, so every page loads it, after work.js and before
        the trunks that call it. -->
-  <script defer src="site.js"></script>
-  <script defer src="work.js"></script>
-  <script defer src="imagesengine.js"></script>
-  <script defer src="blog.js"></script>
-  <script defer src="markdown.js"></script>
-  <script defer src="tool.js"></script>
-  <script defer src="publish.js"></script>
+  <script defer src="libraries/harrisxrwebengine/release.js"></script>
+  <script defer src="site.config.js"></script>
+  <script defer src="libraries/harrisxrwebengine/site.js"></script>
+  <script defer src="libraries/harrisxrwebengine/work.js"></script>
+  <script defer src="libraries/harrisxrwebengine/imagesengine.js"></script>
+  <script defer src="libraries/harrisxrwebengine/blog.js"></script>
+  <script defer src="libraries/harrisxrwebengine/markdown.js"></script>
+  <script defer src="libraries/harrisxrwebengine/tool.js"></script>
+  <script defer src="libraries/harrisxrwebengine/publish.js"></script>
 
   <!-- Graceful degradation: without JS the reveal animations never fire, so
        force all content visible.
@@ -236,7 +245,7 @@
             </header>
             <div class="bs-post__body">
 <p><strong>OMG</strong></p>
-<p>There's a lot more, let's dig in!</p>
+<p>There's a lot more, let's dig in!!</p>
 <span class="bp-cut" data-cut="hard"></span>
 <div class="gallery"><img src="blog/260916_img0006_original.png" width="32" height="32" data-uhd="1" data-hd="blog/260916_img0006.jpg" data-truesize="1" data-crisp="1" data-sd="blog/260916_img0006_sd.webp" data-original="blog/260916_img0006_original.png" data-original-size="32x32" data-original-bytes="459" loading="lazy" alt="satellitetest" data-caption="Satellite" /></div>
 
@@ -455,9 +464,9 @@ Test abc 123
   <!--[edit:blog-manifest]-->
   <script id="blogManifest" type="text/plain" data-ced="blog">
 next-post:0012
-stamp:i492da
+stamp:n67wis
 month:2608=tshrh2
-month:2609=dnawh8
+month:2609=s7pq0c
 2608010010September, yay|2609010009Test of a beforetime|2609020001Test|2609030002Test Z|2609030003This is a blog post test.|2609040004Test 1 Bruh|2609040005OMG TEST|2609040006asd|2609040007Second post of the day|2609040008First post of the day !!asdas!adas...|2609160011OMG There's a lot more, let's...
 </script>
   <!--[/edit:blog-manifest]-->

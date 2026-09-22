@@ -1701,9 +1701,9 @@
      name to some systems. */
   function loadTag(file) {
     return new Promise(function (resolve) {
-      var at = doc.body && doc.body.classList.contains("blog-month") ? "../" : "";
       var el = doc.createElement("script");
-      el.src = at + file + (location.protocol === "file:" ? "" : "?t=" + Date.now());
+      /* the file is at the site root, and the tag is read from this page */
+      el.src = AMH.site.prefix() + file + (location.protocol === "file:" ? "" : "?t=" + Date.now());
       el.onload = function () { resolve(true); };
       el.onerror = function () { resolve(false); };
       doc.head.appendChild(el);

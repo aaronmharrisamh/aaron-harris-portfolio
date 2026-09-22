@@ -1,19 +1,24 @@
 /* ============================================================
-   site.js - shared page behavior, and the one namespace the site's
-   own scripts use to talk to each other.
+   site.js - shared page behavior, the site root, and the pin that
+   ties this site to the engine release it expects.
 
-   Loaded first on every page. It creates window.AMH, the single
-   global the trunks share:
+   The first trunk on every page. release.js loads before it and
+   creates window.AMH, the single global the engine shares, and the
+   host's site.config.js loads between the two:
 
-     AMH.site      requestTick                          (this file)
-     AMH.work      buildGalleries, lightbox             (work.js)
-     AMH.blog      the reading engine's internal API    (blog.js)
-     AMH.gallery   the tile packer, and its regions     (gallery.js)
+     AMH.release   the engine's id, version and folder  (release.js)
+     AMH.config    this site's facts                     (site.config.js)
+     AMH.site      the root, the pin, the address        (this file)
+     AMH.work      buildGalleries, lightbox, players     (work.js)
+     AMH.images    the image engine                      (imagesengine.js)
+     AMH.blog      the reading engine's internal API     (blog.js)
+     AMH.markdown  the Markdown renderer                 (markdown.js)
+     AMH.gallery   the tile packer, and its regions      (gallery.js)
      AMH.tool      the editor kit: the image-region
                    core, the splice, the page list,
                    and what a consumer needs to draw
-                   its own region                       (tool.js)
-     AMH.publish   what edit.blog() calls               (publish.js)
+                   its own region                        (tool.js)
+     AMH.publish   what edit.blog() calls                (publish.js)
 
    Each member is documented where it is published. AMH.tool is the
    largest by far, because it is what the other trunks build on; see
@@ -22,16 +27,17 @@
    window.edit is the one other global. It is the documented console
    entry point for the editor, so it keeps its name.
 
-   Load order is site.js, work.js, blog.js, tool.js, gallery.js,
-   publish.js, declared in the head of every page and asserted by the
-   contract test. Each page loads only the trunks it needs; the two
-   that follow tool.js register themselves with the editor kit, which
-   is why they follow it.
+   Load order is release.js, site.config.js, then this file and the
+   trunks the page needs, declared in each page and asserted by the
+   contract test. The engine's README.md lists the set for each kind
+   of page. The two trunks that follow tool.js register themselves
+   with the editor kit, which is why they follow it.
 
    Sections:
-     1. SETUP                       4. NAV AND IN-PAGE LINKS
-     2. HEADER STATE AND PROGRESS   5. PAGE SWEEPS
-     3. THE ADDRESS AND THE VISIT   6. EXPORTS
+     1. SETUP                            4. NAV AND IN-PAGE LINKS
+     2. HEADER STATE AND PROGRESS        5. PAGE SWEEPS
+     3. THE ROOT, THE ADDRESS AND THE    6. EXPORTS
+        VISIT
 
    There is no cleanup section. The page never tears this down, so an
    empty one would be a heading with nothing under it.
@@ -41,11 +47,36 @@
   /* ==========================================================
      1. SETUP
      ----------------------------------------------------------
-     The namespace other trunks read, and the one class the CSS
-     entrance animations wait for.
+     The namespace other trunks read, the pin, and the one class the
+     CSS entrance animations wait for.
      ========================================================== */
   var AMH = window.AMH = window.AMH || {};
   var doc = document;
+
+  /* THE PIN. The engine this folder holds and the engine this site
+     expects must be the same release, or the editor would write with
+     code the site was not made for. The answer is "" or one sentence
+     that says what to do. Only the editor reads it: reading the page is
+     never stopped. */
+  function pinProblem() {
+    var rel = AMH.release, cfg = AMH.config;
+    if (!rel || !rel.root) {
+      return "release.js did not load before site.js, so this page names no engine release.";
+    }
+    if (!cfg) {
+      return "site.config.js did not load. A page loads it after release.js and before site.js.";
+    }
+    if (cfg.engineVersion !== rel.version) {
+      return "This site pins engine " + (cfg.engineVersion || "(none)") + " and the folder holds " +
+        rel.version + ". Set engineVersion in site.config.js after you replace the library.";
+    }
+    if (pathOf(location.href) === null) {
+      return "This page is not inside the site root, " + root() +
+        ", so the editor cannot tell which page it is.";
+    }
+    return "";
+  }
+  var problem = pinProblem();
 
   /* Old links to the blog takeover.
 
@@ -144,9 +175,18 @@
   onScroll();
 
   /* ==========================================================
-     3. THE ADDRESS AND THE VISIT
+     3. THE ROOT, THE ADDRESS AND THE VISIT
      ----------------------------------------------------------
-     Two jobs that every page shares, and that no page can own alone.
+     Three jobs that every page shares, and that no page can own
+     alone.
+
+     THE ROOT. Every path the engine reads or writes is a path from
+     the site root, and the root is found from where the library is:
+     it sits two folders below the root, in
+     libraries/harrisxrwebengine/. A host that puts it somewhere else
+     names the root in site.config.js as siteRoot. A body class or a
+     count of folders in the page's address is never the answer,
+     because a page can be at any depth.
 
      THE ADDRESS. Five places on this site rewrite the address as the
      reader works: a deep link, a month hop, a tag filter, the editor
@@ -169,6 +209,45 @@
      load blog.js. It stays two strings. It is not a record of the
      reader's browsing state, and it must not grow into one.
      ========================================================== */
+  function libraryRoot() {
+    return (AMH.release && AMH.release.root) || "";
+  }
+  function root() {
+    var own = AMH.config && AMH.config.siteRoot;
+    if (own) return String(own).replace(/\/?$/, "/");
+    var lib = libraryRoot();
+    if (!lib) return "";
+    try { return new URL("../../", lib).href; } catch (e) { return ""; }
+  }
+  /* The path from the site root that an address leads to. A relative
+     address is read from this page, and a folder's address is its
+     index.html. null when the address leads outside the root. */
+  function pathOf(href) {
+    var r = root(), u;
+    if (!r) return null;
+    try { u = new URL(href, location.href).href; } catch (e) { return null; }
+    u = u.split("#")[0].split("?")[0];
+    if (u.indexOf(r) !== 0) return null;
+    var p = u.slice(r.length);
+    try { p = decodeURI(p); } catch (e) { /* a path that will not decode is used as it is */ }
+    if (!p || p.slice(-1) === "/") p += "index.html";
+    return p;
+  }
+  /* This page's path from the site root. Outside the root, its file name,
+     which is the most a page list could name it by. */
+  function pagePath() {
+    var p = pathOf(location.href);
+    return p !== null ? p : (location.pathname.replace(/^.*\//, "") || "index.html");
+  }
+  /* The way from this page up to the site root: "" at the root, and "../"
+     for each folder below it. It goes in front of a path from the root to
+     make a path from this page. */
+  function prefix() {
+    var p = pathOf(location.href);
+    if (p === null) return "";
+    return new Array(p.split("/").length).join("../");
+  }
+
   /* Write the address and keep what the page remembers. */
   function setUrl(url, push) {
     try {
@@ -257,11 +336,6 @@
   /* ==========================================================
      4. NAV AND IN-PAGE LINKS
      ========================================================== */
-  /* The file name of the page being viewed. A directory URL ("/", "/blog/")
-     serves the index of that directory. Every managed page is at the site
-     root, so a file name is enough here; tool.js has the fuller version. */
-  var HERE = location.pathname.split("/").pop() || "index.html";
-
   /* The fragment a nav link points at WITHIN this page, or "" when the link
      leads somewhere else.
 
@@ -270,11 +344,6 @@
      in-page anchor and here it is treated as one; on any other page the
      browser follows it. A bare "#contact" is in-page on every page that has
      a contact section, and stays written that way. */
-  /* One step up from a page in blog/, nothing from a page at the root.
-     blog.js decides the same thing the same way. */
-  function upToRoot() {
-    return doc.body && doc.body.classList.contains("blog-month") ? "../" : "";
-  }
 
   /* Where a shared nav link goes when THIS page has no section for it.
      Every page carries the contact block today, so this is the safety
@@ -286,7 +355,7 @@
     if (!href) return "";
     if (href.charAt(0) === "#") return href;
     var cut = href.indexOf("#");
-    if ((cut === -1 ? href : href.slice(0, cut)) !== HERE) return "";
+    if (pathOf(cut === -1 ? href : href.slice(0, cut)) !== pagePath()) return "";
     return cut === -1 ? "#" : href.slice(cut);
   }
 
@@ -366,7 +435,7 @@
       }
       /* This page has no section by that name. Silently doing nothing is
          the worst answer, so the link follows the site's own copy of it. */
-      if (AWAY[frag]) location.href = upToRoot() + AWAY[frag];
+      if (AWAY[frag]) location.href = prefix() + AWAY[frag];
       return;
     }
 
@@ -379,14 +448,16 @@
 
   /* Mark the nav item that names this page. It cannot be authored, because
      the chrome is the same bytes everywhere; a link with a fragment names a
-     section rather than a page, so only a bare file name counts. */
+     section rather than a page, so only a link with no fragment counts. */
+  var herePath = pagePath();
   Array.prototype.forEach.call(hasNav ? nav.querySelectorAll("a") : [], function (a) {
     var href = a.getAttribute("href");
-    if (href === HERE) a.setAttribute("aria-current", "page");
-    /* A month file is a page of the blog, and its nav link reads
-       "../blog.html", which names no file in this folder. The reader is
-       still in the blog, so the item says so. */
-    else if (upToRoot() && href === "../blog.html") a.setAttribute("aria-current", "page");
+    if (!href || href.indexOf("#") !== -1) return;
+    var to = pathOf(href);
+    if (to === herePath) a.setAttribute("aria-current", "page");
+    /* A month file is a page of the blog, in blog/. The reader is still in
+       the blog, so the Blog item says so. */
+    else if (to === "blog.html" && herePath.indexOf("blog/") === 0) a.setAttribute("aria-current", "page");
   });
 
   /* ==========================================================
@@ -488,12 +559,41 @@
      True when this site sent the reader to the page they are on, in this
      tab, just now. Reads the departure token once and remembers the
      answer on this history entry, so a refresh keeps it. It is what
-     decides whether a page can offer Back. */
+     decides whether a page can offer Back.
+
+     AMH.site.problem
+     "" when this page may be edited. Otherwise one sentence: release.js
+     or site.config.js did not load, the two name different releases, or
+     the page is outside the site root. The editor shows the sentence and
+     opens nothing. Reading is never stopped.
+
+     AMH.site.root(), AMH.site.libraryRoot()
+     The absolute address of the site root and of the engine's folder,
+     each with a trailing slash.
+
+     AMH.site.prefix()
+     The way from this page up to the site root: "" at the root, "../"
+     one folder down. prefix() in front of a path from the root makes a
+     path from this page.
+
+     AMH.site.pagePath()
+     This page's path from the site root: "index.html" for the root's own
+     address, and "blog/2609.html" on a month page.
+
+     AMH.site.pathOf(href)
+     The path from the site root that href leads to, read from this page,
+     or null when it leads outside the root. */
   AMH.site = {
     requestTick: requestTick,
     setUrl: setUrl,
     paramUrl: paramUrl,
     cameFromHere: cameFromHere,
-    watchReveals: watchReveals
+    watchReveals: watchReveals,
+    problem: problem,
+    root: root,
+    libraryRoot: libraryRoot,
+    prefix: prefix,
+    pagePath: pagePath,
+    pathOf: pathOf
   };
 })();

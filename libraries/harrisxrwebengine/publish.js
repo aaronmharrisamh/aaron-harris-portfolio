@@ -9,8 +9,8 @@
    Write a post, drop photos, publish -> one bundle:
    blog.html (manifest spliced) + blog/YYMM.html + sitemap.xml +
    robots.txt + three files for each photo, all of them under blog/.
-   Month pages link site.css from the repo, so no stylesheet is
-   generated.
+   Month pages link engine.css and site.css from the repo, so no
+   stylesheet is generated.
 
    A photo goes through imagesengine.js, the one engine every image on
    the site is made with. What a page shows of it is a line in the
@@ -77,6 +77,13 @@
      panel opened. The manifest check at publish time compares against that
      opening value, because a stale page would splice a stale manifest.
      ========================================================== */
+  /* This site's facts, from the host's site.config.js. A missing field is
+     "", so a site with no portrait writes no portrait rather than a broken
+     one. */
+  function bcCfg(name) {
+    var v = AMH.config && AMH.config[name];
+    return typeof v === "string" ? v : "";
+  }
   var BC_DRAFT_KEY = "amh-blog-draft";
   /* The image index the engine reads and every publish writes; see
      imagesengine.js. The record a bundle leaves waits here until the
@@ -95,7 +102,7 @@
 
   /* The preview's phone: a screen of 9:20 at the width of an average phone,
      in CSS pixels. The page inside lays itself out at this width, so every
-     phone rule in site.css applies there as it does on a phone. */
+     phone rule in the stylesheets applies there as it does on a phone. */
   var BC_PHONE = { w: 390, h: 866 };
   /* The phone's bezel on each side, and the room kept around the phone in
      the preview, both in CSS pixels. */
@@ -1673,7 +1680,7 @@
      The post as a reader sees it, in one of two views. Desktop draws it in
      this page, in the blog's own column, so its width and its line breaks
      are the stream's. Mobile draws it in a phone: a page of its own at
-     BC_PHONE's size, in a frame, so every phone rule in site.css applies
+     BC_PHONE's size, in a frame, so every phone rule in the stylesheets applies
      there as it does on a phone. Both views fold a long post where the
      stream folds it, and Read more shows the rest in place. The refresh
      button draws the view again, folded. */
@@ -1689,7 +1696,7 @@
     var time = bcTimeParse(bcTime.value);
     var box = doc.createElement("div");
     box.innerHTML = '<article class="bs-post"><header class="bs-post__by">' +
-      '<img class="bs-post__avatar" src="aaron-portfolio-portrait-transparent.png" alt="" />' +
+      (STREAM_AVATAR ? '<img class="bs-post__avatar" src="' + TOOL.escAttr(STREAM_AVATAR) + '" alt="" />' : "") +
       "<b>" + TOOL.escAttr(bcBrand) + "</b>" +
       '<span class="bs-post__when"><time datetime="' + B.dateTime(date) + '">' +
       B.dateLabel(date) + TOOL.escAttr(time ? " · " + bcTimeLabel(time) : "") + "</time>" +
@@ -1782,7 +1789,7 @@
   }
 
   /* Mobile: the post in a phone. The frame holds a page of its own, so
-     site.css reads the phone's width in every media query and every vw.
+     the stylesheets read the phone's width in every media query and every vw.
      A new frame for each draw, so a refresh starts from the top, folded. */
   function bcPreviewPhone(html) {
     var fit = doc.createElement("div");
@@ -3810,7 +3817,7 @@
      page being viewed, and every render path passes through a month
      render that has the meta in hand, so it is set there rather than
      threaded through bcRenderArticle's four callers. */
-  var bcBrand = "AARON M. HARRIS";
+  var bcBrand = bcCfg("brand");
   /* Every image on the site, as the manifest states it, keyed by number.
 
      Set once at the start of a build and read wherever a post body is
@@ -3964,16 +3971,21 @@
   /* meta is the site meta from bcSiteMeta; prev is the month before this
      one, or null for the first month. The chain runs backward only:
      reading runs back in time, so a month needs to know only the month
-     before it. The two script tags are site.js and blog.js, for the loader
-     that walks the chain in place; neither tool.js nor publish.js loads
-     here, because a month file is generated, not managed. */
+     before it. The scripts are the engine's release, the host's
+     site.config.js, and the trunks a month page needs, from the engine's
+     folder; see the tags at the foot. The site's name, its description and
+     its social image are the host's, in site.config.js. */
   function bcMonthSkeleton(yymm, blocksJoined, meta, prev, stamp, months, nav) {
     var B = AMH.blog;
+    var esc = TOOL.escAttr;
     var base = meta.base, fontHref = meta.fontHref, brand = meta.brand;
     var mt = B.monthTitle(yymm);
-    var pageTitle = "Aaron M. Harris · Blog · " + mt;
-    var descr = "Thoughts, musings, and fun new developments from Aaron M. Harris";
+    var pageTitle = esc(bcCfg("siteName") + " · Blog · " + mt);
+    var descr = esc(bcCfg("description"));
     var url = base + "blog/" + yymm + ".html";
+    var ogImage = bcCfg("ogImage");
+    /* a month page is one folder down, in blog/ */
+    var lib = "../" + bcLibPath();
     /* The ways on, at the foot of the month. Every one of them is a plain
        link, not an expansion: the rail at the top already carries every
        month, and a second navigation that appended in place had to be kept
@@ -3994,21 +4006,24 @@
       (prev ? '  <link rel="prev" href="' + prev + '.html" />\n' +
               '  <link rel="prefetch" href="' + prev + '.html" />\n' : "") +
       '  <meta property="og:type" content="website" />\n' +
-      '  <meta property="og:site_name" content="Aaron M. Harris" />\n' +
+      '  <meta property="og:site_name" content="' + esc(bcCfg("siteName")) + '" />\n' +
       '  <meta property="og:title" content="' + pageTitle + '" />\n' +
       '  <meta property="og:description" content="' + descr + '" />\n' +
       '  <meta property="og:url" content="' + url + '" />\n' +
-      '  <meta property="og:image" content="' + base + 'og-image.png" />\n' +
-      '  <meta property="og:image:width" content="1200" />\n' +
-      '  <meta property="og:image:height" content="630" />\n' +
-      '  <meta property="og:image:alt" content="Aaron M. Harris — Technical Lead & Solutions Architect." />\n' +
+      (ogImage ? '  <meta property="og:image" content="' + esc(base + ogImage) + '" />\n' +
+        '  <meta property="og:image:width" content="1200" />\n' +
+        '  <meta property="og:image:height" content="630" />\n' +
+        '  <meta property="og:image:alt" content="' + esc(bcCfg("ogImageAlt")) + '" />\n' : "") +
       '  <meta name="twitter:card" content="summary_large_image" />\n' +
       '  <meta name="twitter:title" content="' + pageTitle + '" />\n' +
       '  <meta name="twitter:description" content="' + descr + '" />\n' +
-      '  <meta name="twitter:image" content="' + base + 'og-image.png" />\n' +
+      (ogImage ? '  <meta name="twitter:image" content="' + esc(base + ogImage) + '" />\n' : "") +
       '  <link rel="preconnect" href="https://fonts.googleapis.com" />\n' +
       '  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n' +
       '  <link href="' + fontHref + '" rel="stylesheet" />\n' +
+      /* the engine's style first, and the host's second, so the host's
+         tokens set the theme */
+      '  <link rel="stylesheet" href="' + lib + 'engine.css" />\n' +
       '  <link rel="stylesheet" href="../site.css" />\n' +
       /* THE ONLY INLINE SCRIPT THIS SITE WRITES. See the file header.
 
@@ -4071,18 +4086,27 @@
       '  <scr' + 'ipt id="blogManifest" type="text/plain" data-ced="blog">\n' +
       "months:" + (months || [yymm]).join(" ") + "\n" +
       "</scr" + "ipt>\n" +
-      '  <script defer src="../site.js"></script>\n' +
-      '  <script defer src="../work.js"></script>\n' +
-      '  <script defer src="../imagesengine.js"></script>\n' +
-      '  <script defer src="../blog.js"></script>\n' +
+      '  <script defer src="' + lib + 'release.js"></script>\n' +
+      '  <script defer src="../site.config.js"></script>\n' +
+      '  <script defer src="' + lib + 'site.js"></script>\n' +
+      '  <script defer src="' + lib + 'work.js"></script>\n' +
+      '  <script defer src="' + lib + 'imagesengine.js"></script>\n' +
+      '  <script defer src="' + lib + 'blog.js"></script>\n' +
       /* The editor comes here too, so the corner mark is on every page of
          the site rather than on three of them. It cannot publish from here:
          a month page holds its month list and not the counters, so the
          composer refuses and the per-post Edit button hands the work to the
          blog page, which has what a publish needs. */
-      '  <script defer src="../tool.js"></script>\n' +
-      '  <script defer src="../publish.js"></script>\n' +
+      '  <script defer src="' + lib + 'tool.js"></script>\n' +
+      '  <script defer src="' + lib + 'publish.js"></script>\n' +
       "</body>\n</html>\n";
+  }
+  /* The engine's folder, as a path from the site root, for the tags a
+     month page carries. Every layout the engine documents keeps the folder
+     inside the root. */
+  function bcLibPath() {
+    var lib = AMH.site.libraryRoot(), root = AMH.site.root();
+    return root && lib.indexOf(root) === 0 ? lib.slice(root.length) : "libraries/harrisxrwebengine/";
   }
 
   /* parse an existing (generated or fixture) month file back into article
@@ -4347,11 +4371,11 @@
      The stream never carries a source block. The source lives in the
      month file, so a post's source is in exactly one place. */
 
-  /* The byline's name and picture come from the page, not from here: the
-     wordmark is editable copy, and the portrait is the asset the home page
-     already ships. A rename in the editor reaches the stream at the next
-     publish that writes it. */
-  var STREAM_AVATAR = "aaron-portfolio-portrait-transparent.png";
+  /* The byline's name comes from the page, because the wordmark is
+     editable copy: a rename in the editor reaches the stream at the next
+     publish that writes it. The picture is the host's, in site.config.js,
+     and a site with none writes a byline with no picture. */
+  var STREAM_AVATAR = bcCfg("avatar");
 
   /* One post, in the markup both surfaces share.
 
@@ -4403,7 +4427,8 @@
       '" data-zone="' + esc(post.zone || "") + '" data-tags="' + esc(post.tags || "") +
       (where.id === "p" ? '" data-title="' + esc(post.title || "") : "") + '">\n' +
       indent + '  <header class="bs-post__by">\n' +
-      indent + '    <img class="bs-post__avatar" src="' + where.img + STREAM_AVATAR + '" alt="" />\n' +
+      (STREAM_AVATAR ? indent + '    <img class="bs-post__avatar" src="' + where.img +
+        esc(STREAM_AVATAR) + '" alt="" />\n' : "") +
       indent + "    <b>" + esc(brand) + "</b>\n" +
       indent + '    <a class="bs-post__when" href="' + where.when(post) + '">' +
       '<time datetime="' + B.dateTime(post.date) +
@@ -4768,8 +4793,8 @@
       "</feed>\n";
   }
 
-  /* Structure unchanged: it points at the sitemap. The base comes from the
-     page's own og:url, so it follows CNAME rather than a second copy of it. */
+  /* Structure unchanged: it points at the sitemap. The base is the site's
+     address from site.config.js. */
   function bcRobots(base, stamp) {
     return "# " + bcGenerated(stamp) + "\n" +
       "User-agent: *\nAllow: /\nSitemap: " + base + "sitemap.xml\n";
@@ -4778,34 +4803,28 @@
   /* ==========================================================
      6. BUNDLE AND PUBLISH
      ----------------------------------------------------------
-     One publish for each page load. A bundle splices the deployed bytes of
-     the pages it rewrites, so a second bundle would splice into bytes that
-     no longer match the live site.
+     A bundle splices the bytes of the pages it rewrites: the bytes of the
+     last bundle this tab built and has not yet seen live, or else the
+     deployed bytes. So a second publish before an upload builds on the
+     first, and the newest zip holds everything that is not yet live.
 
      The zip writer itself is AMH.tool.zip: a multi-page export ships a zip
      too, so it is not blog machinery.
      ========================================================== */
-  /* The site root and the font link, read from the page that carries the
-     manifest. Everything generated is built from the root, so it has to be
-     the root and not a page inside it.
-
-     og:url is that page's own URL. While the manifest lived on the home page
-     the two were the same string; on blog.html they are not, so the page's
-     own path comes off the end. Without that, every generated URL sits one
-     level down a directory that does not exist. */
+  /* The site's address, from the host's site.config.js, and the font link,
+     the wordmark and the eyebrow, read from the page that carries the
+     manifest. Everything generated is built from the address, which is the
+     site root and never a page inside it. */
   function bcSiteMeta(src) {
-    var base = (/<meta property="og:url" content="([^"]+)"/.exec(src) ||
-      [null, "https://aaronmichaelharris.com/"])[1];
-    var page = TOOL.currentPage();
-    if (base.slice(-page.length) === page) base = base.slice(0, -page.length);
-    if (base.slice(-1) !== "/") base += "/";
+    var base = bcCfg("publicUrl");
+    if (base && base.slice(-1) !== "/") base += "/";
     var fontHref = (/<link href="(https:\/\/fonts\.googleapis\.com[^"]+)" rel="stylesheet"/.exec(src) ||
       [null, "https://fonts.googleapis.com/css2?family=Inter&display=swap"])[1];
     /* The wordmark, read rather than repeated. A month file carries the same
        brand as the site, and the brand is editable copy: a second copy here
        would mean a rename in the editor left every month file behind. */
     var brand = (/class="brand__title full">([^<]*)</.exec(src) ||
-      [null, "AARON M. HARRIS"])[1];
+      [null, bcCfg("brand")])[1];
     bcBrand = brand;
     /* The blog eyebrow, read for the same reason as the brand. A month
        page opens with it, and it is editable copy on blog.html. */

@@ -2,8 +2,9 @@
 <!-- ============================================================
      index.html - the home page.
 
-     Markup only. Style lives in site.css and behavior lives in the
-     four script trunks, loaded in a fixed order from the head.
+     Markup only. Style lives in the engine's engine.css and this site's
+     site.css, and behavior lives in the engine's script trunks, loaded
+     in a fixed order from the head.
 
      Copy the editor can change is fenced by [edit:slug] comment
      pairs, each wrapping exactly one element. Do not nest a pair
@@ -69,11 +70,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
 
+  <!-- The engine's style first and this site's second, so this site's
+       tokens set the theme. -->
+  <link rel="stylesheet" href="libraries/harrisxrwebengine/engine.css" />
   <link rel="stylesheet" href="site.css" />
 
   <!-- The site's script, in a fixed order. defer keeps document order and runs
        each file after parsing, so every trunk sees the whole page.
-       site.js creates window.AMH, the one namespace the trunks share.
+       release.js names the engine release and creates window.AMH, the one
+       namespace the trunks share, and site.config.js holds this site's
+       facts. Both come first. The trunks are the engine's, in
+       libraries/harrisxrwebengine/.
 
        blog.js is not here: the blog lives on blog.html, which loads it. Each
        page declares the trunks it needs, in the same fixed order.
@@ -86,11 +93,13 @@
        imagesengine.js is the image engine. Every image the site takes in
        goes through it, so every page loads it, after work.js and before
        the trunks that call it. -->
-  <script defer src="site.js"></script>
-  <script defer src="work.js"></script>
-  <script defer src="imagesengine.js"></script>
-  <script defer src="markdown.js"></script>
-  <script defer src="tool.js"></script>
+  <script defer src="libraries/harrisxrwebengine/release.js"></script>
+  <script defer src="site.config.js"></script>
+  <script defer src="libraries/harrisxrwebengine/site.js"></script>
+  <script defer src="libraries/harrisxrwebengine/work.js"></script>
+  <script defer src="libraries/harrisxrwebengine/imagesengine.js"></script>
+  <script defer src="libraries/harrisxrwebengine/markdown.js"></script>
+  <script defer src="libraries/harrisxrwebengine/tool.js"></script>
 
   <!-- Graceful degradation: without JS the reveal animations never fire, so
        force all content visible and let each gallery show its first image. The

@@ -3,7 +3,8 @@
 // Requires: node 22+ (native WebSocket/fetch), Chrome, py launcher (http.server).
 // The harness starts its own local server and Chrome, and cleans both up.
 import { spawn } from "node:child_process";
-import { readFileSync, mkdtempSync, writeFileSync, copyFileSync, cpSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, copyFileSync, cpSync, existsSync, unlinkSync } from "node:fs";
+import vm from "node:vm";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,6 +12,16 @@ import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+// The engine's folder, from the site root. Every trunk is in it.
+const LIB = "libraries/harrisxrwebengine/";
+// The host's facts, as a page reads them: site.config.js, run on its own.
+const SITE_CONFIG = (() => {
+  const ctx = {};
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(join(REPO, "site.config.js"), "utf8"), ctx);
+  return ctx.AMH.config;
+})();
 const SERVER_PORT = 8123;
 const PAGE = `http://127.0.0.1:${SERVER_PORT}/index.html`;
 const BLOGPAGE = `http://127.0.0.1:${SERVER_PORT}/blog.html`;
@@ -25,17 +36,16 @@ function check(name, ok, detail) {
 
 // self-contained: serve the repo ourselves for the duration of the run
 // The suite serves a COPY of the repo, not the repo, so the content of the
-// three pages can be fixed without touching the site. See fixedPage().
+// three pages can be fixed without touching the site. See fixedPage(). The
+// engine's folder is copied whole, so a file added to it needs no line here.
 const SERVE = mkdtempSync(join(tmpdir(), "ced-serve-"));
-for (const f of ["site.css", "site.js", "work.js", "imagesengine.js",
-                 "blog.js", "markdown.js", "gallery.js", "tool.js", "publish.js",
-                 "aaron-portfolio-portrait-transparent.png"]) {
+for (const f of ["site.css", "site.config.js", "aaron-portfolio-portrait-transparent.png"]) {
   try { copyFileSync(join(REPO, f), join(SERVE, f)); } catch {}
 }
 for (const page of ["index.html", "gallery.html", "blog.html"]) {
   writeFileSync(join(SERVE, page), fixedPage(page, readFileSync(join(REPO, page), "utf-8")));
 }
-for (const d of ["img", "tools"]) {
+for (const d of ["img", "tools", "libraries"]) {
   try { cpSync(join(REPO, d), join(SERVE, d), { recursive: true }); } catch {}
 }
 const server = spawn("py", ["-3", "-m", "http.server", String(SERVER_PORT), "--bind", "127.0.0.1"],
@@ -169,8 +179,8 @@ function stripSpans(txt, slugs) {
 // pages. Each of those steps can break a fact below with no visible symptom,
 // so each fact is pinned here while the monofile is still whole and green.
 
-// Every page the editor and the publish engine manage. Order matches
-// MANAGED_PAGES in tool.js, which is the list the site is generated from.
+// Every page the editor and the publish engine manage. Order matches pages
+// in site.config.js, which is the list the site is generated from.
 const MANAGED_PAGES = ["index.html", "gallery.html", "blog.html"];
 
 // The exact marked regions of each page, in the order the open markers appear
@@ -225,19 +235,27 @@ const EXPECTED_REGIONS = {
   ],
 };
 
-// The declared script set of each page, in load order. site.js creates the
-// namespace, so it is always first; tool.js reaches into the others, so it is
-// always last. A page declares only the trunks it needs: blog.js is on the
-// blog page and nowhere else. A wrong order fails here, not in the browser.
+// The declared script set of each page, in load order. release.js names the
+// engine release and creates the namespace, so it is always first, and the
+// host's site.config.js follows it. Then the page's trunks, from the engine's
+// folder: site.js first, and tool.js after every trunk it reaches into. A
+// page declares only the trunks it needs: blog.js is on the blog page and
+// nowhere else. A wrong order fails here, not in the browser.
+const PAGE_HEAD = [LIB + "release.js", "site.config.js"];
+const trunks = (names, up = "") => names.map((f) => up + LIB + f);
 const EXPECTED_SCRIPTS = {
   // markdown.js on the home page: a deep dive is written in Markdown and
   // carries its source, and tool.js is what asks the renderer for the rest.
   // imagesengine.js on every page, after work.js: every image the site
   // takes in goes through it, and tool.js and the trunks after it call it.
-  "index.html": ["site.js", "work.js", "imagesengine.js", "markdown.js", "tool.js"],
-  "blog.html": ["site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js", "tool.js", "publish.js"],
-  "gallery.html": ["site.js", "work.js", "imagesengine.js", "tool.js", "gallery.js"],
+  "index.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "markdown.js", "tool.js"])),
+  "blog.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js",
+    "tool.js", "publish.js"])),
+  "gallery.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "tool.js", "gallery.js"])),
 };
+// A generated month page's scripts. It is one folder down, in blog/.
+const MONTH_SCRIPTS = trunks(["release.js"], "../").concat(["../site.config.js"],
+  trunks(["site.js", "work.js", "imagesengine.js", "blog.js", "tool.js", "publish.js"], "../"));
 
 // blog.html with no posts: the manifest reset to its counters and the index
 // back to its placeholder.
@@ -591,6 +609,18 @@ async function main() {
     check("contract: " + page + " publishes the image engine, with its three renditions",
       eng.there && eng.missing.length === 0 && eng.renditions === "sd,hd,original", JSON.stringify(eng));
 
+    // C3c. the page runs the release its site pins, and it knows where the
+    // site root is: the root is the server's, and the page is at the top of it
+    const pin = await evaluate(`(window.AMH && AMH.site && AMH.site.prefix) ? {
+      release: AMH.release ? AMH.release.version : null,
+      pinned: AMH.config ? AMH.config.engineVersion : null,
+      problem: AMH.site.problem, root: AMH.site.root(),
+      prefix: AMH.site.prefix(), path: AMH.site.pagePath() } : null`);
+    check("contract: " + page + " runs the release its site pins, at the site root",
+      !!pin && !!pin.release && pin.release === pin.pinned && pin.problem === "" &&
+      pin.root === `http://127.0.0.1:${SERVER_PORT}/` && pin.prefix === "" && pin.path === page,
+      JSON.stringify(pin));
+
     // C4. exactly one managed page carries the manifest
     const hasManifest = /<script id="blogManifest"/.test(src);
     check("contract: " + page + (hasManifest ? " carries" : " does not carry") + " the blog manifest",
@@ -624,6 +654,44 @@ async function main() {
       check("contract: edit.blog() on " + page + " says where the composer lives",
         !composer.panel && /blog\.html/.test(composer.says), composer.says);
     }
+  }
+
+  // C-root. The site's own address serves its index.html, and site.js reads
+  // it as that page, at the top of the root.
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/` });
+  await waitLoaded();
+  await sleep(500);
+  const atRoot = await evaluate(`(window.AMH && AMH.site && AMH.site.prefix) ?
+    { path: AMH.site.pagePath(), prefix: AMH.site.prefix(), problem: AMH.site.problem } : null`);
+  check("contract: the site's own address is its index.html, at the root",
+    !!atRoot && atRoot.path === "index.html" && atRoot.prefix === "" && atRoot.problem === "",
+    JSON.stringify(atRoot));
+
+  // C-lib. The engine's folder holds no fact about one site: a site's name,
+  // its domain and its portrait are in its site.config.js. No trunk guesses
+  // the site root from a body class, because site.js finds it from the
+  // folder. Three trunks still ask whether a page IS a month page, which is a
+  // question of role and not of place.
+  {
+    const libDir = join(REPO, LIB);
+    const personal = [];
+    for (const f of readdirSync(libDir)) {
+      const text = readFileSync(join(libDir, f), "utf8");
+      const m = /aaron|michaelharris/i.exec(text);
+      if (m) personal.push(f + ":" + text.slice(0, m.index).split("\n").length);
+    }
+    check("library: no file in the engine's folder names this site's person, domain or portrait",
+      personal.length === 0, personal.join(", "));
+    const guesses = [], roles = {};
+    for (const f of ["site.js", "imagesengine.js", "blog.js", "tool.js", "publish.js"]) {
+      const text = readFileSync(join(libDir, f), "utf8");
+      if (/classList\.contains\("blog-month"\)\s*\?\s*"\.\.\/"/.test(text)) guesses.push(f);
+      roles[f] = (text.match(/classList\.contains\("blog-month"\)/g) || []).length;
+    }
+    check("library: no trunk guesses the site root from a body class, and the three role checks remain",
+      guesses.length === 0 && roles["site.js"] === 0 && roles["imagesengine.js"] === 0 &&
+      roles["blog.js"] === 1 && roles["tool.js"] === 1 && roles["publish.js"] === 1,
+      "guesses=" + guesses.join(",") + " roles=" + JSON.stringify(roles));
   }
 
   // C-gallery. The grid invariant: within a train, the widths of each row
@@ -780,7 +848,7 @@ async function main() {
   check("packer: the same input gives the same output", packer.deterministic === true);
   check("packer: every breakpoint produces a valid layout",
     packer.byCols === "6:ok 3:ok 1:ok", packer.byCols);
-  check("packer: the collapse table matches the one in site.css",
+  check("packer: the collapse table matches the one in engine.css",
     packer.collapse === "1234 1123 1111", packer.collapse);
   check("cap: a 1600px image fills an x4 slot, a portrait does not",
     packer.wideOk === 4 && packer.tallCapped < 4 && packer.cap === 1.35,
@@ -7647,7 +7715,7 @@ async function main() {
     mdTag.html === "<p>A <b>bold start.</p>\n<p>No close.</p>" && !!mdTag.problem,
     JSON.stringify(mdTag).slice(0, 160));
   // MD5. the trunk names its seven sections in its header
-  const mdSrc = readFileSync(join(REPO, "markdown.js"), "utf8");
+  const mdSrc = readFileSync(join(REPO, LIB, "markdown.js"), "utf8");
   const mdSections = (mdSrc.slice(0, mdSrc.indexOf("(function")).match(/\b[1-7]\. [A-Z][A-Z ]+/g) || []).length;
   check("markdown: the trunk is a seven-section manifold, named in its header", mdSections === 7, String(mdSections));
 
@@ -8155,7 +8223,7 @@ async function main() {
   // This is checked at the source, because the promise is structural: the
   // fault was a caller doing half the job, and the guard is that there is
   // only one caller and it does all of it.
-  const pubSrc = readFileSync(join(REPO, "publish.js"), "utf-8");
+  const pubSrc = readFileSync(join(REPO, LIB, "publish.js"), "utf-8");
   const applyCalls = (pubSrc.match(/TOOL\.layerApply\(/g) || []).length;
   const ontoAt = pubSrc.indexOf("function bcLayerOnto(force) {");
   const ontoBody = ontoAt < 0 ? "" : pubSrc.slice(ontoAt, ontoAt + 400);
@@ -8513,6 +8581,30 @@ async function main() {
       month.includes('name="twitter:card"') && month.includes("fonts.googleapis.com") &&
       month.includes('href="../site.css"'),
       month.length + " chars");
+    // The engine's style comes first and the host's second, so the host's
+    // tokens set the theme on a month page as they do on every other page.
+    check("month file: it links the engine's stylesheet, then the host's",
+      month.includes('<link rel="stylesheet" href="../' + LIB + 'engine.css" />') &&
+      month.indexOf('href="../' + LIB + 'engine.css"') < month.indexOf('href="../site.css"'),
+      (month.match(/<link rel="stylesheet"[^>]*>/g) || []).join(" "));
+    // The site's name, its description, its address and its social image are
+    // the host's facts, from site.config.js. The feed's author is the page's
+    // wordmark, because the wordmark is editable copy.
+    {
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      const C = SITE_CONFIG;
+      const wordmark = (/class="brand__title full">([^<]*)</.exec(servedSource("blog.html")) || [])[1] || "";
+      const feed = zipFiles["feed.xml"] ? zipFiles["feed.xml"].toString("utf8") : "";
+      check("month file: its head says the site's name, description, address and image from site.config.js",
+        month.includes("<title>" + esc(C.siteName) + " · Blog · ") &&
+        month.includes('<meta name="description" content="' + esc(C.description) + '" />') &&
+        month.includes('<meta property="og:site_name" content="' + esc(C.siteName) + '" />') &&
+        month.includes('<link rel="canonical" href="' + C.publicUrl + 'blog/2607.html" />') &&
+        month.includes('<meta property="og:image" content="' + esc(C.publicUrl + C.ogImage) + '" />') &&
+        month.includes('<meta property="og:image:alt" content="' + esc(C.ogImageAlt) + '" />') &&
+        !!wordmark && feed.includes("<author><name>" + esc(wordmark) + "</name></author>"),
+        (month.match(/<title>[^<]*<\/title>/) || [""])[0] + " wordmark=" + wordmark);
+    }
     // The one inline script this site writes. It hides the other posts
     // before they paint, and it names the wanted post rather than hiding
     // them all, so a reader whose blog.js never arrives still sees the
@@ -8541,10 +8633,10 @@ async function main() {
     check("chain: the first month says so, carries no prev, and loads the trunks in order",
       !/rel="prev"/.test(month) &&
       month.includes('<p class="bm-chain__end">This is the first month. There is nothing older.</p>') &&
-      /<script defer src="\.\.\/site\.js"><\/script>\n\s*<script defer src="\.\.\/work\.js"><\/script>\n\s*<script defer src="\.\.\/imagesengine\.js"><\/script>\n\s*<script defer src="\.\.\/blog\.js"><\/script>\n\s*<script defer src="\.\.\/tool\.js"><\/script>\n\s*<script defer src="\.\.\/publish\.js"><\/script>/.test(month),
+      JSON.stringify(scriptSrcs(month)) === JSON.stringify(MONTH_SCRIPTS),
       (month.match(/bm-chain__end[^\n]*/) || [""])[0]);
 
-    check("bundle ships no stylesheet (site.css is a repo file)",
+    check("bundle ships no stylesheet (engine.css and site.css are repo files)",
       !Object.keys(zipFiles).some((n) => n.endsWith(".css")),
       Object.keys(zipFiles).filter((n) => n.endsWith(".css")).join(", ") || "none");
     // Read exactly, not by substring: a base URL with the page still on the
@@ -8621,10 +8713,10 @@ async function main() {
     // every page of the site rather than on three of them. It cannot publish
     // from here, which the composer says for itself; see the runtime checks.
     check("month page: it loads the editor and the image engine as well as the reading engine",
-      month.includes('src="../tool.js"') && month.includes('src="../publish.js"') &&
-      month.includes('src="../site.js"') && month.includes('src="../blog.js"') &&
-      month.indexOf('src="../work.js"') < month.indexOf('src="../imagesengine.js"') &&
-      month.indexOf('src="../imagesengine.js"') < month.indexOf('src="../blog.js"'),
+      month.includes('src="../' + LIB + 'tool.js"') && month.includes('src="../' + LIB + 'publish.js"') &&
+      month.includes('src="../' + LIB + 'site.js"') && month.includes('src="../' + LIB + 'blog.js"') &&
+      month.indexOf('src="../' + LIB + 'work.js"') < month.indexOf('src="../' + LIB + 'imagesengine.js"') &&
+      month.indexOf('src="../' + LIB + 'imagesengine.js"') < month.indexOf('src="../' + LIB + 'blog.js"'),
       (month.match(/<script defer src="[^"]*"><\/script>/g) || []).join(" "));
 
     // MC3. the bar carries the two controls and no label. The header above
@@ -8791,12 +8883,13 @@ async function main() {
   const entryIn = (table, num) => ((table && table.images) || []).find((e) => e.num === num) || null;
   if (zipB64) {
     writeBundle(zipFiles);
-    // The stylesheet and the four script trunks are repo files, not bundle
-    // files. Copy them in so the served bundle behaves like the deployed site.
-    for (const f of ["site.css", "site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js",
-                     "tool.js", "publish.js", "index.html"]) {
+    // The stylesheets, the host's facts and the engine's folder are repo
+    // files, not bundle files. Copy them in so the served bundle behaves like
+    // the deployed site.
+    for (const f of ["site.css", "site.config.js", "index.html"]) {
       writeFileSync(join(bdir, f), readFileSync(join(REPO, f)));
     }
+    cpSync(join(REPO, "libraries"), join(bdir, "libraries"), { recursive: true });
     // blog.html is NOT copied from the repo here: this directory is the
     // extracted bundle, so its blog.html is the one the publish just wrote.
     bs = spawn("py", ["-3", "-m", "http.server", "8124", "--bind", "127.0.0.1"], { cwd: bdir, stdio: "ignore" });
@@ -9450,8 +9543,8 @@ async function main() {
       JSON.stringify(blogFoot));
 
     // ---- the month chain, on the served bundle: 2607 points at 2606 ----
-    // CH1. a month page boots with the two scripts and no console error,
-    // and site.js is inert there: it has no chrome to drive
+    // CH1. a month page boots with the engine and no console error, and
+    // site.js is inert there: it has no chrome to drive
     exceptions.length = 0;
     await send("Page.navigate", { url: B + "blog/2607.html" });
     await waitLoaded();
@@ -9467,9 +9560,16 @@ async function main() {
     check("chain: a month page boots with every trunk and no console error",
       exceptions.length === 0 && monthBoot.site && monthBoot.blog && monthBoot.work &&
       monthBoot.images && !monthBoot.index && monthBoot.month &&
-      monthBoot.scripts === "../site.js ../work.js ../imagesengine.js ../blog.js ../tool.js ../publish.js" &&
+      monthBoot.scripts === MONTH_SCRIPTS.join(" ") &&
       monthBoot.link === "Older: June 2026 · 1 post",
       JSON.stringify(monthBoot).slice(0, 200) + " " + exceptions.join(" | ").slice(0, 120));
+    // CH1b. site.js finds the root from the engine's folder, so a month page
+    // knows it is one folder down without a body class to say so
+    const monthRoot = await evaluate(`(window.AMH && AMH.site && AMH.site.prefix) ?
+      { prefix: AMH.site.prefix(), path: AMH.site.pagePath(), problem: AMH.site.problem } : null`);
+    check("chain: a month page knows it is one folder below the site root",
+      !!monthRoot && monthRoot.prefix === "../" && monthRoot.path === "blog/2607.html" &&
+      monthRoot.problem === "", JSON.stringify(monthRoot));
     // MP2. a month page has the bar with its own picker, folds nothing,
     // and zooms
     const monthPage = await evaluate(`(function () {
@@ -12195,8 +12295,9 @@ async function main() {
      got an empty native control. */
   const retired = ["bs-card", "bs-index", "bs-months", "bm-head", "bs-month ", "bs-end",
                    "bs-bar__month"];
-  const searched = ["index.html", "gallery.html", "blog.html", "site.css", "site.js",
-                    "work.js", "imagesengine.js", "blog.js", "markdown.js", "tool.js", "publish.js"];
+  const searched = ["index.html", "gallery.html", "blog.html", "site.css", "site.config.js"].concat(
+    trunks(["engine.css", "release.js", "site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js",
+      "gallery.js", "tool.js", "publish.js"]));
   const stillThere = [];
   for (const f of searched) {
     const text = readFileSync(join(REPO, f), "utf-8");
@@ -13197,7 +13298,8 @@ async function main() {
   })()`);
   check("build: the panel names the build it is running, and every file it is built from",
     mark.there && /^[a-z0-9]{6}$/.test(mark.mark) &&
-    mark.files.indexOf("tool.js") !== -1 && mark.files.indexOf("site.css") !== -1 &&
+    mark.files.indexOf(LIB + "tool.js") !== -1 && mark.files.indexOf(LIB + "engine.css") !== -1 &&
+    mark.files.indexOf("site.css") !== -1 &&
     mark.files.indexOf("index.html") !== -1,
     JSON.stringify(mark).slice(0, 200));
   // Nothing changed under this page, so it is current. The line still says
@@ -13336,7 +13438,7 @@ async function main() {
   // The tools are gone from publish.js, not copied out of it. Two copies of
   // a heading cycle is how the two surfaces drift apart.
   const mdGone = await evaluate(`(function () {
-    return fetch("publish.js").then(function (r) { return r.text(); }).then(function (t) {
+    return fetch(${JSON.stringify(LIB + "publish.js")}).then(function (r) { return r.text(); }).then(function (t) {
       return ["BC_TOOLS", "bcLineAt", "bcHeadingCycle", "bcListToggle", "bcInsertFlag",
               "bcInsertTable", "bcClearMarks", "bcFlagTool"]
         .filter(function (n) { return t.indexOf(n) !== -1; });

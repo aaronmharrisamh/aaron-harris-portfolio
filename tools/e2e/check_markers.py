@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """Validate the marker families in every managed page.
 
-Keep this list in step with MANAGED_PAGES in tool.js. A page the engine may
-write has to obey the marker rules, and a page it may not write is not checked
-here because nothing splices it.
+The pages are the ones the host's site.config.js names, read from that file,
+so the list has one home. A page the engine may write has to obey the marker
+rules, and a page it may not write is not checked here because nothing
+splices it.
 
 Three families share one page:
 
@@ -18,7 +19,21 @@ error here rather than a silent reinterpretation at export time.
 import io, os, re, sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-PAGES = ["index.html", "blog.html", "gallery.html"]
+
+def config_pages(root):
+    """Every path in the pages list of site.config.js, in its order."""
+    path = os.path.join(root, "site.config.js")
+    if not os.path.exists(path):
+        sys.exit("FAIL site.config.js is missing from %s" % os.path.abspath(root))
+    with io.open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"\bpages\s*:\s*\[(.*?)\]", text, re.S)
+    found = re.findall(r'\bpath\s*:\s*"([^"]+)"', m.group(1)) if m else []
+    if not found:
+        sys.exit("FAIL site.config.js names no pages")
+    return found
+
+PAGES = config_pages(ROOT)
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "param", "source", "track", "wbr"}
 MARKER = re.compile(r"<!--\[(/?)(edit|list|item):([\w-]+)\]-->")

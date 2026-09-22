@@ -136,7 +136,10 @@ project only. It does not repeat the baseline.
 - No build step, no framework, no package manager, no bundler, no launcher.
 - Every file is a file that a browser reads directly. GitHub Pages serves the
   repository as it is.
-- Use classic `<script src>` tags in a fixed, documented order. Do not use ES
+- Use classic `<script src>` tags in a fixed, documented order: the engine's
+  `release.js`, then the site's `site.config.js`, then the page's trunks from
+  the engine's folder. The engine's `README.md` lists the set for each kind of
+  page. Do not use ES
   modules. A browser refuses to load a module from disk, and the only repair for
   that is a launcher.
 - The site must work when a person opens it from disk. Reading works offline.
@@ -144,38 +147,46 @@ project only. It does not repeat the baseline.
 
 ### File Map
 
-This is the target state after Phase 4 of the expansion program. Files appear
-here before they exist on disk.
+The site's own files are at the root. The engine is in
+`libraries/harrisxrwebengine/`, a folder a site takes whole.
 
 | File | Job |
 | --- | --- |
 | `index.html` | Home page. Hero, work, about, and contact. |
 | `gallery.html` | Gallery page. The six-column tile grid. |
 | `blog.html` | Blog page. The stream, the post manifest, and the composer. |
-| `site.css` | All page style. Replaces the inline style block. |
-| `site.js` | Shared page behavior for every page. |
-| `work.js` | Carousels of photos and players, the deep-dive drawer, the shared lightbox, and the players' rules: one at a time, and none out of sight. |
-| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
-| `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
-| `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
+| `site.config.js` | This site's facts for the engine: its id, the engine release it pins, its name, address and social image, the managed pages, the shared slugs, and whether it has a blog. Every page loads it second. |
+| `site.css` | This site's style: the theme tokens, the backdrop, the header and nav, the hero, the project cards, and about and contact. Every page links it after `engine.css`. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
 | `images.js` | GENERATED. The image index: every image and media file the site holds, its kind, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
 | `superdeleted.js` | GENERATED. The log of every Super Delete: when, the paths, the typed entry as it was, and when it was restored. Written by the Media box, loaded by it and by a rebuild only. Do not edit by hand. |
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
-| `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
-| `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
-| `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |
 | `tools/e2e/` | The test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. |
 
+In `libraries/harrisxrwebengine/`:
+
+| File | Job |
+| --- | --- |
+| `README.md` | The files, the load order for each kind of page, the host's two files, and the theme tokens. |
+| `release.js` | The engine release: its id, its version and its folder. The one place the engine's version is written. Every page loads it first. |
+| `engine.css` | The style of everything the engine draws or drives, with a default for every theme token. |
+| `site.js` | Shared page behavior for every page, the site root, and the pin check. |
+| `work.js` | Carousels of photos and players, the deep-dive drawer, the shared lightbox, and the players' rules: one at a time, and none out of sight. |
+| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
+| `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
+| `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
+| `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
+| `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
+| `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
+
 Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
-sections only when a distinct job cannot merge into another section. Three
+sections only when a distinct job cannot merge into another section. Two
 files are at eight and say why in their own headers: `gallery.js`, which both
-decides a layout and is an editing surface; `site.css`, whose gallery grid is a
-whole page's layout system with an invariant of its own; and `blog.js`, whose
-FIND section reads one file about every post the blog has, while every
-other section reads the page it is on.
+decides a layout and is an editing surface; and `blog.js`, whose FIND section
+reads one file about every post the blog has, while every other section reads
+the page it is on.
 
 ### The Self-Editing Laws
 
@@ -186,8 +197,9 @@ other section reads the page it is on.
   export never serializes the live DOM.
 - No database, no server, no CMS. Every generated file is standalone HTML that
   works on its own.
-- Publish from a clean repository that matches the deployed site. One publish
-  for each page load.
+- Publish from a clean repository that matches the deployed site. A publish
+  builds on the last bundle this tab made and has not yet seen live, so the
+  newest zip holds everything that is not live.
 - Post ids and anchors are permanent. A rename, a new date, or the deletion of a
   sibling must not change an existing `#p0007` link.
 - The tool proposes and the user decides. Nothing reaches the site except as a
@@ -203,15 +215,22 @@ other section reads the page it is on.
   old-date files into `deletethese/` on the folder route, or lists them on
   the zip route. A media file has no exception: its published path never
   changes.
+- The engine's folder, `libraries/harrisxrwebengine/`, is engine code. No
+  save, publish or export writes it, and a site never edits it in place: an
+  upgrade replaces the whole folder, and the site's `site.config.js` pins the
+  release it expects.
 - A delete never leaves a page naming a file the site does not hold. An
   image still in use comes out of every place that uses it first, and the
   files move only after those places are written.
 
 ### Project Conventions
 
-- The version format is `V0NN`. The commit message carries it, and nothing
-  else records it: there is no version file, and no file states a current
-  version. `git log` is the answer to "what version is this".
+- The site's version format is `V0NN`. The commit message carries it, and
+  nothing else records it: `git log` is the answer to "what version is this".
+- The engine's version is separate. `libraries/harrisxrwebengine/release.js`
+  states it in Semantic Versioning: a patch fixes, a minor adds, and a major
+  breaks a documented contract. Change it when a release goes to another site,
+  and change the pin in `site.config.js` in the same commit.
 - The user makes every commit and push. Claude never runs a Git write command.
 - `node tools/e2e/e2e_test.mjs` and `py -3 tools/e2e/check_markers.py` must both
   pass before each commit.

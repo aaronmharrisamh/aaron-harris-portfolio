@@ -12,10 +12,9 @@
        2. CHROME             5. CONTACT AND FOOTER
        3. INTRO              6. DATA
 
-     The grid rules and the reason for each of them are in section 4
-     of site.css. The packer that arranges the tiles is Phase 4
-     Part 2; until then every train is authored to the invariant by
-     hand, and the page is correct with no script at all.
+     The grid rules and the reason for each of them are in section 3
+     of the engine's engine.css. The packer in gallery.js arranges the
+     tiles, and the page is correct with no script at all.
      ============================================================ -->
 
 <head>
@@ -23,7 +22,7 @@
        1. HEAD AND META
        ------------------------------------------------------------
        This page's own title, canonical and social cards. The
-       stylesheet and the script set are the site's.
+       stylesheets and the script set are the site's.
        ============================================================ -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -51,11 +50,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
+  <!-- The engine's style first and this site's second, so this site's
+       tokens set the theme. -->
+  <link rel="stylesheet" href="libraries/harrisxrwebengine/engine.css" />
   <link rel="stylesheet" href="site.css" />
 
   <!-- The site's script, in a fixed order. defer keeps document order and runs
        each file after parsing, so every trunk sees the whole page.
-       site.js creates window.AMH, the one namespace the trunks share.
+       release.js names the engine release and creates window.AMH, the one
+       namespace the trunks share, and site.config.js holds this site's
+       facts. Both come first. The trunks are the engine's, in
+       libraries/harrisxrwebengine/.
        work.js is here for the lightbox, which Phase 4 Part 4 hands the tiles.
        gallery.js is the tile packer AND the editor's tile consumer, on this
        page and nowhere else. It follows tool.js because it claims its region
@@ -63,11 +68,13 @@
        imagesengine.js is the image engine. Every image the site takes in
        goes through it, so every page loads it, after work.js and before
        the trunks that call it. -->
-  <script defer src="site.js"></script>
-  <script defer src="work.js"></script>
-  <script defer src="imagesengine.js"></script>
-  <script defer src="tool.js"></script>
-  <script defer src="gallery.js"></script>
+  <script defer src="libraries/harrisxrwebengine/release.js"></script>
+  <script defer src="site.config.js"></script>
+  <script defer src="libraries/harrisxrwebengine/site.js"></script>
+  <script defer src="libraries/harrisxrwebengine/work.js"></script>
+  <script defer src="libraries/harrisxrwebengine/imagesengine.js"></script>
+  <script defer src="libraries/harrisxrwebengine/tool.js"></script>
+  <script defer src="libraries/harrisxrwebengine/gallery.js"></script>
 
   <!-- Graceful degradation: without JS the reveal animations never fire, so
        force all content visible. The tiles are static markup either way.

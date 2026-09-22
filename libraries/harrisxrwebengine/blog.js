@@ -249,7 +249,7 @@
      The stream and a month page draw the SAME column: 600px at most, less
      the column's own padding and the card's, which is about 500px on a
      desktop and about 80vw on a phone. That is deliberate - see the note
-     over .bs-stream in site.css section 8 - so one measurement serves both.
+     over .bs-stream in engine.css section 6 - so one measurement serves both.
 
      widest is the widest the string above can ask for, 80vw at 700px. A
      carousel draws a photo at its own size, and a srcset would stretch a
@@ -1339,7 +1339,8 @@
      Each hop is resolved against the url it fetched, so the second hop
      from blog/2608.html to 2607.html lands in blog/ and not at the root.
      ========================================================== */
-  var BLOG_AVATAR = "aaron-portfolio-portrait-transparent.png";
+  /* the byline's picture, from the host's site.config.js; "" for none */
+  var BLOG_AVATAR = (AMH.config && AMH.config.avatar) || "";
   var blogChainAt = "";      /* the url the last hop came from */
   var blogChainRoot = false; /* the stream, rather than a month page */
 
@@ -1566,7 +1567,8 @@
     post.setAttribute("data-tags", tags);
     var by = doc.createElement("header");
     by.className = "bs-post__by";
-    by.innerHTML = '<img class="bs-post__avatar" src="' + BLOG_AVATAR + '" alt="" />' +
+    by.innerHTML = (BLOG_AVATAR ? '<img class="bs-post__avatar" src="' +
+      (AMH.site.prefix() + BLOG_AVATAR).replace(/"/g, "&quot;") + '" alt="" />' : "") +
       "<b></b>" +
       '<a class="bs-post__when" href="' + blogPostUrl(date, id, "root", true) + '">' +
       '<time datetime="' + blogDateTime(date) +
@@ -1752,9 +1754,8 @@
     if (searchLoading) return searchLoading;
     searchLoading = new Promise(function (resolve, reject) {
       if (window.AMH_SEARCH) { resolve(window.AMH_SEARCH); return; }
-      var at = doc.body && doc.body.classList.contains("blog-month") ? "../" : "";
       var el = doc.createElement("script");
-      el.src = at + "search.js";
+      el.src = AMH.site.prefix() + "search.js";
       el.onload = function () { resolve(window.AMH_SEARCH || ""); };
       el.onerror = function () {
         console.info("[blog] no search.js on this site yet.");

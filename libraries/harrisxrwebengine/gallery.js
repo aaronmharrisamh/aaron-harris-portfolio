@@ -34,8 +34,8 @@
 
    Who owns what:
 
-     the CSS owns the layout when this file does not run. Section 4
-     of site.css maps each authored data-span to a grid span, and
+     the CSS owns the layout when this file does not run. Section 3
+     of engine.css maps each authored data-span to a grid span, and
      collapses it at the two narrow breakpoints.
 
      this file owns the layout when it does run, and says so with an
@@ -111,7 +111,7 @@
      breakpoint it is REMAPPED, not scaled: three columns have no room
      for an x4, and scaling would ask for fractions of a column.
 
-     This is the same table site.css applies at each breakpoint, and it
+     This is the same table engine.css applies at each breakpoint, and it
      has to stay the same table. The CSS lays the page out until the
      packer runs; if the two disagreed, the tiles would jump the moment
      it did. Change one and change the other. */
@@ -133,7 +133,7 @@
      browser for: the sizes string a tile's markup carries. The browser reads
      it before it has laid anything out, so it has to be told.
 
-     These are site.css section 4's values. They are the same duplication
+     These are engine.css section 3's values. They are the same duplication
      COLLAPSE above is, for the same reason and with the same rule: change
      one and change the other. */
   var TABLET = 880;          /* at this width six columns become three */
@@ -361,7 +361,7 @@
      everything it writes came out of section 3 or 4.
      ========================================================== */
 
-  /* The column count comes from site.css, which declares it as --gal-cols
+  /* The column count comes from engine.css, which declares it as --gal-cols
      beside every grid-template-columns. The breakpoints live in one place
      and this follows them.
 
@@ -472,7 +472,7 @@
     var rows = pack(model, cols);
 
     /* Write spans first, then order. An inline grid-column beats the
-       data-span rules in site.css, which is how this file takes over
+       data-span rules in engine.css, which is how this file takes over
        from them without either having to know about the other. */
     var order = [];
     rows.forEach(function (r) {
@@ -713,7 +713,7 @@
 
   var TOOL = null;          /* the editor kit, once tool.js has loaded */
   /* The editor's own rules for a tile, added to the editor's one <style>
-     rather than to site.css: none of this exists for a reader, and a
+     rather than to engine.css: none of this exists for a reader, and a
      stylesheet the whole site loads should not carry it. */
   var EDIT_CSS = "" +
     ".gal-tile--edit{outline:1px dashed rgba(74,165,232,.28);outline-offset:-1px;}" +

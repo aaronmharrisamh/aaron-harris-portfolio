@@ -109,7 +109,9 @@
      Rule: the two storage keys are permanent. Renaming one throws away
      a quicksave or a blog draft that someone has already written.
      ========================================================== */
-  /* The pages this engine may read and write.
+  /* The pages this engine may read and write, from the host's
+     site.config.js, as paths from the site root. This file keeps a copy,
+     so a test can add a page without changing the host's facts.
 
      Rules:
        - The engine fetches and splices only a page on this list.
@@ -122,11 +124,10 @@
 
      Order is the order a reader meets the pages, not an order the engine
      depends on. The sitemap is generated from this list. */
-  var MANAGED_PAGES = [
-    { path: "index.html", label: "Home" },
-    { path: "gallery.html", label: "Gallery" },
-    { path: "blog.html", label: "Blog" }
-  ];
+  var CONFIG = AMH.config || {};
+  var MANAGED_PAGES = (CONFIG.pages || []).map(function (pg) {
+    return { path: pg.path, label: pg.label };
+  });
 
   /* Published so a page can register itself, and so the tests can drive a
      second page without one existing in the site yet. */
@@ -142,15 +143,10 @@
      contract test holds the shared spans to being byte-identical.
 
      A page that does not carry one of these slugs is not an error. See
-     optionalSlug() in section 6. */
-  var SHARED_SLUGS = {
-    "brand-title": 1, "brand-sub": 1,
-    "nav-work": 1, "nav-gallery": 1, "nav-blog": 1, "nav-about": 1,
-    "nav-contact": 1,
-    "contact-eyebrow": 1, "contact-h2": 1, "contact-email": 1,
-    "contact-btn-email": 1, "contact-btn-call": 1, "contact-btn-txt": 1,
-    "contact-btn-resume": 1, "endbar": 1
-  };
+     optionalSlug() in section 6. The list is the host's, in
+     site.config.js. */
+  var SHARED_SLUGS = {};
+  (CONFIG.sharedSlugs || []).forEach(function (slug) { SHARED_SLUGS[slug] = 1; });
 
   var QS_KEY = "amh-copy-editor-quicksave";
   /* Pending edits live in sessionStorage, not localStorage: they belong to one
@@ -1429,8 +1425,9 @@
      Everything a person sees once the editor is on: the injected
      styles, the badge chips, the region panel, and the edit modal.
 
-     The styles go into <head> at runtime, after site.css, so the
-     editor wins on equal specificity without any !important.
+     The styles go into <head> at runtime, after engine.css and
+     site.css, so the editor wins on equal specificity without any
+     !important.
      ========================================================== */
   /* ---------------- styles (injected only on first activation) ---------------- */
   var CSS = "" +
@@ -1779,8 +1776,8 @@
        is solid yellow and opens a whole thing: a blog post, a gallery
        section. Filled against hollow and yellow against blue, so the two
        are told apart at a glance rather than by reading them.
-       The blog's post pill wears this too, and site.css keeps only where
-       that one sits. */
+       The blog's post pill wears this too, and engine.css keeps only
+       where that one sits. */
     ".ced-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .7rem;" +
     "border-radius:999px;border:1px solid var(--c-yellow);background:var(--c-yellow);" +
     "color:var(--bg-deep);font:700 .74rem var(--font);cursor:pointer;" +
@@ -2056,8 +2053,8 @@
     /* THE MARKDOWN TOOLBAR.
        The sprite is in the page and drawn from, never seen. A name is kept
        for a screen reader on every icon button, because a mark says nothing
-       out loud; .ced-sr is site.css's, where the blog's search pill already
-       uses it, and a second copy here would be a second answer. */
+       out loud; .ced-sr is engine.css's, where the blog's search pill
+       already uses it, and a second copy here would be a second answer. */
     ".ced-sprite{position:absolute;width:0;height:0;overflow:hidden;}" +
     ".ced-tool--icon{display:inline-flex;align-items:center;justify-content:center;" +
     "min-width:30px;padding:.28rem .42rem;}" +
@@ -2248,7 +2245,9 @@
   function buildRepo(files) {
     if (!repoDir) return Promise.resolve(null);
     return Promise.all(files.map(function (u) {
-      return readFromRepo(u).then(function (text) {
+      /* the page names a file from where the page is, and the repo folder
+         is read from its root */
+      return readFromRepo(AMH.site.pathOf(u) || u).then(function (text) {
         return text === null ? "?" : buildHash(text);
       }, function () { return "?"; });
     }));
@@ -3276,8 +3275,8 @@
     close.textContent = "Close";
     btns.appendChild(close);
 
-    /* a month page is one step below the files */
-    var at = onMonthPage() ? "../" : "";
+    /* the way up from this page to the files, which are named from the root */
+    var at = AMH.site.prefix();
     var urls = [];   /* blob: URLs of pictures read from deletethese/, revoked on close */
 
     function copyText(text) {
@@ -3894,7 +3893,7 @@
       lines.push("Commit and push, then empty " + I.DELETE_DIR + " when you are sure.");
       return askBox({
         tag: "SUPER DELETE", title: "Super delete " + name + "?", danger: true,
-        thumb: isMediaEntry(e) ? "" : (onMonthPage() ? "../" : "") + I.filesOf(e).sd, code: e.base,
+        thumb: isMediaEntry(e) ? "" : AMH.site.prefix() + I.filesOf(e).sd, code: e.base,
         lines: lines, yes: "Super delete"
       }).then(function (yes) {
         if (!yes) return false;
@@ -7039,8 +7038,9 @@
      into the marker inventory and into the chrome the three pages hold
      byte-identical. Nothing built at runtime can reach an export.
 
-     Which corner is one value. site.css positions all four from the data
-     attribute, so moving it is a one-word change here and no CSS edit. */
+     Which corner is one value. engine.css positions all four from the
+     data attribute, so moving it is a one-word change here and no CSS
+     edit. */
   var LAUNCH_CORNER = "bottom-left";   /* or bottom-right, top-left, top-right */
 
   /* The corner, as one SVG.
@@ -7948,24 +7948,16 @@
     return MANAGED_PAGES.some(function (pg) { return pg.path === path; });
   }
 
-  /* Which managed page is being viewed, as a path relative to the site root.
+  /* Which page is being viewed, as a path from the site root. site.js finds
+     the root from where the engine's folder is, so a page in a folder of its
+     own and a copy of the site served from a subdirectory both get the path
+     the page list uses. A directory address is its index.html, and a query
+     is not part of the path.
 
-     The site is served from the root of its domain, which the CNAME and the
-     canonical URL both say, so stripping the leading slash gives the same path
-     the managed-page list uses. location.pathname is used rather than href
-     because it is immune to ?query variants, and a directory URL serves
-     index.html.
-
-     A file name on its own is not enough: two managed pages in different
-     directories would collide on one key, and the pending-edit store is keyed
-     by this. The file-name match stays as a fallback for a copy of the site
-     served from a subdirectory. */
+     The pending-edit store is keyed by this, so two pages in different
+     folders never share a key. */
   function currentPage() {
-    var full = location.pathname.replace(/^\//, "");
-    if (!full || full.slice(-1) === "/") full += "index.html";
-    if (isManaged(full)) return full;
-    var name = full.replace(/^.*\//, "");
-    return isManaged(name) ? name : (full || "index.html");
+    return AMH.site.pagePath();
   }
 
   function pageLabel(path) {
@@ -8010,7 +8002,8 @@
     note("read " + path, onDisk() ? "asking, this page is on disk" : "over http");
     /* BLG-E01 is still reported, because that message is the useful one */
     if (onDisk()) return handOff(path, new Error("opened from disk"));
-    return fetch(path, { cache: "no-store" }).then(
+    /* the path is from the site root, and the fetch is from this page */
+    return fetch(AMH.site.prefix() + path, { cache: "no-store" }).then(
       function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status + " fetching " + path);
         return res.text();
@@ -10022,7 +10015,24 @@
      permanent. AMH.tool is the editor kit, for a trunk that extends
      the editor rather than uses it.
      ========================================================== */
+  /* THE PIN. site.js compares the engine this folder holds with the
+     release site.config.js names. While the two differ, or a file is
+     missing, every command that opens a box or writes a file shows why
+     and does nothing else. Reading the page is never stopped. Returns the
+     sentence, or "" when the editor may open. */
+  function engineRefused() {
+    var why = AMH.site ? AMH.site.problem : "site.js did not load, so this page has no site root.";
+    if (!why) return "";
+    askBox({ tag: "ENGINE", title: "The editor cannot open", lines: [why], yes: "Close", only: true });
+    console.warn("[site editor] " + why);
+    return why;
+  }
+
   var api = function () {
+    if (!active) {
+      var why = engineRefused();
+      if (why) return why;
+    }
     injectStyles();
     scan();
     armGuard();
@@ -10207,6 +10217,8 @@
   };
 
   api.export = function () {
+    var why = engineRefused();
+    if (why) return why;
     scan();
     if (viewing === "before") api.after();
     var edited = regions.filter(function (r) { return r.edited; });
@@ -10326,6 +10338,8 @@
 
   /* edit.save() - write every changed page into the repo folder */
   api.save = function () {
+    var why = engineRefused();
+    if (why) return why;
     saveToFolder().then(function (out) {
       if (out.fellBack) console.warn("[site editor] " + out.fellBack);
     }, function (err) {
@@ -10337,6 +10351,8 @@
   /* edit.media() - every image and media file the site holds, in one box.
      edit.images() is its older name, and opens the same box. */
   api.images = function () {
+    var why = engineRefused();
+    if (why) return why;
     injectStyles();
     imagesBox();
     return "media box open";
@@ -10372,10 +10388,12 @@
   var BLOG_ELSEWHERE = "the blog composer lives on " + BLOG_PAGE;
 
   api.blog = function () {
+    var why = engineRefused();
+    if (why) return why;
     /* A month page cannot publish, so a new post is written on the blog
        page, which opens the composer as it loads. */
     if (onMonthPage()) {
-      location.href = "../" + BLOG_PAGE + "?edit=new";
+      location.href = AMH.site.prefix() + BLOG_PAGE + "?edit=new";
       return "opening " + BLOG_PAGE + " for a new post";
     }
     if (!blogHere()) return BLOG_ELSEWHERE;
@@ -10387,11 +10405,13 @@
   };
   /* edit.blog.edit("0007") - or click a post in the panel/stream */
   api.blog.edit = function (id) {
+    var why = engineRefused();
+    if (why) return why;
     /* A month page shows the post but cannot publish it. Rather than refuse,
        the work moves to the page that can: the blog page opens the composer
        on this post as it loads. */
     if (onMonthPage()) {
-      location.href = "../" + BLOG_PAGE + "?edit=p" + id;
+      location.href = AMH.site.prefix() + BLOG_PAGE + "?edit=p" + id;
       return "opening " + BLOG_PAGE + " on p" + id;
     }
     if (!blogHere()) return BLOG_ELSEWHERE;
@@ -10399,6 +10419,8 @@
   };
   /* re-render all month files with current chrome */
   api.blog.rebuild = function () {
+    var why = engineRefused();
+    if (why) return why;
     if (!blogHere()) return BLOG_ELSEWHERE;
     /* the engine answers with the record its bundle left, which is for the
        Media box and not for a person reading the console */
