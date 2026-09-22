@@ -69,8 +69,9 @@
   /* ==========================================================
      2. CONSTANTS AND STATE
      ----------------------------------------------------------
-     The draft key is permanent. Renaming it throws away a post someone has
-     already written.
+     The draft key's word is permanent, and its name is the site's, from
+     AMH.site.key. A new word throws away a post someone has already
+     written.
 
      One composer per page load. The state below is that composer: what is on
      screen, which images are staged, and what the manifest said when the
@@ -84,7 +85,7 @@
     var v = AMH.config && AMH.config[name];
     return typeof v === "string" ? v : "";
   }
-  var BC_DRAFT_KEY = "amh-blog-draft";
+  var BC_DRAFT_KEY = AMH.site.key("blog-draft");
   /* The image index the engine reads and every publish writes; see
      imagesengine.js. The record a bundle leaves waits here until the
      bundle is delivered, and then becomes the current record. */
@@ -119,7 +120,7 @@
     ".blog-page{padding-block:1rem 2rem;}";
   /* Which view the preview opens in, "desktop" or "mobile". A preference of
      this browser, like the route, so a lost value costs one click. */
-  var BC_VIEW_KEY = "amh-blog-preview";
+  var BC_VIEW_KEY = AMH.site.key("blog-preview");
   /* The refresh mark on the preview's bar, drawn once and stroked in
      currentColor, so it follows the button's colour. */
   var BC_REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
@@ -171,8 +172,8 @@
   /* The publish wizard's keys and timings. The localStorage key is a
      preference and survives. The two sessionStorage keys belong to one tab
      and one publish, which is the same life as a pending edit. */
-  var NOREMIND_KEY = "amh-publish-noremind";  /* "1": the reminder step proceeds on its own */
-  var PUBLISH_KEY = "amh-publish-pending";    /* the last bundle, until the site shows it */
+  var NOREMIND_KEY = AMH.site.key("publish-noremind");  /* "1": the reminder step proceeds on its own */
+  var PUBLISH_KEY = AMH.site.key("publish-pending");    /* the last bundle, until the site shows it */
   /* The least time a progress row stays current. On the live site the work
      takes a few milliseconds, and a list that ticks faster than the eye can
      read explains nothing. */
@@ -3105,7 +3106,7 @@
      notice, which has no one to ask. */
   var BC_ROUTE_ZIP = "zip";
   var BC_ROUTE_FOLDER = "folder";
-  var ROUTE_KEY = "amh-publish-route";
+  var ROUTE_KEY = AMH.site.key("publish-route");
 
   function bcRoute() {
     try {
@@ -6285,8 +6286,10 @@
        holds()         the numbers of the cards the open composer holds
        busy()          true while a publish or a rebuild is on screen
 
-     tool.js calls all six. The unload guard calls dirty(), which is why
-     a composer that is open but empty must answer false. */
+     tool.js reaches these through the hooks this file registers at its
+     foot, and never by this name. The console and the suite use the name.
+     The unload guard calls dirty(), which is why a composer that is open
+     but empty must answer false. */
   AMH.publish = {
     open: openComposer,
     edit: bcLoadPost,
@@ -6397,6 +6400,26 @@
   /* The editor turning on is the other moment the layer may be shown:
      tool.js calls this when it does. */
   AMH.publish.staged = function () { return bcLayerOnto(); };
+
+  /* THE EDITOR'S SLOT. tool.js never names this file: it reads the hooks
+     below from AMH.tool.blog, and a page without them has no composer.
+     outputs are the files a publish writes whole, which carry no region
+     and so get no marker check. */
+  if (TOOL.blogRegister) {
+    TOOL.blogRegister({
+      open: openComposer,
+      edit: bcLoadPost,
+      rebuild: bcRebuild,
+      staged: AMH.publish.staged,
+      note: bcNote,
+      trace: AMH.publish.trace,
+      holds: AMH.publish.holds,
+      busy: AMH.publish.busy,
+      checklist: AMH.publish.checklist,
+      dirty: bcDirty,
+      outputs: { "search.js": 1, "feed.xml": 1, "sitemap.xml": 1, "robots.txt": 1 }
+    });
+  }
   /* A month page cannot publish, so its Edit pill sends the reader here with
      the post named in the address, ?edit=pNNNN, and its New post pill with
      ?edit=new. Answer it once, then take it out of the address, so a reload
@@ -6409,6 +6432,9 @@
        reader parameter with it, and null took the visit as well. */
     AMH.site.setUrl(AMH.site.paramUrl({ edit: null }), false);
     if (!TOOL.editorOn()) window.edit();
+    /* The editor refused to open, and its box says why: the site pins
+       another engine release. The composer opens nothing either. */
+    if (!TOOL.editorOn()) return;
     if (m[1] === "new") window.edit.blog();
     else bcLoadPost(m[2]);
   }

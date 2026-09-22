@@ -172,14 +172,14 @@ In `libraries/harrisxrwebengine/`:
 | `README.md` | The files, the load order for each kind of page, the host's two files, and the theme tokens. |
 | `release.js` | The engine release: its id, its version and its folder. The one place the engine's version is written. Every page loads it first. |
 | `engine.css` | The style of everything the engine draws or drives, with a default for every theme token. |
-| `site.js` | Shared page behavior for every page, the site root, and the pin check. |
+| `site.js` | Shared page behavior for every page, the site root, the pin check, and the site's storage names. |
 | `work.js` | Carousels of photos and players, the deep-dive drawer, the shared lightbox, and the players' rules: one at a time, and none out of sight. |
-| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes. Every page. |
+| `imagesengine.js` | The image engine: the formats it takes, what an upload becomes, what a media file holds and its kind, the photos and media files held until a save, the markup an image carries, the finder for files nothing uses, the image index and the log of super deletes, and the grammar of the tag that places a file in a post. Every page. |
 | `blog.js` | The blog reading engine: the tag and the blocks it renders, the stream, the cuts, the month chain and find. `blog.html` and every month page. |
 | `markdown.js` | The Markdown renderer. A post body, and a deep-dive body. |
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
-| `tool.js` | The copy editor, image editing, the Markdown bar, and the export. |
-| `publish.js` | The blog composer and the publish bundle. `blog.html` only. |
+| `tool.js` | The copy editor, image editing, the Markdown bar, and the export. It reaches the blog composer only through the slot the composer fills, `AMH.tool.blog`. |
+| `publish.js` | The blog composer and the publish bundle. `blog.html` and the month pages, where it fills the editor's slot when it loads. |
 
 Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
 sections only when a distinct job cannot merge into another section. Two

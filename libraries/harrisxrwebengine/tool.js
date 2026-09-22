@@ -106,8 +106,9 @@
   /* ==========================================================
      2. CONSTANTS AND KEYS
      ----------------------------------------------------------
-     Rule: the two storage keys are permanent. Renaming one throws away
-     a quicksave or a blog draft that someone has already written.
+     Rule: a storage name is the site's id and a permanent word, from
+     AMH.site.key. A new word throws away a quicksave or a draft that
+     someone has already written.
      ========================================================== */
   /* The pages this engine may read and write, from the host's
      site.config.js, as paths from the site root. This file keeps a copy,
@@ -148,10 +149,10 @@
   var SHARED_SLUGS = {};
   (CONFIG.sharedSlugs || []).forEach(function (slug) { SHARED_SLUGS[slug] = 1; });
 
-  var QS_KEY = "amh-copy-editor-quicksave";
+  var QS_KEY = AMH.site.key("copy-editor-quicksave");
   /* Pending edits live in sessionStorage, not localStorage: they belong to one
      sitting. The tab closing is the signal that the work is abandoned. */
-  var PENDING_KEY = "amh-pending-edits";
+  var PENDING_KEY = AMH.site.key("pending-edits");
   var VOID_TAGS = { area:1, base:1, br:1, col:1, embed:1, hr:1, img:1,
                     input:1, link:1, meta:1, param:1, source:1, track:1, wbr:1 };
 
@@ -175,7 +176,7 @@
      on every page because a person may be anywhere when they wonder whether
      they pushed it. publish.js owns the record; this only reads it. */
   var publishLine = null;
-  var PUBLISH_KEY = "amh-publish-pending";
+  var PUBLISH_KEY = AMH.site.key("publish-pending");
   var openRegion = null;     /* text region in the modal */
   var drawerHooked = false;
   var styleEl = null;
@@ -2589,7 +2590,7 @@
       : "p" + rec.id + (rec.kind === "delete" ? " deletion" : "");
     publishLine.textContent = what +
       " is in a bundle that is not live yet. " + done + " of 4 steps ticked." +
-      (AMH.publish ? " Checklist." : " Open blog.html for the checklist.");
+      (AMH.tool.blog ? " Checklist." : " Open blog.html for the checklist.");
   }
   AMH.tool.publishLine = refreshPublishLine;
 
@@ -3730,8 +3731,7 @@
   }
   /* This page can write month files: blog.html, with the composer on it. */
   function blogSurface() {
-    return !onMonthPage() && !!(AMH.publish && AMH.publish.rebuild) &&
-      currentPage() === BLOG_PAGE;
+    return !onMonthPage() && !!AMH.tool.blog && currentPage() === BLOG_PAGE;
   }
   /* The regions of this page that show an image, as the boxes name them. */
   function regionsShowing(base) {
@@ -3844,11 +3844,11 @@
     function say(t) { if (box) box.say(t); }
     var name = imageName(e);
     if (superBusy) { say("A super delete is already running."); return Promise.resolve(false); }
-    if (e.num && AMH.publish && AMH.publish.holds && AMH.publish.holds().indexOf(e.num) !== -1) {
+    if (e.num && AMH.tool.blog && AMH.tool.blog.holds().indexOf(e.num) !== -1) {
       say("Close the composer first.");
       return Promise.resolve(false);
     }
-    if (AMH.publish && AMH.publish.busy && AMH.publish.busy()) {
+    if (AMH.tool.blog && AMH.tool.blog.busy()) {
       say("Wait for the publish to finish.");
       return Promise.resolve(false);
     }
@@ -3904,7 +3904,7 @@
            the posts were written and the files were moved. */
         if (places.posts.length) {
           say("Rebuilding " + BLOG_PAGE + " without " + name + "...");
-          return AMH.publish.rebuild({
+          return AMH.tool.blog.rebuild({
             without: e.num,
             name: name,
             after: function (rec) {
@@ -4158,7 +4158,7 @@
     publishLine.hidden = true;
     publishLine.title = "The last bundle you built. Click for the list of what to do with it.";
     publishLine.addEventListener("click", function () {
-      if (AMH.publish && AMH.publish.checklist) AMH.publish.checklist();
+      if (AMH.tool.blog) AMH.tool.blog.checklist();
       else console.info("[site editor] the checklist opens on blog.html.");
     });
     panel.appendChild(publishLine);
@@ -4224,7 +4224,7 @@
        It is offered only where the publish engine is loaded. On the other
        pages the button could only answer "the composer lives on
        blog.html", which is not an answer worth a button. */
-    if (AMH.publish && AMH.publish.rebuild) {
+    if (AMH.tool.blog) {
       rebuildBtn = footBtn("Rebuild", "", function () { api.blog.rebuild(); });
       armRebuildSay(rebuildBtn);
     }
@@ -4232,7 +4232,8 @@
        and not a page's. It sits before New post: the box is about what
        the site holds, and the composer is about adding to it. */
     footBtn("Media", "", function () { api.images(); });
-    footBtn("New post", "", function () { api.blog(); });
+    /* a site with no blog has nothing to post to */
+    if (CONFIG.blog !== false) footBtn("New post", "", function () { api.blog(); });
     footBtn("Revert all", "", function () { api.revertAll(); });
     footBtn("Exit", "", function () { api(); });
     panel.appendChild(foot);
@@ -7984,7 +7985,7 @@
      This trunk reports into it when that trunk is on the page, and says
      nothing when it is not. */
   function note(what, info) {
-    if (AMH.publish && AMH.publish.note) AMH.publish.note(what, info);
+    if (AMH.tool.blog) AMH.tool.blog.note(what, info);
   }
 
   function pristine(path) {
@@ -8034,7 +8035,7 @@
 
      It clears itself: when a page loads carrying the layer's stamp, the
      upload has happened and there is nothing left to remember. */
-  var LAYER_KEY = "amh-publish-pending";
+  var LAYER_KEY = AMH.site.key("publish-pending");
   var LAYER_MAX = 4 * 1024 * 1024;
 
   function layerRead() {
@@ -8153,7 +8154,7 @@
     "BLG-E10": "This month file is from a different publish than the blog page you opened. The publish overwrites it with the version this page knows.",
     "BLG-E11": "The live manifest is different from the page you loaded. Reload the page and compose again. Save Draft first.",
     "BLG-E12": "The browser did not give permission to write to that folder. Pick it again and choose Save changes.",
-    "BLG-E13": "That folder is not the root of this repo. The root holds index.html and blog.html.",
+    "BLG-E13": "That folder is not the root of this site.",
     "BLG-E14": "A file could not be written to the folder. Nothing else was written after it."
   };
 
@@ -8229,13 +8230,15 @@
     return expected.filter(function (pp) { return !optional[pp]; });
   }
 
-  /* The files the publish engine writes whole. None of them carries an
+  /* A file the publish engine writes whole. None of them carries an
      editable region, so none of them can fail a marker check in a way a
-     person could act on. Month files are not listed: they are matched by
-     their shape and checked by their stamp. */
-  var GENERATED_FILES = {
-    "search.js": 1, "feed.xml": 1, "sitemap.xml": 1, "robots.txt": 1
-  };
+     person could act on. The composer names them when it registers, so a
+     page without it writes none. Month files are not among them: they are
+     matched by their shape and checked by their stamp. */
+  function generatedFile(name) {
+    var outs = AMH.tool.blog && AMH.tool.blog.outputs;
+    return !!(outs && Object.prototype.hasOwnProperty.call(outs, name));
+  }
 
   /* Does this look like a page the editor writes? Better verification, as
      chosen: the name has to match, and the markers the splice needs have to
@@ -8262,7 +8265,7 @@
     /* A file the engine writes whole carries no markers and never will, so
        saying so at every publish is a warning that can never be acted on.
        A month file is checked above by its stamp instead. */
-    if (GENERATED_FILES[want]) return { ok: true, count: 0 };
+    if (generatedFile(want)) return { ok: true, count: 0 };
     var marks = text.match(/<!--\[edit:[\w-]+\]-->/g) || [];
     if (!marks.length) {
       return { ok: true, warn: true, code: "BLG-E05",
@@ -8488,13 +8491,14 @@
      the permission askable at all.
 
      A NAME IS NOT PROOF. Every page opened from disk shares one origin,
-     "file://", so two clones of this repo share one memory and report the
-     same folder name. The stamp in the folder's own blog.html is what
-     tells them apart, so it is read and compared before the folder is
-     used. It can only be read after permission is granted, so the verdict
-     is shown before the click when the browser still has permission, and
-     right after it when it does not. */
-  var IDB_NAME = "amh-editor", IDB_STORE = "repo", IDB_KEY = "folder";
+     "file://", so two sites, or two clones of one site, share one memory
+     and can report the same folder name. The siteId in the folder's own
+     site.config.js tells two sites apart, and the stamp in its blog.html
+     tells two clones apart, so both are read and compared before the
+     folder is used. They can only be read after permission is granted, so
+     the verdict is shown before the click when the browser still has
+     permission, and right after it when it does not. */
+  var IDB_NAME = AMH.site.key("editor"), IDB_STORE = "repo", IDB_KEY = "folder";
   var repoOffered = {};      /* a remembered folder is offered once per mode, per load */
 
   /* name and store default to the folder's own database. The held photos
@@ -8560,8 +8564,26 @@
     var m = el ? /stamp:([0-9a-z]{6})/.exec(el.textContent) : null;
     return m ? m[1] : "";
   }
+  /* THE SITE'S OWN MARK. site.config.js at a folder's root names the site
+     the folder belongs to. It is read as text and its siteId is found by a
+     pattern: a folder the reader picked is never run as code. */
+  var SITE_FILE = "site.config.js";
+  function siteIdIn(text) {
+    var m = /\bsiteId\s*:\s*["']([^"']+)["']/.exec(String(text || ""));
+    return m ? m[1] : "";
+  }
+  function repoText(handle, name) {
+    return handle.getFileHandle(name).then(function (fh) { return fh.getFile(); }).then(readFile);
+  }
+
   /* Read the folder and say what it is. Needs permission, so it runs after
-     the grant. Resolves a verdict the step can show as one sentence. */
+     the grant. Resolves a verdict the step can show as one sentence.
+
+     A folder is this site's root when its site.config.js names this site's
+     id and it holds this site's first page. A publish splices deployed
+     bytes, so writing into the wrong folder would put a half-site where it
+     does not belong. On a site with a blog, the stamp in the folder's
+     blog.html then says whether it is the publish this page knows. */
   function repoVerify(handle) {
     /* A handle can come back from storage without its methods, because a
        structured clone keeps the data and not the object. Answer, do not
@@ -8570,31 +8592,43 @@
     if (!handle || typeof handle.getFileHandle !== "function") {
       return Promise.resolve({ ok: false, why: "That folder could not be read." });
     }
-    return repoHasRootMarks(handle).then(function (root) {
-      if (!root) return { ok: false, why: "That folder is not the root of this site. " +
-        "The root holds index.html and blog.html." };
-      return handle.getFileHandle("blog.html")
-        .then(function (fh) { return fh.getFile(); })
-        .then(readFile)
-        .then(function (text) {
-          var mine = pageStamp(), theirs = stampIn(text);
-          if (!mine || !theirs) {
-            return { ok: true, why: "It holds index.html and blog.html. The publish " +
-              "stamp could not be compared." };
-          }
-          if (mine === theirs) {
-            return { ok: true, why: "Its blog page is the version this page knows (stamp " +
-              theirs + ")." };
-          }
-          return { ok: true, warn: true, why: "Its blog page is from a DIFFERENT publish " +
-            "than this page: the folder says " + theirs + " and this page says " + mine +
-            ". Check it is the clone you mean before you publish." };
-        }, function () {
-          return { ok: true, why: "It holds index.html and blog.html. Its blog page " +
-            "could not be read." };
-        });
+    var mine = CONFIG.siteId || "";
+    var first = MANAGED_PAGES.length ? MANAGED_PAGES[0].path : "index.html";
+    return repoText(handle, SITE_FILE).then(function (text) {
+      var theirs = siteIdIn(text);
+      if (!theirs) return { ok: false, why: "Its " + SITE_FILE + " names no siteId." };
+      if (theirs !== mine) {
+        return { ok: false, why: "It is another site: its " + SITE_FILE + " says siteId \"" +
+          theirs + "\", and this page is siteId \"" + mine + "\"." };
+      }
+      return handle.getFileHandle(first).then(function () {
+        if (CONFIG.blog === false) return { ok: true, why: "It is this site, siteId " + mine + "." };
+        return repoStamp(handle);
+      }, function () {
+        return { ok: false, why: "It holds this site's " + SITE_FILE + " and no " + first + "." };
+      });
     }, function () {
-      return { ok: false, why: "That folder could not be read." };
+      return { ok: false, why: "It holds no " + SITE_FILE +
+        ", so it is not the root of a site this engine writes." };
+    });
+  }
+  /* The stamp in the folder's blog.html against this page's: the same
+     publish, another publish, or a stamp that cannot be compared. */
+  function repoStamp(handle) {
+    return repoText(handle, BLOG_PAGE).then(function (text) {
+      var mine = pageStamp(), theirs = stampIn(text);
+      if (!mine || !theirs) {
+        return { ok: true, why: "It is this site. The publish stamp could not be compared." };
+      }
+      if (mine === theirs) {
+        return { ok: true, why: "Its blog page is the version this page knows (stamp " +
+          theirs + ")." };
+      }
+      return { ok: true, warn: true, why: "Its blog page is from a DIFFERENT publish " +
+        "than this page: the folder says " + theirs + " and this page says " + mine +
+        ". Check it is the clone you mean before you publish." };
+    }, function () {
+      return { ok: true, why: "It is this site. Its blog page could not be read." };
     });
   }
 
@@ -8615,20 +8649,6 @@
      gone and the copy stays on disk until the person empties the folder.
      The blog's own orphans are still named for the user to remove. */
   var repoWriteDir = null;    /* the folder, once it may be written to */
-
-  /* The two files that say this folder is the root of this site. A publish
-     splices deployed bytes, so writing into the wrong folder would put a
-     half-site somewhere it does not belong. */
-  var ROOT_MARKS = ["index.html", "blog.html"];
-
-  function repoHasRootMarks(handle) {
-    return Promise.all(ROOT_MARKS.map(function (name) {
-      return handle.getFileHandle(name).then(function () { return true; },
-        function () { return false; });
-    })).then(function (found) {
-      return found.every(function (ok) { return ok; });
-    });
-  }
 
   /* Pick the repo folder for writing. Resolves with the handle, or null
      when the picker was closed. Rejects when the folder is not this repo
@@ -8971,12 +8991,12 @@
      the write path remember and check the same way. */
   function repoChoose(mode) {
     var fresh = function () {
-      return window.showDirectoryPicker({ id: "amh-repo", mode: mode }).then(
+      return window.showDirectoryPicker({ id: AMH.site.key("repo"), mode: mode }).then(
         function (handle) {
           return repoWritable(handle, mode).then(function (granted) {
             if (!granted) throw errObj("BLG-E12", "");
             return repoVerify(handle).then(function (v) {
-              if (!v.ok) throw errObj("BLG-E13", "");
+              if (!v.ok) throw errObj("BLG-E13", v.why);
               repoRemember(handle);
               return handle;
             });
@@ -10057,7 +10077,7 @@
       if (AMH.blog && AMH.blog.editButtons) AMH.blog.editButtons();
       /* and the work that is built and not yet uploaded goes on screen
          with them: the layer is the author's, so it waits for the editor */
-      if (AMH.publish && AMH.publish.staged) AMH.publish.staged();
+      if (AMH.tool.blog) AMH.tool.blog.staged();
       console.info("[site editor] ON - click a badge (or a row in the panel) to edit. edit.help() lists commands.");
     } else {
       AMH.tool.editPost = null;
@@ -10362,6 +10382,8 @@
   /* The composer is publish.js, and it needs the manifest and the reading
      engine as well as itself. All three are on the blog page and nowhere
      else, so say where to go rather than open something that cannot publish.
+     The composer is reached through its slot, AMH.tool.blog, which it fills
+     when it loads.
 
      The console names stay here whatever file answers them. edit.blog() is
      what people have learned to type. */
@@ -10379,17 +10401,21 @@
         ", which holds the counters and the entries.");
       return false;
     }
-    if (AMH.publish && AMH.blog && doc.getElementById("blogManifest")) return true;
+    if (AMH.tool.blog && AMH.blog && doc.getElementById("blogManifest")) return true;
     console.warn("[blog] the composer lives on " + BLOG_PAGE +
       ", which holds the manifest, the reading engine and publish.js. Open " +
       BLOG_PAGE + " and run edit.blog() there.");
     return false;
   }
   var BLOG_ELSEWHERE = "the blog composer lives on " + BLOG_PAGE;
+  /* A site with no blog says so, rather than send the reader to a page it
+     does not have. */
+  var NO_BLOG = "This site has no blog.";
 
   api.blog = function () {
     var why = engineRefused();
     if (why) return why;
+    if (CONFIG.blog === false) return NO_BLOG;
     /* A month page cannot publish, so a new post is written on the blog
        page, which opens the composer as it loads. */
     if (onMonthPage()) {
@@ -10400,13 +10426,14 @@
     injectStyles();
     scan();
     armGuard();
-    AMH.publish.open(null);
+    AMH.tool.blog.open(null);
     return "blog composer open";
   };
   /* edit.blog.edit("0007") - or click a post in the panel/stream */
   api.blog.edit = function (id) {
     var why = engineRefused();
     if (why) return why;
+    if (CONFIG.blog === false) return NO_BLOG;
     /* A month page shows the post but cannot publish it. Rather than refuse,
        the work moves to the page that can: the blog page opens the composer
        on this post as it loads. */
@@ -10415,23 +10442,24 @@
       return "opening " + BLOG_PAGE + " on p" + id;
     }
     if (!blogHere()) return BLOG_ELSEWHERE;
-    return AMH.publish.edit(id);
+    return AMH.tool.blog.edit(id);
   };
   /* re-render all month files with current chrome */
   api.blog.rebuild = function () {
     var why = engineRefused();
     if (why) return why;
+    if (CONFIG.blog === false) return NO_BLOG;
     if (!blogHere()) return BLOG_ELSEWHERE;
     /* the engine answers with the record its bundle left, which is for the
        Media box and not for a person reading the console */
-    AMH.publish.rebuild();
+    AMH.tool.blog.rebuild();
     return "rebuilding: choose where the bundle should land";
   };
   /* edit.blog.trace(true) prints a line for every read, splice and write of
      the next publish. The wizard's own steps are printed either way. */
   api.blog.trace = function (on) {
-    if (!AMH.publish || !AMH.publish.trace) return "the publish engine is not on this page";
-    return AMH.publish.trace(on);
+    if (!AMH.tool.blog) return "the publish engine is not on this page";
+    return AMH.tool.blog.trace(on);
   };
 
   api.help = function () {
@@ -10465,7 +10493,7 @@
          they are invisible from here, which is exactly when a guard earns its
          keep. Navigating within the site is not a beforeunload. */
       if (dirty() || pendingCount().changes ||
-          (AMH.publish && AMH.publish.dirty())) {
+          (AMH.tool.blog && AMH.tool.blog.dirty())) {
         e.preventDefault(); e.returnValue = "";
       }
     });
@@ -10714,9 +10742,29 @@
   AMH.tool.point = pointAt;
   AMH.tool.unpoint = unpoint;
 
+  /* AMH.tool.blog, AMH.tool.blogRegister(hooks)
+     The blog composer, when this page loads one, and the call it makes to
+     say so. Null on a page without publish.js, and on a site with no blog.
+     This file reads the slot and never names the composer, so a site
+     without a blog loads an editor that has nothing to say about one. The
+     hooks, each the composer's own:
+
+       open(id), edit(id)   the composer, on a new post or on post id
+       rebuild(opts)        every month file written again
+       staged()             the bundle this tab built, onto the page
+       note(what, info)     a line in the publish trace
+       trace(on)            the trace, switched; answers what it did
+       holds()              the numbers of the files the composer holds
+       busy()               true while a publish or a rebuild runs
+       checklist()          the Done step again, from the record
+       dirty()              true while the composer holds unsaved work
+       outputs              the files the composer writes whole, by name */
+  AMH.tool.blog = AMH.tool.blog || null;
+  AMH.tool.blogRegister = function (hooks) { AMH.tool.blog = hooks || null; };
+
   /* ---------------- the editor kit ----------------
-     What a trunk that extends the editor is allowed to use. publish.js is
-     the one consumer today; the Phase 4 gallery tile grid is the next.
+     What a trunk that extends the editor is allowed to use. publish.js and
+     gallery.js are its two consumers.
 
      These are internals, not console commands. They may be renamed with
      their consumers. The rule that keeps them honest is that this file

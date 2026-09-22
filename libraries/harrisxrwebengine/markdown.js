@@ -23,7 +23,8 @@
    so the tag renderer cannot see it.
 
    Loaded by blog.html, before tool.js and publish.js, and by the home
-   page for its deep dives. It reads no page and touches no DOM.
+   page for its deep dives. It reads no page and touches no DOM. It reads
+   the tag's grammar from imagesengine.js, which loads before it.
    Publishes AMH.markdown.
 
    Sections:
@@ -38,6 +39,12 @@
      1. SETUP
      ========================================================== */
   var AMH = window.AMH = window.AMH || {};
+  /* A tag is read with the image engine's grammar, so this file stops when
+     imagesengine.js is missing, rather than read tags by a rule of its own. */
+  if (!AMH.images || !AMH.images.tag) {
+    console.warn("[markdown] markdown.js needs imagesengine.js, which did not load before it.");
+    return;
+  }
 
   /* ==========================================================
      2. PATTERNS
@@ -86,18 +93,18 @@
      and is read before a paragraph is gathered. This one finds the rest. */
   var FLAG_NAMES = FLAGS.map(function (f) { return f.name; }).join("|");
   var FLAG_ANY = new RegExp("\\{(" + FLAG_NAMES + ")\\}", "g");
-  /* THE TAG'S WORDS: the options a tag can open with, and each kind's
-     word. blog.js names the same words beside AMH.blog.TAG; these are a
-     copy, for the reason TAG_G gives. */
-  var TAG_OPTION = "(?:portrait1:1|portrait|landscape|nocarousel|noborders|nocontrols|autoplay|muted|unmuted|loop)";
-  var TAG_OPTIONS = TAG_OPTION + "(?: " + TAG_OPTION + ")*";
-  var TAG_KIND = "img|png|video|audio|midi";
+  /* THE TAG'S WORDS: the options a tag can open with, each kind's word,
+     and the number. They are the image engine's, in AMH.images.tag, the
+     one place a tag's grammar is written. */
+  var TAG = AMH.images.tag;
+  var TAG_OPTIONS = TAG.OPTIONS;
+  var TAG_KIND = TAG.KIND;
   /* THE ESCAPES. {!name} writes a flag as text, and [!img0001] and
      [!nocarousel video0012] write a tag as text. The mark answers only
      for a command the renderer knows, so {!hello} is not an escape and
      stays exactly as typed. */
   var ESC_FLAG = new RegExp("\\{!(" + FLAG_NAMES + ")\\}", "g");
-  var ESC_TAG = new RegExp("\\[!((?:" + TAG_OPTIONS + ") )?(" + TAG_KIND + ")([0-9a-z]\\d{3})", "g");
+  var ESC_TAG = new RegExp("\\[!((?:" + TAG_OPTIONS + ") )?(" + TAG_KIND + ")(" + TAG.ID + ")", "g");
   /* Taken off LAST, once nothing is looking for a command any more. Undo it
      earlier and the thing the mark was protecting would be obeyed. */
   function unmark(s) {
@@ -118,18 +125,16 @@
     pipe: /^\s*\|.*\|\s*$/,
     delim: /^\s*\|(\s*:?-+:?\s*\|)+\s*$/,
     /* a line that is nothing but tags */
-    tagRun: new RegExp("^(?:\\s*\\[(?:(?:" + TAG_OPTIONS + ") )?(?:" + TAG_KIND + ")[0-9a-z]\\d{3}" +
+    tagRun: new RegExp("^(?:\\s*\\[(?:(?:" + TAG_OPTIONS + ") )?(?:" + TAG_KIND + ")" + TAG.ID +
       "(?:,[^\\]|]*)?(?:\\|[^\\]]*)?\\])+\\s*$"),
     flag: new RegExp("^\\{(" + FLAGS.map(function (f) { return f.name; }).join("|") + ")\\}\\s*$"),
     html: /^<[a-zA-Z\/!]/,
     blank: /^\s*$/
   };
   /* One tag, with its groups: the options, the kind's word, the number,
-     the caption, the alt. blog.js names the same tag as AMH.blog.TAG; this
-     is a copy, because this file also loads on the home page, where blog.js
-     does not, and the harness runs one list of tags through both. */
-  var TAG_G = new RegExp("\\[(?:(" + TAG_OPTIONS + ") )?(" + TAG_KIND + ")([0-9a-z]\\d{3})" +
-    "(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]", "g");
+     the caption, the alt. The image engine builds it, and blog.js reads
+     tags with the same pattern. */
+  var TAG_G = TAG.pattern("g");
   /* a link: text, then a url that may hold one level of parentheses,
      which is what a javascript: url in the fixture needs to be caught whole */
   var LINK_G = /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
@@ -214,7 +219,7 @@
     var codes = [];
     var out = text.replace(CODE_G, function (_, c) {
       codes.push("<code>" + escCode(c) + "</code>");
-      return " " + (codes.length - 1) + " ";
+      return "\u0000" + (codes.length - 1) + "\u0000";
     });
     out = out.replace(LINK_G, link);
     out = out.replace(/\*\*(\S(?:[^*]*?\S)?)\*\*/g, "<strong>$1</strong>");
@@ -222,7 +227,7 @@
     out = out.replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, "<em>$1</em>");
     /* an underscore inside a word is text: snake_case stays as typed */
     out = out.replace(/(^|[^\w])_(\S(?:[^_\n]*?\S)?)_(?=[^\w]|$)/g, "$1<em>$2</em>");
-    return out.replace(/ (\d+) /g, function (_, n) { return codes[n]; });
+    return out.replace(/\u0000(\d+)\u0000/g, function (_, n) { return codes[n]; });
   }
 
   /* ==========================================================

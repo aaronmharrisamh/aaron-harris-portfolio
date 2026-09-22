@@ -7,6 +7,11 @@
    tool.js. It owns no box, no folder and no page. tool.js draws the
    boxes and writes the files, and each consumer names its files.
 
+   It also owns the grammar of the tag that places a file in a post or
+   a deep dive, [img0001,caption|alt], in AMH.images.tag. blog.js and
+   markdown.js build their readers from it, so the words are written
+   once.
+
    Seven sections:
      1. SETUP                    5. CORE LOGIC
      2. CONSTANTS AND CONFIG     6. CLEANUP
@@ -134,6 +139,43 @@
      with it. */
   var TAG_WORDS = { image: "img", video: "video", audio: "audio", midi: "midi" };
 
+  /* THE TAG, NAMED ONCE.
+
+       [portrait img0001,caption|alt]
+       [nocarousel noborders video0012,caption|description]
+
+     Options first, in any order, each one followed by one space; then the
+     kind's word and a four-character number; then an optional comma and
+     caption, and an optional pipe and a description, which is an image's
+     alt text. The options and the kind's word are lower case.
+
+     blog.js and markdown.js build every tag reader from these, and the
+     composer builds its readers from blog.js's, so a tag means one thing
+     to the page, the renderer and the composer.
+
+     The frame words come first, the longest first, because a pattern tries
+     the words in order and portrait1:1 starts with portrait. */
+  var TAG_SHAPES = ["portrait1:1", "portrait", "landscape"];
+  var TAG_OPTIONS = TAG_SHAPES.concat(["nocarousel", "noborders", "nocontrols", "autoplay",
+    "muted", "unmuted", "loop"]);
+  /* Each word a tag may name a kind with, and the kind: the words above,
+     and png after img. */
+  var TAG_KINDS = {};
+  Object.keys(TAG_WORDS).forEach(function (kind) {
+    TAG_KINDS[TAG_WORDS[kind]] = kind;
+    if (kind === "image") TAG_KINDS.png = "image";
+  });
+  /* the number: a letter or a digit, then three digits */
+  var TAG_ID = "[0-9a-z]\\d{3}";
+  var TAG_OPTION = "(?:" + TAG_OPTIONS.join("|") + ")";
+  var TAG_OPTION_RUN = TAG_OPTION + "(?: " + TAG_OPTION + ")*";
+  var TAG_KIND = Object.keys(TAG_KINDS).join("|");
+  /* One whole tag. The groups, in order: the options as one string, or
+     nothing when a tag has none; the kind's word; the number; the caption;
+     the alt. */
+  var TAG_SOURCE = "\\[(?:(" + TAG_OPTION_RUN + ") )?(" + TAG_KIND + ")(" + TAG_ID + ")" +
+    "(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+
   /* The image formats the engine reads, by MIME type, and the extension
      each is written with: the image lines of FORMATS, turned round. */
   var TYPES = {};
@@ -209,11 +251,12 @@
      copy for the other at a breakpoint, and the two must look the same. */
   var GROUND = "#16181d";
 
-  /* The database a held photo waits in until a save writes it. */
-  var DB_NAME = "amh-images", DB_STORE = "images";
-  /* The tab key is permanent. A new name gives an open tab a new id, and
-     its held photos would then look like another tab's. */
-  var TAB_KEY = "amh-photo-tab";
+  /* The database a held photo waits in until a save writes it. Its name is
+     the site's, so two sites on one origin keep their photos apart. */
+  var DB_NAME = AMH.site.key("images"), DB_STORE = "images";
+  /* The tab key's word is permanent. A new word gives an open tab a new
+     id, and its held photos would then look like another tab's. */
+  var TAB_KEY = AMH.site.key("photo-tab");
   /* A record another tab left is kept this long, in case that tab is still
      open with the edit that shows it. */
   var STALE_MS = 24 * 60 * 60 * 1000;
@@ -288,6 +331,13 @@
      one. */
   function tagWordOf(kind) {
     return own(TAG_WORDS, kind) || "";
+  }
+  /* One match of the tag pattern, by name: the tag as written, its options
+     as one string, the kind's word and its kind, the number, and the
+     caption and the alt, trimmed. */
+  function tagRead(m) {
+    return { text: m[0], options: m[1] || "", word: m[2], kind: own(TAG_KINDS, m[2]) || "",
+             num: m[3], caption: (m[4] || "").trim(), alt: (m[5] || "").trim() };
   }
   /* A MIME type as the table names it: lower case, without parameters,
      and with another system's name for the same format put back to the
@@ -2074,6 +2124,21 @@
     mimeOf: mimeOf,            /* the MIME type of an extension as a kind, or "" */
     tagWordOf: tagWordOf,      /* the word a blog tag names a kind with */
     kindWords: kindWords,      /* "a video", for a sentence about a kind */
+    /* THE TAG'S GRAMMAR, the one copy; see THE TAG in section 2. The
+       capitals are pattern text, for a reader that builds a pattern of
+       its own around them. */
+    tag: {
+      shapes: TAG_SHAPES,        /* the frame words */
+      options: TAG_OPTIONS,      /* every option word, in the order a pattern tries them */
+      kinds: TAG_KINDS,          /* each word a tag names a kind with, and the kind */
+      OPTION: TAG_OPTION,        /* one option */
+      OPTIONS: TAG_OPTION_RUN,   /* options, one space apart */
+      KIND: TAG_KIND,            /* a kind's word */
+      ID: TAG_ID,                /* the number */
+      source: TAG_SOURCE,        /* one whole tag, in five groups */
+      pattern: function (flags) { return new RegExp(TAG_SOURCE, flags || ""); },
+      read: tagRead              /* one match, by name */
+    },
     /* a media file's limits, read each time, so a test can lower them */
     MEDIA_MAX_MB: MEDIA_MAX_MB,
     MEDIA_PROBE_MS: MEDIA_PROBE_MS,

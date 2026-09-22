@@ -15,11 +15,14 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // The engine's folder, from the site root. Every trunk is in it.
 const LIB = "libraries/harrisxrwebengine/";
 // The host's facts, as a page reads them: site.config.js, run on its own.
+// The text is what a fake repo folder holds, because the folder route
+// knows a site by the siteId in its own site.config.js.
+const SITE_CONFIG_TEXT = readFileSync(join(REPO, "site.config.js"), "utf8");
 const SITE_CONFIG = (() => {
   const ctx = {};
   ctx.window = ctx;
   vm.createContext(ctx);
-  vm.runInContext(readFileSync(join(REPO, "site.config.js"), "utf8"), ctx);
+  vm.runInContext(SITE_CONFIG_TEXT, ctx);
   return ctx.AMH.config;
 })();
 const SERVER_PORT = 8123;
@@ -692,6 +695,38 @@ async function main() {
       guesses.length === 0 && roles["site.js"] === 0 && roles["imagesengine.js"] === 0 &&
       roles["blog.js"] === 1 && roles["tool.js"] === 1 && roles["publish.js"] === 1,
       "guesses=" + guesses.join(",") + " roles=" + JSON.stringify(roles));
+
+    // The editor never names the composer. The composer fills the editor's
+    // slot when it loads, so a site with no blog loads an editor that says
+    // nothing about one.
+    const toolText = readFileSync(join(libDir, "tool.js"), "utf8");
+    const composerText = readFileSync(join(libDir, "publish.js"), "utf8");
+    const named = (toolText.match(/AMH\.publish/g) || []).length;
+    const registers = (composerText.match(/blogRegister\(/g) || []).length;
+    check("library: tool.js never names the composer, and the composer fills its slot in one call",
+      named === 0 && registers === 1, "AMH.publish in tool.js: " + named + ", blogRegister( in publish.js: " + registers);
+    // The tag's words are written once, in the image engine. blog.js and
+    // markdown.js build their patterns from that one copy.
+    const grammar = {};
+    for (const f of ["blog.js", "markdown.js", "imagesengine.js"]) {
+      const text = readFileSync(join(libDir, f), "utf8");
+      grammar[f] = { square: (text.match(/"portrait1:1"/g) || []).length,
+                     kinds: (text.match(/img\|png\|video/g) || []).length };
+    }
+    check("library: the tag's words are written once, in the image engine, and blog.js and markdown.js carry no copy",
+      grammar["blog.js"].square === 0 && grammar["blog.js"].kinds === 0 &&
+      grammar["markdown.js"].square === 0 && grammar["markdown.js"].kinds === 0 &&
+      grammar["imagesengine.js"].square === 1 && grammar["imagesengine.js"].kinds === 0,
+      JSON.stringify(grammar));
+    // Every storage name is the site's id and a word, through AMH.site.key.
+    // The corner mark's class is a style hook, not a storage name.
+    const written = [];
+    for (const f of readdirSync(libDir).filter((f) => f.endsWith(".js"))) {
+      const found = readFileSync(join(libDir, f), "utf8").match(/["']amh[-:](?!edit\b)[a-z-]*["']/g) || [];
+      if (found.length) written.push(f + ": " + found.join(" "));
+    }
+    check("library: every storage name goes through AMH.site.key, and no trunk writes one out",
+      written.length === 0, written.join("; "));
   }
 
   // C-gallery. The grid invariant: within a train, the widths of each row
@@ -2698,6 +2733,21 @@ async function main() {
       ? c === "rgb(242, 193, 78)" : c === "rgb(74, 165, 232)") &&
     foot.view !== "rgb(74, 165, 232)",
     JSON.stringify(foot));
+  // SL1. The home page loads no composer, so the editor's slot for it is
+  // empty, and the trace says so. A site whose config says it has no blog
+  // answers every blog command with that, and sends no one anywhere.
+  const noComposer = await evaluate(`(function () {
+    var out = { slot: AMH.tool.blog, trace: window.edit.blog.trace(true) };
+    AMH.config.blog = false;
+    out.none = [window.edit.blog(), window.edit.blog.edit("0001"), window.edit.blog.rebuild()];
+    AMH.config.blog = true;
+    out.back = window.edit.blog();
+    return out;
+  })()`);
+  check("slot: the home page has no composer and says so, and a site with no blog says it has none",
+    noComposer.slot === null && noComposer.trace === "the publish engine is not on this page" &&
+    noComposer.none.every((s) => s === "This site has no blog.") && /blog\.html/.test(noComposer.back),
+    JSON.stringify(noComposer));
   // The panel names itself, and its head carries the close where a window
   // always puts one. Exit at the foot does the same job for a reader who
   // has worked down the panel; this is for one who wants out at once.
@@ -4195,9 +4245,12 @@ async function main() {
         getFileHandle: function (n, opts) {
           var key = prefix + n;
           if (!files[key]) {
-            /* the two marks that say a folder is this site's root, and the
-               third managed page, which a save reads back */
-            if (n === "index.html" || n === "blog.html" || n === "gallery.html") {
+            /* the marks that say a folder is this site's root, its
+               site.config.js and its first page; blog.html, which carries the
+               stamp; and the third managed page, which a save reads back */
+            if (key === "site.config.js") {
+              files[key] = fileH(key, ${JSON.stringify(SITE_CONFIG_TEXT)});
+            } else if (n === "index.html" || n === "blog.html" || n === "gallery.html") {
               files[key] = fileH(key, "<html>root</html>");
             } else if (!opts || !opts.create) {
               return Promise.reject(new DOMException("no " + n, "NotFoundError"));
@@ -6686,10 +6739,11 @@ async function main() {
       };
     }
     window.__opened = [];
-    /* index.html and blog.html are the marks that say a folder is the root
-       of this site. The pick is refused without them, so the stand-in tree
-       carries them, as a real repo root does. */
+    /* site.config.js and index.html are the marks that say a folder is the
+       root of this site. The pick is refused without them, so the stand-in
+       tree carries them, as a real repo root does. */
     var tree = dirH({
+      "site.config.js": fileH(${JSON.stringify(SITE_CONFIG_TEXT)}, "site.config.js"),
       "index.html": fileH("<html>root mark</html>", "index.html"),
       "blog.html": fileH('<script id="blogManifest">stamp:' +
         ((/stamp:([0-9a-z]{6})/.exec(document.getElementById('blogManifest')
@@ -7390,7 +7444,8 @@ async function main() {
     /<p>Text\.<\/p>\n<div class="gallery"><img src="\.\.\/blog\/260711_img0001\.jpg" loading="lazy" alt="Alt one" data-caption="Cap one" \/><\/div>\n?<p><code>&#91;img0002\]<\/code> in code\.<\/p>$/.test(mdFig),
     mdFig.slice(0, 220));
   // TW1. one list of tags through AMH.blog.TAG and through the Markdown
-  // renderer's own copy of the rule, which must give the same answer
+  // renderer. Both build their patterns from the image engine's grammar,
+  // and they must give the same answer.
   const tw1 = await evaluate(`(function () {
     var TAG = new RegExp('^' + AMH.blog.TAG + '$');
     return ['[img0005]', '[img0005,Fig. A: the dish at dawn]',
@@ -7405,6 +7460,16 @@ async function main() {
   check("tags: the blog and the Markdown renderer read every tag the same way, frame words included",
     tw1.length === tw1want.length && tw1.every((r, i) => r[1] === tw1want[i] && r[2] === tw1want[i]),
     JSON.stringify(tw1));
+  // TW2. the blog's pattern IS the image engine's, and the words are the
+  // ones a tag has always had
+  const oneRule = await evaluate(`({ same: AMH.blog.TAG === AMH.images.tag.source,
+    kinds: Object.keys(AMH.images.tag.kinds).join("|"), options: AMH.images.tag.options.join(" "),
+    shapes: AMH.images.tag.shapes.join(" ") })`);
+  check("tags: the blog reads tags with the image engine's pattern, and the words are the ones they were",
+    oneRule.same === true && oneRule.kinds === "img|png|video|audio|midi" &&
+    oneRule.options === "portrait1:1 portrait landscape nocarousel noborders nocontrols autoplay muted unmuted loop" &&
+    oneRule.shapes === "portrait1:1 portrait landscape",
+    JSON.stringify(oneRule));
   // BK1-BK3. runs follow the lines, the first word in a run sets the frame,
   // and a Markdown post makes the same carousels as an HTML post
   const bkRuns = await evaluate(`(function () {
@@ -7476,8 +7541,8 @@ async function main() {
     mt1.n >= 40 && mt1.bad.length === 0, mt1.bad.length ? JSON.stringify(mt1.bad[0]).slice(0, 500) : "");
 
   // MT2. one table of tags through AMH.blog.TAG and through the Markdown
-  // renderer's own copy: the same tags are whole to both, and a caption
-  // and a description are the same words to both
+  // renderer, which build from one grammar: the same tags are whole to
+  // both, and a caption and a description are the same words to both
   const MT_TAGS = [
     ["[video0012]", true], ["[audio0013,Recording]", true], ["[midi0014,Song|The MIDI file]", true],
     ["[nocarousel img0001]", true], ["[noborders img0001,Cap]", true], ["[portrait1:1 img0001]", true],
@@ -9049,7 +9114,7 @@ async function main() {
       var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       hit.dispatchEvent(ev);
       document.removeEventListener('click', stop);
-      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+      try { sessionStorage.removeItem('amh-hop'); } catch (e) {}
       return new Promise(function (res) { setTimeout(function () {
         var out = { prevented: seen, href: hit.getAttribute('href'),
                     closed: list.hidden, path: location.pathname };
@@ -9093,7 +9158,7 @@ async function main() {
         document.addEventListener('click', stop);
         press('Enter');
         document.removeEventListener('click', stop);
-        try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+        try { sessionStorage.removeItem('amh-hop'); } catch (e) {}
         setTimeout(function () {
           res({ at: at, opened: opened });
         }, 300);
@@ -9541,6 +9606,21 @@ async function main() {
         '["Export","Save to repo","Rebuild","Media","New post","Revert all","Exit"]' &&
       blogFoot.filled === "rgb(74, 165, 232)" && blogFoot.shared,
       JSON.stringify(blogFoot));
+    // SL2. blog.html's composer fills the editor's slot with its eleven
+    // hooks, and they are the very functions it publishes, so the button,
+    // the console and the Media box reach one composer.
+    const slotHooks = await evaluate(`(function () {
+      var s = AMH.tool.blog;
+      if (!s) return null;
+      return { names: Object.keys(s).sort().join(" "),
+               one: s.rebuild === AMH.publish.rebuild && s.open === AMH.publish.open &&
+                    s.dirty === AMH.publish.dirty && s.checklist === AMH.publish.checklist,
+               outputs: Object.keys(s.outputs || {}).sort().join(" ") };
+    })()`);
+    check("slot: blog.html's composer fills the editor's slot with its eleven hooks, the functions it publishes",
+      !!slotHooks && slotHooks.names === "busy checklist dirty edit holds note open outputs rebuild staged trace" &&
+      slotHooks.one === true && slotHooks.outputs === "feed.xml robots.txt search.js sitemap.xml",
+      JSON.stringify(slotHooks));
 
     // ---- the month chain, on the served bundle: 2607 points at 2606 ----
     // CH1. a month page boots with the engine and no console error, and
@@ -10235,12 +10315,12 @@ async function main() {
     await send("Page.navigate", { url: "http://127.0.0.1:8124/blog.html" });
     await sleep(2200);
     const tagHop = await evaluate(`(function () {
-      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+      try { sessionStorage.removeItem('amh-hop'); } catch (e) {}
       var a = document.createElement('a');
       a.href = 'blog.html?t=e2e';
       document.body.appendChild(a);
       a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      var t = null; try { t = sessionStorage.getItem('amh:hop'); } catch (e) {}
+      var t = null; try { t = sessionStorage.getItem('amh-hop'); } catch (e) {}
       return !!t;
     })()`);
     await sleep(2400);
@@ -11017,7 +11097,7 @@ async function main() {
     // a plain left click on a post link is a departure; every other way of
     // opening a link leaves this tab where it is, so none of them is
     const PLANT = (extra) => `(function () {
-      try { sessionStorage.removeItem('amh:hop'); } catch (e) {}
+      try { sessionStorage.removeItem('amh-hop'); } catch (e) {}
       var a = document.createElement('a');
       a.className = 'probeLink';
       a.href = AMH.blog.postUrl('260609', '0001', 'root', true);
@@ -11027,7 +11107,7 @@ async function main() {
       a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true,
         button: ${extra.button || 0}, ctrlKey: ${!!extra.ctrl}, shiftKey: ${!!extra.shift},
         metaKey: ${!!extra.meta} }));
-      var t = null; try { t = sessionStorage.getItem('amh:hop'); } catch (e) { t = 'refused'; }
+      var t = null; try { t = sessionStorage.getItem('amh-hop'); } catch (e) { t = 'refused'; }
       return t;
     })()`;
     const guards = {};
@@ -11065,7 +11145,7 @@ async function main() {
       out: !!document.querySelector('.bm-top__out'),
       href: location.href, len: history.length,
       state: JSON.stringify(history.state),
-      token: (function () { try { return sessionStorage.getItem('amh:hop'); } catch (e) { return 'refused'; } })()
+      token: (function () { try { return sessionStorage.getItem('amh-hop'); } catch (e) { return 'refused'; } })()
     })`);
     check("back: a real departure offers Back under the bar, filled, and spends the token",
       !!wrote && landed.back && landed.underBar && landed.arrowSvg &&
@@ -12185,9 +12265,15 @@ async function main() {
         return { kind: 'file', getFile: function () {
           return Promise.resolve(new File([text], name, { type: 'text/html' })); } };
       }
-      function folder(name, blogText) {
-        var files = { 'index.html': fileH('<html></html>', 'index.html') };
+      var config = ${JSON.stringify(SITE_CONFIG_TEXT)};
+      /* configText: undefined is this site's own, and null is none */
+      function folder(name, blogText, configText, noIndex) {
+        var files = {};
+        if (!noIndex) files['index.html'] = fileH('<html></html>', 'index.html');
         if (blogText !== null) files['blog.html'] = fileH(blogText, 'blog.html');
+        if (configText !== null) {
+          files['site.config.js'] = fileH(configText === undefined ? config : configText, 'site.config.js');
+        }
         return { name: name,
           queryPermission: function () { return Promise.resolve('granted'); },
           getFileHandle: function (n) {
@@ -12196,12 +12282,15 @@ async function main() {
           } };
       }
       var man = '<scr' + 'ipt id="blogManifest">stamp:';
+      var here = man + mine + '</scr' + 'ipt>';
       return Promise.all([
-        AMH.tool.repoVerify(folder('same', man + mine + '</scr' + 'ipt>')),
+        AMH.tool.repoVerify(folder('same', here)),
         AMH.tool.repoVerify(folder('stale', man + 'zzzzzz</scr' + 'ipt>')),
-        AMH.tool.repoVerify(folder('noblog', null))
+        AMH.tool.repoVerify(folder('noconfig', here, null)),
+        AMH.tool.repoVerify(folder('other', here, config.replace(/siteId: "[^"]+"/, 'siteId: "other"'))),
+        AMH.tool.repoVerify(folder('nopage', here, undefined, true))
       ]).then(function (v) {
-        return { same: v[0], stale: v[1], notRoot: v[2], mine: mine };
+        return { same: v[0], stale: v[1], noConfig: v[2], other: v[3], noPage: v[4], mine: mine };
       });
     })()`, { awaitPromise: true });
     check("repo memory: a folder whose blog page matches this page is accepted and says so",
@@ -12214,9 +12303,35 @@ async function main() {
       verdicts.stale.ok === true && verdicts.stale.warn === true &&
       /DIFFERENT publish/.test(verdicts.stale.why) && /zzzzzz/.test(verdicts.stale.why),
       JSON.stringify(verdicts.stale));
-    check("repo memory: a folder without the root marks is refused",
-      verdicts.notRoot.ok === false && /not the root/.test(verdicts.notRoot.why),
-      JSON.stringify(verdicts.notRoot));
+    // A site is known by the siteId in its own site.config.js, which is read
+    // as text: a folder with none, or with another site's, is not this site.
+    check("repo memory: a folder with no site.config.js is refused, and the reason names the file",
+      verdicts.noConfig.ok === false && /site\.config\.js/.test(verdicts.noConfig.why),
+      JSON.stringify(verdicts.noConfig));
+    check("repo memory: another site's folder is refused by its siteId, and the reason names both ids",
+      verdicts.other.ok === false && /"other"/.test(verdicts.other.why) &&
+      /"amh"/.test(verdicts.other.why), JSON.stringify(verdicts.other));
+    check("repo memory: this site's config without the site's first page is refused",
+      verdicts.noPage.ok === false && /index\.html/.test(verdicts.noPage.why),
+      JSON.stringify(verdicts.noPage));
+    // ST1. Every name the engine keeps in the browser is the site's id and
+    // a word. The portfolio's names are the ones it always had, so no stored
+    // work is lost; the hop token is the one name that moved, from amh:hop.
+    const stored = await evaluate(`(async function () {
+      var words = ["copy-editor-quicksave", "pending-edits", "publish-pending", "editor", "repo",
+        "images", "photo-tab", "blog-draft", "blog-preview", "publish-noremind", "publish-route", "hop"];
+      var dbs = indexedDB.databases ? (await indexedDB.databases()).map(function (d) { return d.name; }) : null;
+      var keys = Object.keys(localStorage).concat(Object.keys(sessionStorage));
+      return { names: words.map(AMH.site.key), dbs: dbs,
+               colon: keys.filter(function (k) { return /^amh:/.test(k); }) };
+    })()`, { awaitPromise: true });
+    check("storage: every name is the site's id and a word, and the portfolio's names are the ones it had",
+      JSON.stringify(stored.names) === JSON.stringify(["amh-copy-editor-quicksave", "amh-pending-edits",
+        "amh-publish-pending", "amh-editor", "amh-repo", "amh-images", "amh-photo-tab", "amh-blog-draft",
+        "amh-blog-preview", "amh-publish-noremind", "amh-publish-route", "amh-hop"]) &&
+      !!stored.dbs && stored.dbs.indexOf("amh-images") !== -1 && stored.dbs.indexOf("amh-editor") !== -1 &&
+      stored.colon.length === 0,
+      JSON.stringify(stored));
     // and forgetting it really forgets it
     const forgotten = await evaluate(
       `AMH.tool.repoForget().then(function () { return AMH.tool.repoRecall(); })
@@ -12234,7 +12349,8 @@ async function main() {
       }
       var stamp = (/stamp:([0-9a-z]{6})/
         .exec(document.getElementById('blogManifest').textContent) || [])[1] || '';
-      var files = { 'index.html': fileH('<html></html>', 'index.html'),
+      var files = { 'site.config.js': fileH(${JSON.stringify(SITE_CONFIG_TEXT)}, 'site.config.js'),
+                    'index.html': fileH('<html></html>', 'index.html'),
                     'blog.html': fileH('<scr' + 'ipt id="blogManifest">stamp:' + stamp + '</scr' + 'ipt>', 'blog.html') };
       window.__picks = [];
       window.__asked = [];
@@ -12477,6 +12593,7 @@ async function main() {
         ? Promise.resolve(entries[n]) : Promise.reject(new DOMException("no " + n, "NotFoundError")); } }; }
     window.__picked = 0;
     window.showDirectoryPicker = function () { window.__picked++; return Promise.resolve(dirH({
+      "site.config.js": fileH(${JSON.stringify(SITE_CONFIG_TEXT)}, "site.config.js"),
       "blog.html": fileH(${JSON.stringify(diskBlog)}, "blog.html"),
       "index.html": fileH(${JSON.stringify(diskHome)}, "index.html") })); };
     [...document.querySelectorAll('.bc-wizard .ced-modal__btns button')]

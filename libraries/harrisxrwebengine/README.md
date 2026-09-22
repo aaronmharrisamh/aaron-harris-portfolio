@@ -17,14 +17,14 @@ upgrade replaces the whole folder.
 | --- | --- |
 | `release.js` | The release: its id, its version, and the address of this folder. The one place the version is written. |
 | `engine.css` | The style of everything the engine draws or drives, and a default for every theme token. |
-| `site.js` | Shared page behavior, the site root, and the pin check. |
+| `site.js` | Shared page behavior, the site root, the pin check, and the site's storage names. |
 | `work.js` | The carousels, the players, the deep-dive drawer and the lightbox. |
-| `imagesengine.js` | The image engine: intake, the files held until a save, the image index, and the log of super deletes. |
+| `imagesengine.js` | The image engine: intake, the files held until a save, the image index, the log of super deletes, and the grammar of the tag that places a file in a post. |
 | `blog.js` | The blog reader: the stream, the month chain and find. |
 | `markdown.js` | The Markdown renderer. |
 | `gallery.js` | The gallery page's tile packer and its editor. |
-| `tool.js` | The editor, the splice and the export. |
-| `publish.js` | The blog composer and the publish bundle. |
+| `tool.js` | The editor, the splice and the export. It reaches the blog composer only through the slot the composer fills, `AMH.tool.blog`. |
+| `publish.js` | The blog composer and the publish bundle. It fills the editor's slot when it loads. |
 
 ## The site's two files
 
@@ -74,6 +74,24 @@ somewhere else names its root in `site.config.js` as `siteRoot`.
 `site.js` compares it with `release.js`. While the two differ, or either file
 is missing, the page still reads, and the editor refuses to open and says
 why.
+
+## Storage and the repo folder
+
+Every name the engine keeps in the browser is the site's `siteId`, a dash and
+a word: `AMH.site.key("pending-edits")`. Two sites on one origin keep their
+drafts, held photos and remembered folders apart.
+
+The editor writes into a repo folder only when the folder's own
+`site.config.js` names the same `siteId` and the folder holds the site's
+first page. The engine reads that file as text and never runs it. On a site
+with a blog, the stamp in the folder's `blog.html` then says whether it is
+the publish the page knows.
+
+## A site with no blog
+
+A site whose `site.config.js` says `blog: false` loads no `blog.js` and no
+`publish.js`. Its editor shows no New post button, and the console's blog
+commands answer "This site has no blog."
 
 ## The theme
 

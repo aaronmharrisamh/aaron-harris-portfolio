@@ -78,6 +78,14 @@
   }
   var problem = pinProblem();
 
+  /* THE SITE'S STORAGE NAMES. Every name the engine keeps in the browser
+     starts with the site's id, so two sites on one origin never read each
+     other's work. The word after the id is permanent: a new word loses
+     what a person has already stored under the old one. */
+  function key(word) {
+    return ((AMH.config && AMH.config.siteId) || "site") + "-" + word;
+  }
+
   /* Old links to the blog takeover.
 
      "?b=..." was the blog's URL from V035 until the blog got its own page, so
@@ -276,7 +284,7 @@
     } catch (e) {}
   }
 
-  var HOP_KEY = "amh:hop";
+  var HOP_KEY = key("hop");
   var HOP_MAX = 60000;   /* a token older than this belongs to another trip */
 
   /* Record a departure this site is making, for the page it is going to.
@@ -582,7 +590,12 @@
 
      AMH.site.pathOf(href)
      The path from the site root that href leads to, read from this page,
-     or null when it leads outside the root. */
+     or null when it leads outside the root.
+
+     AMH.site.key(word)
+     The name this site keeps word under in the browser: the site's id, a
+     dash, and word: amh-pending-edits is the portfolio's pending edits,
+     and every trunk names its storage this way. */
   AMH.site = {
     requestTick: requestTick,
     setUrl: setUrl,
@@ -594,6 +607,7 @@
     libraryRoot: libraryRoot,
     prefix: prefix,
     pagePath: pagePath,
-    pathOf: pathOf
+    pathOf: pathOf,
+    key: key
   };
 })();

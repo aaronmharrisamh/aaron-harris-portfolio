@@ -43,6 +43,13 @@
      ========================================================== */
   var AMH = window.AMH = window.AMH || {};
   var doc = document;
+  /* The tag's grammar is the image engine's, and every tag reader here is
+     built from it, so this file stops when imagesengine.js is missing. The
+     posts a page carries still read. */
+  if (!AMH.images || !AMH.images.tag) {
+    console.warn("[blog] blog.js needs imagesengine.js, which did not load before it.");
+    return;
+  }
 
   /* HOW LONG A POST SHOWS BEFORE IT FOLDS.
 
@@ -257,34 +264,26 @@
   var BLOG_SIZES = "(max-width: 700px) 80vw, 520px";
   var BLOG_SLOT = { sizes: BLOG_SIZES, widest: 560 };
 
-  /* THE TAG, NAMED ONCE.
+  /* THE TAG.
 
        [portrait img0001,caption|alt]
        [nocarousel noborders video0012,caption|description]
 
-     Options first, in any order, each one followed by one space; then the
-     kind's word and a four-character id; then an optional comma and
-     caption, and an optional pipe and a description, which is an image's
-     alt text. The options and the kind are lower case, and png is the
-     older name of img.
+     Its grammar is the image engine's, in AMH.images.tag: see THE TAG in
+     section 2 of imagesengine.js. A match has five groups: the options as
+     one string, or nothing when a tag has none; the kind's word; the
+     number; the caption; the alt. A tag with one frame word has that word
+     alone in the first group, as it always had.
 
-     The groups, in order: the options as one string, or nothing when a
-     tag has none; the kind's word; the number; the caption; the alt. A tag
-     with one frame word has that word alone in the first group, as it
-     always had.
-
-     publish.js builds every tag reader it has from this source, so a tag
-     means one thing to the composer and to the page. markdown.js keeps a
-     copy of its own, because it also loads on the home page, where this
-     file does not; the harness runs one list of tags through both. */
-  var BLOG_OPTIONS = ["portrait1:1", "portrait", "landscape", "nocarousel", "noborders",
-                      "nocontrols", "autoplay", "muted", "unmuted", "loop"];
-  /* portrait1:1 is before portrait, so the longer word is tried first */
-  var BLOG_OPTION = "(?:" + BLOG_OPTIONS.join("|") + ")";
+     markdown.js reads tags too, and it loads on the home page, where this
+     file does not, which is why the grammar is not this file's. publish.js
+     builds every tag reader it has from the three names below, so a tag
+     means one thing to the composer, the renderer and the page. */
+  var BLOG_TAG_RULE = AMH.images.tag;
+  var BLOG_OPTIONS = BLOG_TAG_RULE.options;
   /* each kind's word, and the kind it names */
-  var BLOG_KINDS = { img: "image", png: "image", video: "video", audio: "audio", midi: "midi" };
-  var BLOG_TAG = "\\[(?:(" + BLOG_OPTION + "(?: " + BLOG_OPTION + ")*) )?(" +
-    Object.keys(BLOG_KINDS).join("|") + ")(" + BLOG_ID + ")(?:,([^\\]|]*))?(?:\\|([^\\]]*))?\\]";
+  var BLOG_KINDS = BLOG_TAG_RULE.kinds;
+  var BLOG_TAG = BLOG_TAG_RULE.source;
 
   /* "a", "a and b", "a, b and c" */
   function blogAnd(list) {
@@ -306,7 +305,7 @@
      The first frame word is the tag's. A second, different one is a
      problem, and so is a tag that says both muted and unmuted. A word
      written twice is read once. problems lists each as a short phrase. */
-  var BLOG_SHAPES = ["portrait1:1", "portrait", "landscape"];
+  var BLOG_SHAPES = BLOG_TAG_RULE.shapes;
   function blogTagOptions(text) {
     var o = { shape: "", nocarousel: false, noborders: false, nocontrols: false,
               autoplay: false, sound: "", loop: false, problems: [] };
@@ -353,9 +352,10 @@
      asks for a player that the page never draws. */
   var BLOG_PLAYBACK = ["nocontrols", "autoplay", "loop"];
   function blogTagRead(m) {
-    var o = blogTagOptions(m[1]);
-    o.text = m[0]; o.at = m.index; o.word = m[2]; o.kind = BLOG_KINDS[m[2]]; o.num = m[3];
-    o.caption = (m[4] || "").trim(); o.alt = (m[5] || "").trim();
+    var r = BLOG_TAG_RULE.read(m);
+    var o = blogTagOptions(r.options);
+    o.text = r.text; o.at = m.index; o.word = r.word; o.kind = r.kind; o.num = r.num;
+    o.caption = r.caption; o.alt = r.alt;
     if (o.kind !== "video" && o.kind !== "audio") {
       var asks = BLOG_PLAYBACK.filter(function (w) { return o[w]; });
       if (o.sound) asks.push(o.sound);
@@ -381,7 +381,8 @@
      it is typed and once more at publish, because a typo here used to cost
      the image. The escape [!img0005] is a deliberate non-tag and is never
      named. */
-  var NEAR_TAG = /\[(?!!)[^\]\n]*\b(?:img|png|video|audio|midi)\s?[0-9a-z]\d{3}\b[^\]\n]*\](?!\()/gi;
+  var NEAR_TAG = new RegExp("\\[(?!!)[^\\]\\n]*\\b(?:" + BLOG_TAG_RULE.KIND + ")\\s?" + BLOG_TAG_RULE.ID +
+    "\\b[^\\]\\n]*\\](?!\\()", "gi");
   function blogNearTags(source) {
     var whole = new RegExp("^" + BLOG_TAG + "$");
     var out = [], m;
