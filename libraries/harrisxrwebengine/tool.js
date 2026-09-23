@@ -8099,6 +8099,20 @@
     return !rec.overSize;
   }
 
+  /* THE INDEX AND THE LAYER. A bundle that is not on the site yet holds
+     the newest images.js, so the image index reads the layer's copy before
+     the site's, the way pristine() reads the layer's pages: see the entry
+     point. An index written into the folder is newer than that copy, so it
+     takes the copy's place, and the next load does not find the older
+     record there. */
+  function layerTakeIndex(files) {
+    var name = AMH.images && AMH.images.index ? AMH.images.index.file : "";
+    var rec = layerRead();
+    if (!name || !files[name] || !rec || !rec.files) return;
+    rec.files[name] = new TextDecoder().decode(files[name]);
+    layerWrite(rec);
+  }
+
   /* The page, read from the layer.
 
      Only the machine-owned regions are replaced, and only with the
@@ -8738,7 +8752,7 @@
       return chain.then(function () {
         return writeOne(name, files[name]).then(function () { written.push(name); });
       });
-    }, Promise.resolve()).then(function () { return written; },
+    }, Promise.resolve()).then(function () { layerTakeIndex(files); return written; },
       function (err) { err.written = written; throw err; });
   }
   function repoWriteReady() { return !!repoWriteDir; }
@@ -9950,12 +9964,11 @@
     var pages = names.filter(function (n) { return n !== engine().index.file; });
     if (pages.length === 1 && built.length === 1) {
       downloadFile(built[0].path.replace(/^.*\//, ""), built[0].text, "text/html");
-      return false;
+      return;
     }
     downloadFile("publish.zip", zipStore(names.map(function (name) {
       return { name: name, bytes: files[name] };
     })));
-    return true;
   }
 
   function downloadFile(name, data, type) {
@@ -10279,10 +10292,10 @@
           return indexFiles(built, held).then(function (ix) {
             var files = bundleFiles(built, held);
             Object.keys(ix.files).forEach(function (n) { files[n] = ix.files[n]; });
-            var zipped = downloadBundle(built, files);
-            /* a zip carried the index; a page alone did not, and the record
-               stays what the file holds */
-            if (zipped && ix.rec) engine().index.set(ix.rec);
+            downloadBundle(built, files);
+            /* A zip does not change the record. The pages and photos stay
+               waiting for a save, and that save writes the index with
+               them. */
             exportedClean = true;
             console.info("[site editor] exported " + Object.keys(files).sort().join(", ") +
               " with " + edited.length + " text region(s) and " + editedGals.length +
@@ -10345,9 +10358,9 @@
       var built = bundle.built, files = bundle.files, ix = bundle.ix;
       /* the download, for a browser with no picker and for a refused folder */
       function asZip(why) {
-        var zipped = downloadBundle(built, files);
+        /* as the export: a zip does not change the record */
+        downloadBundle(built, files);
         AMH.tool.markExported();
-        if (zipped && ix.rec) engine().index.set(ix.rec);
         return { wrote: [], moved: [], fellBack: why };
       }
       if (!hasPicker()) {
@@ -10936,6 +10949,12 @@
     doc.addEventListener("DOMContentLoaded", pendingRestore, { once: true });
   } else {
     window.setTimeout(pendingRestore, 0);
+  }
+
+  /* The image index asks the staging layer for a newer images.js at its
+     first load. Every trunk that loads the index runs after this line. */
+  if (AMH.images && AMH.images.index && AMH.images.index.from) {
+    AMH.images.index.from(function () { return layerFile(AMH.images.index.file); });
   }
 
   /* The way in, for anyone who does not open a console. */

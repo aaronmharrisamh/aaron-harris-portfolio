@@ -12,7 +12,7 @@
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "lawn",
-  engineVersion: "1.0.0",
+  engineVersion: "1.0.1",
   siteName: "Greenline Mowing",
   brand: "GREENLINE MOWING",
   publicUrl: "https://greenline.example/",

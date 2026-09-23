@@ -1605,6 +1605,9 @@
      composer, a save or a publish. A reader never loads it. */
   var INDEX_FILE = "images.js";
   var INDEX_V = 2;
+  /* what the file's one statement starts with: indexText writes it and
+     indexRead finds the record after it */
+  var INDEX_START = "window.AMH_IMAGES = ";
   var indexRec = null;        /* the record, once loaded */
   var indexLoading = null;    /* the one load, cached as its promise */
   var indexProblem = "";      /* why the file on the site must not be written, or "" */
@@ -1759,15 +1762,23 @@
       doc.head.appendChild(el);
     });
   }
+  /* Where a newer copy of the file waits, if one does: a function that
+     returns the copy's text, or null. tool.js names the staging layer
+     here, because a bundle that is built and not uploaded is newer than
+     the site, and the next write counts on from its numbers. */
+  var indexStaged = null;
+  function indexFrom(fn) { indexStaged = typeof fn === "function" ? fn : null; }
   /* A file the tag found and could not read still loads: a script with a
      fault fires load and sets nothing. The check names that, so it never
-     becomes an empty index that the next write would put on the site. */
-  /* TODO: the index loads from the site and never from the staging layer.
-     After a reload, a bundle that is built and not uploaded is not in it:
-     a new file can take an id that bundle gave out, and the next bundle's
-     index leaves that bundle's files out. */
+     becomes an empty index that the next write would put on the site.
+
+     The first load asks for the newer copy before it reads the site. It
+     asks then and not sooner, so the blog page has cleared a bundle that
+     is already live. A record set before the load is the one it takes. */
   function indexLoad() {
     if (!indexLoading) {
+      var staged = indexStaged ? indexRead(indexStaged()) : null;
+      if (staged) indexSet(staged);
       indexLoading = (window.AMH_IMAGES ? Promise.resolve(true) : loadTag(INDEX_FILE)).then(function (found) {
         if (!found) console.info("[images] no " + INDEX_FILE + " on this site yet. The next save or publish writes it.");
         indexProblem = found ? indexCheck(window.AMH_IMAGES) : "";
@@ -1778,6 +1789,19 @@
     /* the record as it stands, and not as the load found it: a write since
        then replaced it, and the next write builds on that one */
     return indexLoading.then(function () { return indexRec; });
+  }
+  /* A record from the file's text, as indexText writes it, or null when the
+     text holds none. The text is read as data and never run, so a copy the
+     browser keeps needs no script tag. */
+  function indexRead(text) {
+    var s = String(text || "");
+    var at = s.indexOf(INDEX_START);
+    var end = s.lastIndexOf("}");
+    if (at === -1 || end < at) return null;
+    try {
+      var rec = JSON.parse(s.slice(at + INDEX_START.length, end + 1));
+      return rec && typeof rec === "object" ? rec : null;
+    } catch (e) { return null; }
   }
   /* Why no write may replace the file on the site, or "". A writer asks
      before it builds, and indexText refuses in any case. */
@@ -1844,7 +1868,7 @@
     r.stamp = String(stamp || "");
     var lines = r.images.map(function (e) { return JSON.stringify(e); });
     return genHeader(r.stamp) +
-      "window.AMH_IMAGES = {\"v\":" + INDEX_V + ",\"stamp\":" + JSON.stringify(r.stamp) +
+      INDEX_START + "{\"v\":" + INDEX_V + ",\"stamp\":" + JSON.stringify(r.stamp) +
       ",\"nextImg\":" + JSON.stringify(r.nextImg) + ",\"images\":[" +
       (lines.length ? "\n" + lines.join(",\n") + "\n" : "") + "]};\n";
   }
@@ -2176,6 +2200,8 @@
       load: indexLoad,         /* the record, as a promise; loads the file once */
       get: indexGet,           /* the record, or null before load() settled */
       set: indexSet,           /* the record a write left */
+      read: indexRead,         /* a record from the file's text, or null */
+      from: indexFrom,         /* where a newer copy waits: a function, or null */
       problem: indexProblemNow, /* why the file on the site must not be written, or "" */
       check: indexCheck,       /* the same answer for any record, as a file holds it */
       entry: indexEntry,       /* one entry by base path */

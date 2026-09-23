@@ -102,7 +102,7 @@ open and names the missing file.
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "lawn",
-  engineVersion: "1.0.0",
+  engineVersion: "1.0.1",
   siteName: "Greenline Mowing",
   brand: "GREENLINE MOWING",
   publicUrl: "https://greenline.example/",
@@ -300,7 +300,9 @@ No worked example of a second site with a blog exists yet.
 
 **Export.** One changed page downloads as itself. More than one, or a
 page with a new photo, downloads as `publish.zip`, laid out the way the
-site's folder is, so it unzips over the site.
+site's folder is, so it unzips over the site. An export leaves the edits
+and the photos waiting, and the image index waits with them: the save
+after it writes `images.js`.
 
 **Save to repo.** The owner picks the site's folder once, and the editor
 writes the changed files into it. It writes into a folder only when the
@@ -324,7 +326,9 @@ it or the owner discards it, so it follows the owner from page to page.
 **The staging layer.** A blog publish, a delete or a rebuild builds a
 bundle and leaves it to the owner to upload. Until the site shows that
 bundle's stamp, the tab keeps its text files and reads through them, so
-the next bundle builds on the last one.
+the next bundle builds on the last one. The image index reads the
+bundle's `images.js` before the site's, and a save into the folder puts
+the `images.js` it wrote into the layer.
 
 ## 9. Upgrade and versions
 
