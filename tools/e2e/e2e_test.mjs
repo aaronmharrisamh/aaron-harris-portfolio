@@ -45,7 +45,7 @@ const SERVE = mkdtempSync(join(tmpdir(), "ced-serve-"));
 for (const f of ["site.css", "site.config.js", "aaron-portfolio-portrait-transparent.png"]) {
   try { copyFileSync(join(REPO, f), join(SERVE, f)); } catch {}
 }
-for (const page of ["index.html", "gallery.html", "blog.html"]) {
+for (const page of ["index.html", "gallery.html", "blog.html", "about.html"]) {
   writeFileSync(join(SERVE, page), fixedPage(page, readFileSync(join(REPO, page), "utf-8")));
 }
 for (const d of ["img", "tools", "libraries"]) {
@@ -200,7 +200,7 @@ function stripSpans(txt, slugs) {
 
 // Every page the editor and the publish engine manage. Order matches pages
 // in site.config.js, which is the list the site is generated from.
-const MANAGED_PAGES = ["index.html", "gallery.html", "blog.html"];
+const MANAGED_PAGES = ["index.html", "gallery.html", "blog.html", "about.html"];
 
 // The exact marked regions of each page, in the order the open markers appear
 // in the source. A part that adds, removes or renames a region must edit this
@@ -240,6 +240,8 @@ const EXPECTED_REGIONS = {
   "blog.html": [
     "brand-title", "brand-sub", "nav-work", "nav-gallery", "nav-blog",
     "nav-about", "nav-contact", "blog-eyebrow", "blog-h2", "blog-stream",
+    "about-eyebrow", "about-lede",
+    "about-p1", "about-p2", "about-p3", "about-place", "about-link",
     "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
     "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar",
     "blog-manifest",
@@ -249,6 +251,19 @@ const EXPECTED_REGIONS = {
     "nav-about", "nav-contact",
     "gallery-eyebrow", "gallery-h2", "gallery-intro", "gallery-note",
     "gal-br",
+    "about-eyebrow", "about-lede",
+    "about-p1", "about-p2", "about-p3", "about-place", "about-link",
+    "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
+    "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar",
+  ],
+  // The About page is its heading and the footer, whose About is the
+  // page's content.
+  "about.html": [
+    "brand-title", "brand-sub", "nav-work", "nav-gallery", "nav-blog",
+    "nav-about", "nav-contact",
+    "aboutpage-eyebrow", "aboutpage-h1",
+    "about-eyebrow", "about-lede",
+    "about-p1", "about-p2", "about-p3", "about-place", "about-link",
     "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
     "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar",
   ],
@@ -271,6 +286,8 @@ const EXPECTED_SCRIPTS = {
   "blog.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "blog.js", "markdown.js",
     "tool.js", "publish.js"])),
   "gallery.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "tool.js", "gallery.js"])),
+  // the set the engine's guide gives a page of copy
+  "about.html": PAGE_HEAD.concat(trunks(["site.js", "work.js", "imagesengine.js", "tool.js"])),
 };
 // A generated month page's scripts. It is one folder down, in blog/.
 const MONTH_SCRIPTS = trunks(["release.js"], "../").concat(["../site.config.js"],
@@ -2634,7 +2651,7 @@ async function main() {
     const domain = readFileSync(join(REPO, "CNAME"), "utf-8").trim();
     const root = "https://" + domain + "/";
     const want = { "index.html": root, "gallery.html": root + "gallery.html",
-                   "blog.html": root + "blog.html" };
+                   "blog.html": root + "blog.html", "about.html": root + "about.html" };
     const seen = { canonical: [], og: [], title: [] };
     for (const page of MANAGED_PAGES) {
       const src = readFileSync(join(REPO, page), "utf-8");
@@ -2654,13 +2671,14 @@ async function main() {
 
   // C7. the shared chrome is one set of bytes.
   //
-  // The header and the contact section are on every managed page. Nothing
-  // generates them: each page holds its own copy, and the editor writes an
-  // edit to a shared region onto every page at once. That only works while
-  // the copies are identical to begin with, so the suite holds them to it.
+  // The header and the footer, which holds About and Contact, are on every
+  // managed page. Nothing generates them: each page holds its own copy, and
+  // the editor writes an edit to a shared region onto every page at once.
+  // That only works while the copies are identical to begin with, so the
+  // suite holds them to it.
   const CHROME_SPANS = [
     ["header", '<header class="site-header"', "</header>"],
-    ["contact section", '<section class="contact"', "</section>"],
+    ["footer", '<footer class="site-footer"', "</footer>"],
   ];
   for (const [label, open, close] of CHROME_SPANS) {
     const spans = MANAGED_PAGES.map((page) => {
@@ -2672,6 +2690,21 @@ async function main() {
     check("contract: every managed page carries the same " + label,
       same, same ? spans[0].length + " chars on " + MANAGED_PAGES.length + " pages"
                  : "differs: " + MANAGED_PAGES.join(" vs "));
+  }
+
+  // C7b. every region in the shared chrome is a shared slug. A region off
+  // the list is edited on one page only, and the copies drift apart.
+  {
+    const src = readFileSync(join(REPO, "index.html"), "utf-8");
+    const chromeText = CHROME_SPANS.map(([, open, close]) => {
+      const i = src.indexOf(open);
+      return i === -1 ? "" : src.slice(i, src.indexOf(close, i));
+    }).join("");
+    const inChrome = regionSlugs(chromeText);
+    const offList = inChrome.filter((s) => (SITE_CONFIG.sharedSlugs || []).indexOf(s) === -1);
+    check("contract: every region in the header and the footer is a shared slug",
+      inChrome.length === 22 && offList.length === 0,
+      offList.length ? "not shared: " + offList.join(", ") : inChrome.length + " regions");
   }
 
   // C8. the highlights block is marked machine-owned in the source. What
@@ -6928,7 +6961,7 @@ async function main() {
     chips: document.querySelectorAll('.ced-chip').length,
   })`);
   check("blog page: its regions get panel rows and badges",
-    blogUI.rows === 18 && blogUI.chips > 0, JSON.stringify(blogUI));
+    blogUI.rows === 25 && blogUI.chips > 0, JSON.stringify(blogUI));
 
   await evaluate(`[...document.querySelectorAll('.ced-panel__row')]
     .find(r => r.textContent.indexOf('blog-eyebrow') >= 0).click()`);
@@ -6979,7 +7012,7 @@ async function main() {
   await evaluate(`window.edit.pending.clear()`);
   await sleep(400);
 
-  // BL-shared. The header and the contact section are on every managed page.
+  // BL-shared. The header and the footer are on every managed page.
   // Editing one of their regions is one act that writes every page, which is
   // what keeps the pages from drifting without generating the markup.
   await evaluate(`[...document.querySelectorAll('.ced-chip')].find(c => c.title === 'nav-work').click()`);
@@ -6992,7 +7025,7 @@ async function main() {
   await sleep(200);
   const sharedPending = await evaluate(`window.edit.pending()`);
   check("shared: one edit to a shared region is waiting on every managed page",
-    /3 unsaved changes on 3 pages/.test(sharedPending), sharedPending);
+    /4 unsaved changes on 4 pages/.test(sharedPending), sharedPending);
 
   await evaluate(`window.__zipB64 = null; window.edit.export()`);
   let sz = null;
@@ -7019,6 +7052,35 @@ async function main() {
   await sleep(400);
 
   await evaluate(`window.edit()`);
+
+  // ============ AB. THE ABOUT PAGE ============
+  // about.html is a heading over the site footer, and the footer's About is
+  // the page's content. AB1. its nav item is the current one, and the
+  // About shows close under the heading, with no second eyebrow. The gap
+  // is read to the About's grid, whose top does not move when the grid
+  // stacks the portrait over the text on a narrow window.
+  await send("Page.navigate", { url: `http://127.0.0.1:${SERVER_PORT}/about.html` });
+  await waitLoaded();
+  await sleep(1200);
+  const ab1 = await evaluate(`(function () {
+    var cur = document.querySelector('.nav__links a[aria-current="page"]');
+    var head = document.querySelector('.site-footer .about .section-head');
+    var grid = document.querySelector('.site-footer .about .about__grid');
+    var lede = document.querySelector('.site-footer .about .lede');
+    var h1 = document.querySelector('main h1');
+    return {
+      current: cur ? cur.getAttribute('href') : null,
+      h1: h1 ? h1.textContent.trim() : null,
+      eyebrow: head ? getComputedStyle(head).display : null,
+      lede: lede ? Math.round(lede.getBoundingClientRect().height) : 0,
+      width: window.innerWidth,
+      gap: h1 && grid ? Math.round(grid.getBoundingClientRect().top - h1.getBoundingClientRect().bottom) : -1
+    };
+  })()`);
+  check("about page: About is the current item, and the footer's About sits close under the heading with no second eyebrow",
+    ab1.current === "about.html" && !!ab1.h1 && ab1.eyebrow === "none" && ab1.lede > 0 &&
+    ab1.gap >= 0 && ab1.gap < 100, JSON.stringify(ab1));
+
   await send("Page.navigate", { url: PAGE });
   await waitLoaded();
   await sleep(1200);
@@ -8730,7 +8792,7 @@ async function main() {
     const sm = zipFiles["sitemap.xml"].toString("utf8");
     const locs = [...sm.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
     const ROOT = "https://aaronmichaelharris.com/";
-    const wantLocs = [ROOT, ROOT + "gallery.html", ROOT + "blog.html",
+    const wantLocs = [ROOT, ROOT + "gallery.html", ROOT + "blog.html", ROOT + "about.html",
                       ROOT + "blog/2607.html"];
     check("sitemap lists every managed page and every month, and nothing else",
       JSON.stringify(locs) === JSON.stringify(wantLocs), JSON.stringify(locs));
@@ -8761,7 +8823,7 @@ async function main() {
       return b === -1 ? "" : src.slice(a, b + close.length);
     };
     const wantHeader = liftPaths(cut(blogSrc, '<header class="site-header"', "</header>"));
-    const wantContact = liftPaths(cut(blogSrc, '<section class="contact"', "</section>"));
+    const wantFooter = liftPaths(cut(blogSrc, '<footer class="site-footer"', "</footer>"));
     // the comparison is against the blog.html of THIS bundle, so it proves
     // the two files the publish just wrote agree with each other
     check("month page carries the site header, byte-identical to the page that published it",
@@ -8769,12 +8831,12 @@ async function main() {
       wantHeader ? (month.includes(wantHeader) ? "header " + wantHeader.length + " bytes"
         : firstDiff(wantHeader, month.slice(month.indexOf('<header class="site-header"'))))
         : "no header found in the bundle's blog.html");
-    check("month page carries the contact block, byte-identical to the page that published it",
-      wantContact.length > 200 && month.includes(wantContact) &&
-      /class="endbar"/.test(month),
-      wantContact ? (month.includes(wantContact) ? "contact " + wantContact.length + " bytes"
-        : firstDiff(wantContact, month.slice(month.indexOf('<section class="contact"'))))
-        : "no contact found in the bundle's blog.html");
+    check("month page carries the site footer, About and Contact, byte-identical to the page that published it",
+      wantFooter.length > 200 && month.includes(wantFooter) && /id="about"/.test(wantFooter) &&
+      /id="contact"/.test(wantFooter) && /class="endbar"/.test(wantFooter),
+      wantFooter ? (month.includes(wantFooter) ? "footer " + wantFooter.length + " bytes"
+        : firstDiff(wantFooter, month.slice(month.indexOf('<footer class="site-footer"'))))
+        : "no footer found in the bundle's blog.html");
     // the drawer needs its scrim, or the nav is unusable on a phone
     check("month page carries the nav scrim and the progress bar",
       month.includes('id="navOverlay"') && month.includes('id="progress"'),
@@ -8785,6 +8847,7 @@ async function main() {
     check("month page: the lifted chrome's paths are written for a page in blog/",
       month.includes('href="../index.html#work"') && month.includes('href="../gallery.html"') &&
       month.includes('href="../blog.html"') && month.includes('href="#contact"') &&
+      month.includes('href="../about.html"') &&
       month.includes('src="../aaron-portfolio-portrait-transparent.png"') &&
       month.includes('href="mailto:contact@aaronmichaelharris.com"'),
       (month.match(/href="\.\.\/[^"]*"/g) || []).slice(0, 6).join(" "));
@@ -9270,6 +9333,14 @@ async function main() {
         scrim: !!document.getElementById('navOverlay'),
         contact: !!document.getElementById('contact'),
         endbar: !!document.querySelector('.endbar'),
+        about: !!document.querySelector('footer.site-footer #about'),
+        /* a month page has no data-portrait-bg, and its portraits still
+           get the site's glow */
+        attr: document.documentElement.hasAttribute('data-portrait-bg'),
+        glow: (function () {
+          var b = document.querySelector('.site-footer .portrait-bg');
+          return b ? getComputedStyle(b).backgroundImage : '';
+        })(),
         headerH: getComputedStyle(document.documentElement).getPropertyValue('--header-h').trim(),
         headerTop: getComputedStyle(document.documentElement).getPropertyValue('--header-top').trim(),
         /* the column must START below the fixed header, and the bar must be
@@ -9286,8 +9357,10 @@ async function main() {
       JSON.stringify(chrome.current) === '["../blog.html"]' &&
       chrome.toggle && chrome.scrim,
       JSON.stringify({ links: chrome.links, current: chrome.current }));
-    check("month page: the contact block and its endbar are on the page",
-      chrome.contact && chrome.endbar, JSON.stringify(chrome).slice(0, 160));
+    check("month page: the site footer is on the page, with About, Contact and the endbar",
+      chrome.about && chrome.contact && chrome.endbar, JSON.stringify(chrome).slice(0, 160));
+    check("month page: with no data-portrait-bg, the portraits get the site's glow",
+      chrome.attr === false && /radial-gradient/.test(chrome.glow), JSON.stringify({ attr: chrome.attr, glow: chrome.glow.slice(0, 60) }));
     // MC4c. The corner mark, on a month page as on every other page. A new
     // post cannot start here: a month page carries its month list and not
     // the counters. So the composer does not open on this page. The work

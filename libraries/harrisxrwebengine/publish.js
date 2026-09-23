@@ -3934,9 +3934,9 @@
      carry the bytes of them. These four blocks are taken whole out of the
      page being published, which is a managed page whose shared spans the
      editor holds byte-identical across every managed page. So a month
-     file shows the site's own header and the site's own contact block,
-     and a rename in the editor reaches it at the next rebuild, exactly
-     as the wordmark already does.
+     file shows the site's own header and the site's own footer, and a
+     rename in the editor reaches it at the next rebuild, exactly as the
+     wordmark already does.
 
      Do not edit these blocks in a month file. The next rebuild writes
      them again from the managed page. */
@@ -3963,9 +3963,12 @@
       progress: bcCut(src, '<div class="progress"', "</div>"),
       header: bcLiftPaths(bcCut(src, '<header class="site-header"', "</header>")),
       scrim: bcCut(src, '<div class="nav-overlay"', "</div>"),
-      /* the contact block carries the endbar, which is the copyright line,
-         so a month file needs no footer of its own */
-      contact: bcLiftPaths(bcCut(src, '<section class="contact"', "</section>"))
+      /* The site's footer closes every page of the site, a month file
+         too. A page with no footer gives its contact section instead,
+         so a site that has not added a footer keeps the block its month
+         files carry. */
+      footer: bcLiftPaths(bcCut(src, '<footer class="site-footer"', "</footer>") ||
+        bcCut(src, '<section class="contact"', "</section>"))
     };
   }
 
@@ -4077,9 +4080,8 @@
       "    </main>\n" +
       foot +
       "  </div>\n\n" +
-      /* the contact block carries the endbar, which is the copyright line,
-         so a month file needs no footer of its own */
-      "  " + meta.chrome.contact + "\n" +
+      /* the site's footer, lifted whole like the header */
+      "  " + meta.chrome.footer + "\n" +
       /* The months, for the picker. A month page has no manifest of its
          own and needs no entries: the one thing the picker reads is the
          month list, and blog.js takes this line as it takes the list it

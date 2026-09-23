@@ -22,7 +22,7 @@
   var src = (document.currentScript && document.currentScript.src) || "";
   AMH.release = {
     id: "harrisxrwebengine",
-    version: "1.0.1",
+    version: "1.1.0",
     root: src.replace(/[^\/]*$/, "")
   };
 })();

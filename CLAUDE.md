@@ -154,13 +154,19 @@ project only. It does not repeat the baseline.
 The site's own files are at the root. The engine is in
 `libraries/harrisxrwebengine/`, a folder a site takes whole.
 
+Every managed page closes with the same site footer, `footer.site-footer`:
+the About and the Contact sections. Their copy regions are shared, the
+contract test holds the footer byte-identical on every managed page, and
+each month page carries a copy that the composer takes from `blog.html`.
+
 | File | Job |
 | --- | --- |
-| `index.html` | Home page. Hero, work, about, and contact. |
+| `index.html` | Home page. Hero, work, and the latest posts. |
 | `gallery.html` | Gallery page. The six-column tile grid. |
 | `blog.html` | Blog page. The stream, the post manifest, and the composer. |
+| `about.html` | About page. Its own heading over the site footer, whose About is the page's content. |
 | `site.config.js` | This site's facts for the engine: its id, the engine release it pins, its name, address and social image, the managed pages, the shared slugs, and whether it has a blog. Every page loads it second. |
-| `site.css` | This site's style: the theme tokens, the backdrop, the header and nav, the hero, the project cards, and about and contact. Every page links it after `engine.css`. |
+| `site.css` | This site's style: the theme tokens, the backdrop, the header and nav, the hero, the project cards, about and contact, and the About page. Every page links it after `engine.css`. |
 | `search.js` | GENERATED. The index of every post, read by find. Do not edit by hand. |
 | `images.js` | GENERATED. The image index: every image and media file the site holds, its kind, its facts and where it is used. Written by a save, a publish, Super Delete and Restore, loaded by the editor only. Do not edit by hand. |
 | `superdeleted.js` | GENERATED. The log of every Super Delete: when, the paths, the typed entry as it was, and when it was restored. Written by the Media box, loaded by it and by a rebuild only. Do not edit by hand. |
@@ -184,6 +190,7 @@ In `libraries/harrisxrwebengine/`:
 | `gallery.js` | The tile packer and the editor's tile consumer. `gallery.html` only. |
 | `tool.js` | The copy editor, image editing, the Markdown bar, and the export. It reaches the blog composer only through the slot the composer fills, `AMH.tool.blog`. |
 | `publish.js` | The blog composer and the publish bundle. `blog.html` and the month pages, where it fills the editor's slot when it loads. |
+| `CHANGES.md` | The release notes: each engine release, newest first, with the summary of the commit that made it. |
 
 Each JavaScript trunk is a seven-section manifold. Stretch a trunk to eight
 sections only when a distinct job cannot merge into another section. Two
@@ -237,7 +244,9 @@ the page it is on.
 - The engine's version is separate. `libraries/harrisxrwebengine/release.js`
   states it in Semantic Versioning: a patch fixes, a minor adds, and a major
   breaks a documented contract. Change it when a release goes to another site,
-  and change the pin in `site.config.js` in the same commit.
+  and change the pin in `site.config.js` in the same commit. That commit also
+  adds its summary to the top of the engine's `CHANGES.md`, under the new
+  version.
 - The user makes every commit and push. Claude never runs a Git write command.
 - `node tools/e2e/e2e_test.mjs` and `py -3 tools/e2e/check_markers.py` must both
   pass before each commit.

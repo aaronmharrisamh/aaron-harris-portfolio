@@ -1,55 +1,67 @@
 <!DOCTYPE html>
-<html lang="en">
 <!-- ============================================================
-     gallery.html - the gallery page.
+     about.html - the About page.
 
-     The long form of the work: every project as a train of image
-     tiles, six columns wide.
+     The About itself is in the site footer, which every page
+     carries. This page puts its own heading over that footer, so
+     the About has an address of its own. An edit to the About on
+     any page is written to every page.
 
-     Six sections. No hero: this page is one job, and the site
-     footer closes it.
+     Sections:
+       1. HEAD AND META      3. INTRO
+       2. CHROME             4. FOOTER
 
-       1. HEAD AND META      4. GALLERY
-       2. CHROME             5. FOOTER
-       3. INTRO              6. DATA
-
-     The grid rules and the reason for each of them are in section 3
-     of the engine's engine.css. The packer in gallery.js arranges the
-     tiles, and the page is correct with no script at all.
+     Four sections. The page has one job, and the footer does
+     most of it.
      ============================================================ -->
 
+<html lang="en" data-portrait-bg="1">
 <head>
   <!-- ============================================================
        1. HEAD AND META
        ------------------------------------------------------------
-       This page's own title, canonical and social cards. The
-       stylesheets and the script set are the site's.
+       This page's own title, canonical and social cards. Every page
+       carries its own; they are not shared chrome.
        ============================================================ -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gallery · Aaron M. Harris</title>
-  <meta name="description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
-  <link rel="canonical" href="https://aaronmichaelharris.com/gallery.html" />
-  <link rel="alternate" type="application/atom+xml" title="Aaron M. Harris - Blog" href="feed.xml" />
-  <meta name="theme-color" content="#0d1014" />
 
+  <title>About · Aaron M. Harris</title>
+  <meta name="description" content="About Aaron M. Harris: a technical lead and solutions architect who has shipped production software since 2011, based in Traverse City, Michigan." />
+  <meta name="author" content="Aaron M. Harris" />
+  <meta name="theme-color" content="#16181d" />
+  <link rel="canonical" href="https://aaronmichaelharris.com/about.html" />
+  <link rel="alternate" type="application/atom+xml" title="Aaron M. Harris - Blog" href="feed.xml" />
+
+  <!-- Favicons -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+
+  <!-- Open Graph / social share -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Aaron M. Harris" />
-  <meta property="og:title" content="Gallery · Aaron M. Harris" />
-  <meta property="og:description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
-  <meta property="og:url" content="https://aaronmichaelharris.com/gallery.html" />
+  <meta property="og:title" content="About · Aaron M. Harris" />
+  <meta property="og:description" content="About Aaron M. Harris: a technical lead and solutions architect who has shipped production software since 2011, based in Traverse City, Michigan." />
+  <meta property="og:url" content="https://aaronmichaelharris.com/about.html" />
   <meta property="og:image" content="https://aaronmichaelharris.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="Aaron M. Harris - Technical Lead &amp; Solutions Architect." />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Gallery · Aaron M. Harris" />
-  <meta name="twitter:description" content="Project galleries from Aaron M. Harris: simulation, visualization, and the tools built around them." />
-  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
 
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="About · Aaron M. Harris" />
+  <meta name="twitter:description" content="About Aaron M. Harris: a technical lead and solutions architect who has shipped production software since 2011, based in Traverse City, Michigan." />
+  <meta name="twitter:image" content="https://aaronmichaelharris.com/og-image.png" />
+  <meta name="twitter:creator" content="@aaronmharrisamh" />
+
+  <!-- Inter via Google Fonts (with a robust system fallback in CSS) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
 
   <!-- The engine's style first and this site's second, so this site's
        tokens set the theme. -->
@@ -61,11 +73,7 @@
        release.js names the engine release and creates window.AMH, the one
        namespace the trunks share, and site.config.js holds this site's
        facts. Both come first. The trunks are the engine's, in
-       libraries/harrisxrwebengine/.
-       work.js is here for the lightbox, which Phase 4 Part 4 hands the tiles.
-       gallery.js is the tile packer AND the editor's tile consumer, on this
-       page and nowhere else. It follows tool.js because it claims its region
-       with the editor kit at load, the way publish.js registers itself.
+       libraries/harrisxrwebengine/: the set for a page of copy.
        imagesengine.js is the image engine. Every image the site takes in
        goes through it, so every page loads it, after work.js and before
        the trunks that call it. -->
@@ -75,10 +83,9 @@
   <script defer src="libraries/harrisxrwebengine/work.js"></script>
   <script defer src="libraries/harrisxrwebengine/imagesengine.js"></script>
   <script defer src="libraries/harrisxrwebengine/tool.js"></script>
-  <script defer src="libraries/harrisxrwebengine/gallery.js"></script>
 
   <!-- Graceful degradation: without JS the reveal animations never fire, so
-       force all content visible. The tiles are static markup either way.
+       force all content visible.
        These rules stay inline. A <noscript> block applies only when scripting
        is off, and a linked stylesheet cannot carry that condition. -->
   <noscript>
@@ -88,7 +95,7 @@
   </noscript>
 </head>
 
-<body>
+<body class="about-page">
   <!-- ============================================================
        2. CHROME
        ------------------------------------------------------------
@@ -97,8 +104,8 @@
 
        The header is shared chrome: byte-identical on every managed
        page, and held to that by the contract test. Its copy regions
-       are shared too - an edit to one is written to every page that
-       has it, in the same publish. See docs/README.md.
+       are shared too: an edit to one is written to every page that
+       has it, in the same publish.
        ============================================================ -->
   <div class="progress" id="progress" aria-hidden="true"></div>
 
@@ -159,166 +166,27 @@
     <!-- ============================================================
          3. INTRO
          ------------------------------------------------------------
-         What this page is, in two sentences. Editable copy.
+         The page's heading. The About under it is the footer's.
+         The about-page class on body lets site.css hide the footer's
+         About eyebrow here, because the heading already says it.
          ============================================================ -->
-    <section class="gal-intro" aria-label="About this gallery">
+    <section class="page-intro" aria-label="Introduction">
       <div class="wrap">
         <div class="section-head reveal">
-          <!--[edit:gallery-eyebrow]-->
-          <span class="eyebrow">Gallery</span>
-          <!--[/edit:gallery-eyebrow]-->
+          <!--[edit:aboutpage-eyebrow]-->
+          <span class="eyebrow">About</span>
+          <!--[/edit:aboutpage-eyebrow]-->
+          <!--[edit:aboutpage-h1]-->
+          <h1>Aaron M. Harris</h1>
+          <!--[/edit:aboutpage-h1]-->
         </div>
-        <!--[edit:gallery-h2]-->
-        <h2>The work, at length.</h2>
-        <!--[/edit:gallery-h2]-->
-        <!--[edit:gallery-intro]-->
-        <p class="lede">Every project as its own train of images: interfaces, simulations, and the
-          quieter engineering behind them. The home page shows the highlights; this page shows the
-          rest.</p>
-        <!--[/edit:gallery-intro]-->
-        <!--[edit:gallery-note]-->
-        <p class="gal-note">This gallery is being filled. One project is up so far, with the others
-          following as their images are prepared.</p>
-        <!--[/edit:gallery-note]-->
-      </div>
-    </section>
-
-    <!-- ============================================================
-         4. GALLERY
-         ------------------------------------------------------------
-         One train per section. A train opens with its title band,
-         spanning all six columns and exactly one row tall, and then
-         its tiles.
-
-         The trains are a LIST: the editor may add one, remove one and
-         reorder them, which no other region allows. Each train is one
-         item, and its id is permanent. Add or remove a train by hand
-         here and its [item:] pair goes with it.
-
-         A section is not tied to a project. It is a label, a title, a
-         year and its tiles, so a set of travel photographs is as much a
-         section as a piece of work is.
-
-         Two things in the band are written for the author and must not
-         be typed here: the number, which is a CSS counter, and the image
-         count, which the editor writes at export.
-
-         The invariant the design rests on: every tile is exactly one
-         row tall, and the widths in a row add to exactly six. An
-         interior hole is therefore impossible rather than avoided.
-         Only the last row of a train may be short.
-
-         Each tile carries three numbers. data-w is the width the image
-         prefers, written for six columns. data-priority is the order
-         the author wants, lower first. data-span is the width the tile
-         is DRAWN at.
-
-         With the editor on, a tile wears four controls: its chip, which
-         opens the section's photos; the three width buttons; the
-         priority field; and a trash. A caption wears a pencil, and the
-         band wears a + Photo pill. None of them is ever exported. A
-         photograph is added through + Photo, through the button on the
-         empty tile a section with none shows, or by dropping files
-         anywhere on the section.
-
-         The packer in gallery.js reads the first two and writes the
-         third, as an inline style rather than into the markup: a span
-         is a decision about one viewport width, not a fact about the
-         image. The data-span authored here is that same packer's
-         answer at six columns, so a reader with no script sees the
-         layout a reader with one sees.
-         ============================================================ -->
-    <section class="gal" id="gallery" aria-label="Project galleries">
-      <div class="wrap">
-
-        <!--[list:gallery]-->
-        <!--[item:tbg]-->
-        <!--[edit:gal-tbg]-->
-        <div class="gal-train" data-section="tbg">
-          <header class="gal-train__head">
-            <span class="gal-train__n"><i class="gal-train__i"></i>Section</span>
-            <h3 class="gal-train__title">Forerunner</h3>
-            <span class="gal-train__rule" aria-hidden="true"></span>
-            <span class="gal-train__meta"><span class="gal-train__year">2026</span><span class="gal-train__count">1 image</span></span>
-          </header>
-          <figure class="gal-tile" data-w="2" data-priority="0" data-span="2">
-            <img src="img/work/satellitetest-h9mf0w.jpg"
-                 srcset="img/work/satellitetest-h9mf0w_sd.webp 480w, img/work/satellitetest-h9mf0w.jpg 853w"
-                 sizes="(max-width: 560px) 92vw, (max-width: 880px) 30vw, 352px"
-                 width="853"
-                 height="645"
-                 alt="satellitetest" loading="lazy" decoding="async"
-                 data-sd="img/work/satellitetest-h9mf0w_sd.webp"
-                 data-original="img/work/satellitetest-h9mf0w_original.png"
-                 data-original-size="853x645"
-                 data-original-bytes="367973" />
-            <figcaption class="gal-tile__cap">Caption!</figcaption>
-          </figure>
-        </div>
-        <!--[/edit:gal-tbg]-->
-        <!--[/item:tbg]-->
-
-        <!--[item:br]-->
-        <!--[edit:gal-br]-->
-        <div class="gal-train" data-section="br">
-          <header class="gal-train__head">
-            <span class="gal-train__n"><i class="gal-train__i"></i>Project</span>
-            <h3 class="gal-train__title">Blockade Runner</h3>
-            <span class="gal-train__rule" aria-hidden="true"></span>
-            <span class="gal-train__meta"><span class="gal-train__year">2024</span><span class="gal-train__count">8 images</span></span>
-          </header>
-          <figure class="gal-tile" data-w="2" data-priority="1" data-span="2">
-            <img src="img/seed/blockade-01.jpg" alt="Bridge interior" loading="lazy" decoding="async"
-                 width="1600" height="900" />
-            <figcaption class="gal-tile__cap">Bridge interior</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="2" data-priority="1" data-span="2">
-            <img src="img/seed/forerunner-01.jpg" alt="Approach vector" loading="lazy" decoding="async"
-                 width="1600" height="900" />
-            <figcaption class="gal-tile__cap">Approach vector</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="2" data-priority="2" data-span="2">
-            <img src="img/seed/phillips-01.jpg" alt="Instrument column" loading="lazy" decoding="async"
-                 width="1600" height="900" />
-            <figcaption class="gal-tile__cap">Instrument column</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="3" data-priority="1" data-span="3">
-            <img src="img/seed/planetarium-02.jpg" alt="Star field calibration" loading="lazy" decoding="async"
-                 width="1500" height="500" />
-            <figcaption class="gal-tile__cap">Star field calibration</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="3" data-priority="2" data-span="3">
-            <img src="img/seed/planetarium-01.jpg" alt="Dome projection test" loading="lazy" decoding="async"
-                 width="1600" height="900" />
-            <figcaption class="gal-tile__cap">Dome projection test</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="4" data-priority="2" data-span="4">
-            <img src="img/seed/cognition-vr-03.jpg" alt="Orbital debris traversal" loading="lazy" decoding="async"
-                 width="1600" height="800" />
-            <figcaption class="gal-tile__cap">Orbital debris traversal</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="2" data-priority="3" data-span="2">
-            <img src="img/seed/forerunner-03.jpg" alt="Timeline scrub" loading="lazy" decoding="async"
-                 width="1200" height="1200" />
-            <figcaption class="gal-tile__cap">Timeline scrub</figcaption>
-          </figure>
-          <figure class="gal-tile" data-w="3" data-priority="3" data-span="3">
-            <img src="img/seed/aitooling-01.jpg" alt="Engine chic UI" loading="lazy" decoding="async"
-                 width="1600" height="900" />
-            <figcaption class="gal-tile__cap">Engine chic UI</figcaption>
-          </figure>
-        </div>
-        <!--[/edit:gal-br]-->
-        <!--[/item:br]-->
-        <!--[/list:gallery]-->
-
       </div>
     </section>
 
   </main>
 
   <!-- ============================================================
-       5. FOOTER
+       4. FOOTER
        ------------------------------------------------------------
        About and Contact, which close every page. Shared chrome,
        like the header: byte-identical on every managed page, and
@@ -429,16 +297,6 @@
       <!--[/edit:endbar]-->
     </section>
   </footer>
-
-  <!-- ============================================================
-       6. DATA
-       ------------------------------------------------------------
-       Inert content the scripts read. Nothing here renders.
-
-       The tile model lives in the markup above, on each figure, not
-       in a manifest: a tile is an image with a width and a caption,
-       and the page has to be meaningful with no script at all.
-       ============================================================ -->
 
   <!-- ╔══════════════════════════════════════════════════════════════════════╗
        ║  BUILT-IN COPY EDITOR (hidden) · activate from the F12 console: edit()  ║

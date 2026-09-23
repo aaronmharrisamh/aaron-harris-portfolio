@@ -12,16 +12,15 @@
      one pair: tools/e2e/check_markers.py enforces both rules.
 
      Sections:
-       1. HEAD AND META      5. LATEST FROM THE BLOG
-       2. CHROME             6. ABOUT
-       3. HERO               7. CONTACT AND FOOTER
-       4. WORK
+       1. HEAD AND META      4. WORK
+       2. CHROME             5. LATEST FROM THE BLOG
+       3. HERO               6. FOOTER
      ============================================================ -->
 
 <!-- Rule: data-portrait-bg="N" on <html> selects the fill painted behind
      both portrait cutouts, the header circle and the About circle. The CSS
-     defines one option, 1 (Azure Spotlight). Add a matching block in
-     site.css before setting any other value. -->
+     defines one option, 1 (Azure Spotlight), and a page with no value gets
+     it too. Add a matching block in site.css before setting any other value. -->
 <html lang="en" data-portrait-bg="1">
 <head>
   <!-- ============================================================
@@ -164,7 +163,7 @@
         <a href="blog.html">Blog</a>
         <!--[/edit:nav-blog]-->
         <!--[edit:nav-about]-->
-        <a href="index.html#about">About</a>
+        <a href="about.html">About</a>
         <!--[/edit:nav-about]-->
         <!--[edit:nav-contact]-->
         <a href="#contact">Contact</a>
@@ -1027,9 +1026,19 @@ Low hardware requirements were a deliberate specialty. The software cold-loads i
       </div>
     </section>
 
-    <!-- ============================================================
-         6. ABOUT
-         ============================================================ -->
+  </main>
+
+  <!-- ============================================================
+       6. FOOTER
+       ------------------------------------------------------------
+       About and Contact, which close every page. Shared chrome,
+       like the header: byte-identical on every managed page, and
+       held to that by the contract test. Its copy regions are
+       shared, so an edit to one is written to every page. A month
+       page carries the same bytes, taken from blog.html when the
+       blog is published or rebuilt.
+       ============================================================ -->
+  <footer class="site-footer">
     <section class="about" id="about" aria-label="About Aaron">
       <div class="wrap">
         <div class="section-head reveal"><!--[edit:about-eyebrow]--><span class="eyebrow">About</span><!--[/edit:about-eyebrow]--></div>
@@ -1068,11 +1077,6 @@ Low hardware requirements were a deliberate specialty. The software cold-loads i
       </div>
     </section>
 
-    <!-- ============================================================
-         7. CONTACT AND FOOTER
-         ------------------------------------------------------------
-         The closing call to action and the end bar.
-         ============================================================ -->
     <section class="contact" id="contact" aria-label="Contact">
       <div class="wrap">
         <div class="reveal">
@@ -1135,8 +1139,7 @@ Low hardware requirements were a deliberate specialty. The software cold-loads i
       <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
       <!--[/edit:endbar]-->
     </section>
-
-  </main>
+  </footer>
 
 
   <!-- ╔══════════════════════════════════════════════════════════════════════╗

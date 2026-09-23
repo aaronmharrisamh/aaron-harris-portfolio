@@ -135,8 +135,8 @@
   AMH.tool.pages = MANAGED_PAGES;
 
   /* Copy that appears on more than one managed page and has to read the same
-     on all of them: the brand and the nav in the header, and the contact
-     section that closes every page.
+     on all of them: the brand and the nav in the header, and the footer
+     that closes every page.
 
      An edit to one of these is staged for every other managed page in the
      same act, so the pages cannot drift apart. Nothing here generates the
@@ -9793,7 +9793,7 @@
   /* Slugs the export may skip instead of failing on.
 
      A shared region is staged for every managed page. A page that does not
-     carry it - one with no contact section, or one where the region was
+     carry it - one with no footer, or one where the region was
      removed on purpose - is not an error: that copy does not belong there.
      Losing a whole export over it would be the worse outcome.
 

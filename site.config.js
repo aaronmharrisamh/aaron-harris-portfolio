@@ -28,7 +28,7 @@
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "amh",
-  engineVersion: "1.0.1",
+  engineVersion: "1.1.0",
   siteName: "Aaron M. Harris",
   brand: "AARON M. HARRIS",
   description: "Thoughts, musings, and fun new developments from Aaron M. Harris",
@@ -39,10 +39,12 @@ AMH.config = {
   pages: [
     { path: "index.html", label: "Home" },
     { path: "gallery.html", label: "Gallery" },
-    { path: "blog.html", label: "Blog" }
+    { path: "blog.html", label: "Blog" },
+    { path: "about.html", label: "About" }
   ],
   sharedSlugs: ["brand-title", "brand-sub", "nav-work", "nav-gallery", "nav-blog", "nav-about",
-    "nav-contact", "contact-eyebrow", "contact-h2", "contact-email", "contact-btn-email",
-    "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar"],
+    "nav-contact", "about-eyebrow", "about-lede", "about-p1", "about-p2", "about-p3",
+    "about-place", "about-link", "contact-eyebrow", "contact-h2", "contact-email",
+    "contact-btn-email", "contact-btn-call", "contact-btn-txt", "contact-btn-resume", "endbar"],
   blog: true
 };

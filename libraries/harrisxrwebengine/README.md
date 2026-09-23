@@ -43,6 +43,7 @@ the site that uses it.
 | `gallery.js` | The gallery page's tile packer and its editor. |
 | `tool.js` | The editor, the splice and the export. It reaches the blog composer only through the slot the composer fills, `AMH.tool.blog`. |
 | `publish.js` | The blog composer and the publish bundle. It fills the editor's slot when it loads. |
+| `CHANGES.md` | The release notes: each release, newest first, with the summary of the commit that made it. |
 
 Rule: a site takes this folder whole and never edits it in place.
 A fix goes into the engine and comes back to the site as a release.
@@ -102,7 +103,7 @@ open and names the missing file.
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "lawn",
-  engineVersion: "1.0.1",
+  engineVersion: "1.1.0",
   siteName: "Greenline Mowing",
   brand: "GREENLINE MOWING",
   publicUrl: "https://greenline.example/",
@@ -212,6 +213,11 @@ the header's look; `#navToggle`, `#nav` and `#navOverlay`, the drawer on a
 narrow screen. A nav link whose address is the page's own is marked
 `aria-current="page"`.
 
+**The footer.** A page may close with `<footer class="site-footer">`,
+after `main`. Keep it the same on every page and list its regions in
+`sharedSlugs`, and an edit to it reaches every page. On a site with a
+blog, a month page carries it too: see section 7.
+
 **The carousel.** A plain list of images. `work.js` builds the carousel,
 its arrows, its dots and its lightbox from it:
 
@@ -288,6 +294,12 @@ names: `blog.html` at the root and the month pages in `blog/`.
   `text/plain` and marked `data-ced="blog"`: the blog's counters, its
   publish stamp and one line for each post.
 
+A month page is a page of the site. At each publish and rebuild, the
+composer copies the header of `blog.html`, `header.site-header`, and its
+footer, `footer.site-footer`, into the month page whole. It writes each
+relative path in them for a page one folder down. A `blog.html` with no
+such footer gives its `section.contact` instead.
+
 The composer writes the month pages, `search.js`, `feed.xml`,
 `sitemap.xml` and `robots.txt`. A save, a publish, a Super Delete and a
 Restore write the image index, `images.js`, and a Super Delete and a
@@ -338,13 +350,18 @@ the `images.js` it wrote into the layer.
 3. Open each page. The editor opens, and `AMH.release.version` in the
    console is the new version. A page that says the pin is wrong has an
    old `site.config.js` or an old folder.
-4. When the release notes say the generated pages changed, open
-   `blog.html`, run `edit.blog.rebuild()`, deliver the bundle, and commit
-   it. A site with no blog skips this step.
+4. When `CHANGES.md` says the month pages changed, open `blog.html`,
+   run `edit.blog.rebuild()`, deliver the bundle, and commit it. A site
+   with no blog skips this step.
 
 The site keeps its pages, its content, its `site.css` and its
 `site.config.js` through every upgrade. A release that needs a change to
-any of them is a major version, and its notes say what to change.
+any of them is a major version, and its entry in `CHANGES.md` says what
+to change.
+
+**Changes.** `CHANGES.md` in this folder lists each release, newest
+first, with the summary of the commit that made it. A release adds its
+entry in the commit that changes the version.
 
 **The pin.** While `engineVersion` and `release.js` differ, or either file
 is missing, the page still reads. The editor refuses to open, and its box

@@ -1,7 +1,8 @@
 /* ============================================================
    site.css - this site's own style: the theme tokens, the page's
    backdrop, the header and nav, the hero, the project cards, the
-   about and contact blocks, and their breakpoints.
+   about and contact blocks of the footer, the About page, and their
+   breakpoints.
 
    The engine's style is in libraries/harrisxrwebengine/engine.css.
    Every page links that file first and this one second, so a rule
@@ -575,6 +576,7 @@ body.nav-open { overflow: hidden; }
    SECTION HEADINGS
    ------------------------------------------------------------ */
 .section-head { max-width: 60ch; margin-bottom: clamp(2.5rem, 6vw, 4.5rem); }
+.section-head h1,
 .section-head h2 {
   font-size: clamp(2rem, 4.4vw, 2.9rem);
   letter-spacing: -.02em; font-weight: 800; line-height: 1.08;
@@ -726,6 +728,17 @@ body.nav-open { overflow: hidden; }
 .about__body .textlink { margin-top: 1.6rem; }
 
 /* ------------------------------------------------------------
+   THE ABOUT PAGE
+   ------------------------------------------------------------
+   about.html is a heading over the site footer, and the footer's
+   About is the page's content. The heading names the page, so the
+   About shows no eyebrow of its own there. It starts close under
+   the heading, because the heading opens the same subject. */
+.page-intro { padding-top: var(--section-pad); }
+.about-page .site-footer .about { padding-top: 0; }
+.about-page .site-footer .about .section-head { display: none; }
+
+/* ------------------------------------------------------------
    CONTACT / FOOTER
    ------------------------------------------------------------ */
 .contact {
@@ -808,6 +821,8 @@ body.nav-open { overflow: hidden; }
    fill is selected by [data-portrait-bg="N"] on <html>. One option
    ships: 1, Azure Spotlight. To try another, add a matching
    [data-portrait-bg="N"] block here and set that value on <html>.
+   A page with no value gets option 1. A generated month page has no
+   value, and its portraits must match every other page's.
    ------------------------------------------------------------ */
 .portrait-bg {
   position: absolute; inset: 0; z-index: 0;
@@ -822,9 +837,11 @@ body.nav-open { overflow: hidden; }
 }
 
 /* 1 — Azure Spotlight: soft top-down glow that gently breathes */
+:root:not([data-portrait-bg]) .portrait-bg,
 [data-portrait-bg="1"] .portrait-bg {
   background: radial-gradient(115% 115% at 50% 22%, var(--accent-glow), var(--panel) 68%);
 }
+:root:not([data-portrait-bg]) .portrait-bg::before,
 [data-portrait-bg="1"] .portrait-bg::before {
   background: radial-gradient(58% 55% at 50% 28%, rgba(111,188,242,.5), transparent 70%);
   animation: pbgPulse 6s var(--ease-soft) infinite alternate;

@@ -12,7 +12,7 @@
      one pair.
 
      Sections:
-       1. HEAD AND META      4. CONTACT AND FOOTER
+       1. HEAD AND META      4. FOOTER
        2. CHROME             5. DATA
        3. BLOG
 
@@ -161,7 +161,7 @@
         <a href="blog.html">Blog</a>
         <!--[/edit:nav-blog]-->
         <!--[edit:nav-about]-->
-        <a href="index.html#about">About</a>
+        <a href="about.html">About</a>
         <!--[/edit:nav-about]-->
         <!--[edit:nav-contact]-->
         <a href="#contact">Contact</a>
@@ -377,12 +377,57 @@ Test abc 123
       </div>
     </section>
 
-    <!-- ============================================================
-         4. CONTACT AND FOOTER
-         ------------------------------------------------------------
-         Shared chrome, like the header: byte-identical with the home
-         page, and its copy regions are shared.
-         ============================================================ -->
+  </main>
+
+  <!-- ============================================================
+       4. FOOTER
+       ------------------------------------------------------------
+       About and Contact, which close every page. Shared chrome,
+       like the header: byte-identical on every managed page, and
+       held to that by the contract test. Its copy regions are
+       shared, so an edit to one is written to every page. A month
+       page carries the same bytes, taken from blog.html when the
+       blog is published or rebuilt.
+       ============================================================ -->
+  <footer class="site-footer">
+    <section class="about" id="about" aria-label="About Aaron">
+      <div class="wrap">
+        <div class="section-head reveal"><!--[edit:about-eyebrow]--><span class="eyebrow">About</span><!--[/edit:about-eyebrow]--></div>
+        <div class="about__grid">
+          <div class="reveal">
+            <div class="portrait">
+              <span class="portrait-bg" aria-hidden="true"></span>
+              <img src="aaron-portfolio-portrait-transparent.png" width="512" height="512"
+                   alt="Portrait of Aaron M. Harris." loading="lazy" />
+            </div>
+          </div>
+          <div class="about__body reveal d1">
+            <!--[edit:about-lede]-->
+            <p class="lede">I'm Aaron Harris, a technical lead and solutions architect who has been shipping production software since 2011. I started building games and tools when I was nine, and that lifelong systems instinct still shows up in how I architect, debug, and lead today.</p>
+            <!--[/edit:about-lede]-->
+            <!--[edit:about-p1]-->
+            <p>My range is end-to-end: full-stack systems, UI/UX, simulation, integrations, AI-assisted workflows, and the judgment to know what should be built, delegated, simplified, or protected from technical debt.</p>
+            <!--[/edit:about-p1]-->
+            <!--[edit:about-p2]-->
+            <p>My pattern is to move fluently between contributor, architect, and team lead: translating between engineers, clients, and stakeholders, turning ambiguous goals into working systems, and helping small teams keep moving when the path is not obvious.</p>
+            <!--[/edit:about-p2]-->
+            <!--[edit:about-p3]-->
+            <p>The work that lights me up has people on the other end of it: watching an audience get hooked on space, or hearing that service techs are home for dinner at 5&nbsp;p.m.</p>
+            <!--[/edit:about-p3]-->
+            <!--[edit:about-place]-->
+            <p class="place">Currently based in Traverse City, Michigan.</p>
+            <!--[/edit:about-place]-->
+            <!--[edit:about-link]-->
+            <a class="textlink" href="https://www.linkedin.com/in/aaronmichaelharris/" target="_blank" rel="noopener">
+              Read the full bio on LinkedIn
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </a>
+            <!--[/edit:about-link]-->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="contact" id="contact" aria-label="Contact">
       <div class="wrap">
         <div class="reveal">
@@ -445,8 +490,7 @@ Test abc 123
       <div class="endbar">© 2026 Aaron M. Harris · Traverse City, MI</div>
       <!--[/edit:endbar]-->
     </section>
-
-  </main>
+  </footer>
 
   <!-- ============================================================
        5. DATA
