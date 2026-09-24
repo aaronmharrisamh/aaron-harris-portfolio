@@ -144,10 +144,12 @@ project only. It does not repeat the baseline.
   that is a launcher.
 - The site must work when a person opens it from disk. Reading works offline.
   The blog stream and the publish tool need HTTP or the file hand-off.
-- The engine is made in this repository, and every other site takes
-  `libraries/harrisxrwebengine/` whole and never edits it. Edit the engine
-  here only, and make each change work for any site: `tools/e2e/fixtures/lawn/`
-  is a second site on the engine, and the suite runs it on every commit.
+- The engine is made in its own repository,
+  `github.com/HarrisXR-LLC/harrisxrwebengine`. This site takes
+  `libraries/harrisxrwebengine/` whole at each upgrade and never edits it in
+  place: a fix found here goes into the engine's repository first and comes
+  back as a release. `.localonly/tools/engine_upgrade.py` copies a release in
+  and sets the pin.
 
 ### File Map
 
@@ -173,7 +175,8 @@ each month page carries a copy that the composer takes from `blog.html`.
 | `feed.xml` | GENERATED. The Atom feed. Do not edit by hand. |
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |
-| `tools/e2e/` | The test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. `fixtures/lawn/` is Greenline Mowing, a second site on the engine with a page in a folder, no blog and a light theme; the LW section runs it beside this site to prove the engine is not tied to it. |
+| `addendum.ini` | Dated notes about this repository that are not rules, one section per note. |
+| `.localonly/` | Local only. Git ignores it, so the suites and tools stay out of the public repository. `tools/e2e/` is the test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. `tools/engine_upgrade.py` takes a release of the engine in, `tools/engine_same.py` proves two copies of the engine are the same, and `tools/gen_placeholders.py` makes the seed images. |
 
 In `libraries/harrisxrwebengine/`:
 
@@ -241,15 +244,15 @@ the page it is on.
 
 - The site's version format is `V0NN`. The commit message carries it, and
   nothing else records it: `git log` is the answer to "what version is this".
-- The engine's version is separate. `libraries/harrisxrwebengine/release.js`
-  states it in Semantic Versioning: a patch fixes, a minor adds, and a major
-  breaks a documented contract. Change it when a release goes to another site,
-  and change the pin in `site.config.js` in the same commit. That commit also
-  adds its summary to the top of the engine's `CHANGES.md`, under the new
-  version.
+- The engine's version is separate, and the engine's repository sets it.
+  `libraries/harrisxrwebengine/release.js` states it in Semantic Versioning:
+  a patch fixes, a minor adds, and a major breaks a documented contract. This
+  site pins it in `site.config.js`. An upgrade commit changes the engine's
+  folder and the pin together, and reads `V0NN - upgrade the engine to X.Y.Z`.
 - The user makes every commit and push. Claude never runs a Git write command.
-- `node tools/e2e/e2e_test.mjs` and `py -3 tools/e2e/check_markers.py` must both
-  pass before each commit.
+- `node .localonly/tools/e2e/e2e_test.mjs` and
+  `py -3 .localonly/tools/e2e/check_markers.py` must both pass before each
+  commit.
 - Do not use em dashes in copy for the webpage.
 - `docs/` is in `.gitignore`. It holds the plans, the manual, and the mockups.
 - `CLAUDE.md` is committed. It is not in `.gitignore`, because the rules ship

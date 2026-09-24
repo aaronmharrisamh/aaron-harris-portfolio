@@ -9,7 +9,7 @@
      Copy the editor can change is fenced by [edit:slug] comment
      pairs, each wrapping exactly one element. Do not nest a pair
      more than one level deep, and do not put two elements inside
-     one pair: tools/e2e/check_markers.py enforces both rules.
+     one pair: the marker checker, check_markers.py, enforces both rules.
 
      Sections:
        1. HEAD AND META      4. WORK
@@ -258,9 +258,9 @@
          carousels; the editor treats each gallery as an image region.
 
          TODO: the gallery images are stand-ins from img/seed/, made by
-         tools/gen_placeholders.py. Replace the <img> src values with
-         real photos, then retire img/seed/ and that script. Originals
-         are archived in /archived/.
+         the seed generator, gen_placeholders.py. Replace the <img> src
+         values with real photos, then retire img/seed/ and that script.
+         Originals are archived in /archived/.
          ============================================================ -->
     <section class="work" id="work" aria-label="Selected work">
       <div class="wrap">
