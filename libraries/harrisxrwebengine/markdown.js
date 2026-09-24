@@ -5,9 +5,9 @@
    preview and for the publish. There is no package manager and no build,
    so the renderer is our own, and it is small on purpose: Notepad's set
    of Markdown, plus tables, quotes and code, plus the two cut flags. The
-   set is the contract. tools/e2e/fixtures/markdown.txt holds one case for
-   each feature and each edge, and the renderer is done when every case
-   renders byte for byte. A feature outside the set is text.
+   set is the contract. A test fixture holds one case for each feature
+   and each edge, and the renderer is done when every case renders byte
+   for byte. A feature outside the set is text.
 
    Two rules keep it honest. Anything not in the set is text. Raw HTML
    passes through untouched, which is the escape hatch for the one thing

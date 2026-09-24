@@ -2,12 +2,27 @@
 
 Each release of the engine, newest first. The version is the one in
 `release.js`. Each entry is the summary of the commit that made the
-release, word for word, and `V0NN` is that commit's number in the
-engine's repository. Those commits also changed the engine's first
-site, so some lines name that site's pages.
+release, word for word.
+
+The engine is made in its own repository. From 1.1.1 on, the commit that
+makes a release carries the release's version, such as `V1.1.1`.
+
+Entries up to 1.1.0 come from the engine's first home: the repository of
+the portfolio site it was made for. They carry that repository's commit
+numbers, `V0NN`. Those commits also changed that site, so some lines name
+its pages.
 
 A site upgrades by the steps in section 9 of `README.md`. When an entry
 says the month pages changed, the site runs a rebuild after the upgrade.
+
+## 1.1.1
+
+V1.1.1 - point the guide at the engine's new home
+- bump release.js and the site's pin to 1.1.1
+- make the engine's own website the worked example
+- name the marker checker without its old path
+- name the test fixtures in comments without paths
+- say which home each CHANGES entry came from
 
 ## 1.1.0
 

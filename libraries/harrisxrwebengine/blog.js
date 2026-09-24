@@ -1803,8 +1803,8 @@
      An unclosed quote runs to the end of its group, because a person
      halfway through typing one should still see results.
 
-     tools/e2e/fixtures/queries.txt holds the cases and their parsed
-     form, and the parser is done when every line of it matches. */
+     A test fixture holds the cases and their parsed form, and the
+     parser is done when every line of it matches. */
   function searchParse(q) {
     var groups = [];
     String(q || "").split(",").forEach(function (part) {

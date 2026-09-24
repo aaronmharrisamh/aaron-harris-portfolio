@@ -103,7 +103,7 @@ open and names the missing file.
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "lawn",
-  engineVersion: "1.1.0",
+  engineVersion: "1.1.1",
   siteName: "Greenline Mowing",
   brand: "GREENLINE MOWING",
   publicUrl: "https://greenline.example/",
@@ -273,8 +273,8 @@ bottom left corner at load, on every page. Pressing it opens the editor,
 and so does `edit()` in the console. Nothing about it is written into a
 page.
 
-The engine's own repository checks the marker rules with
-`tools/e2e/check_markers.py --site <site root>`.
+The engine's repository checks these rules with a marker checker before
+every commit.
 
 ## 7. The blog contract
 
@@ -375,11 +375,16 @@ generated markup, and the stored formats.
 
 ## 10. The worked example
 
-`tools/e2e/fixtures/lawn/` in the engine's repository is Greenline
-Mowing, a fictional lawn care site built from this guide: three pages,
-one of them a folder down, a gallery, no blog, and a light green theme in
-its own `site.css`. It holds no engine file. The test suite copies this
-folder under it and runs it beside the engine's first site on one origin,
-on every commit: the load order, the pin, an edit, a shared edit, a photo
-on the nested page, a gallery tile, both delivery routes, and the storage
-names. Its `README.md` says what each file is for.
+The engine's own website is the worked example. It is the root of the
+engine's repository, built from this guide. Its home page lists the
+engine's features as a project list. It has a gallery, a blog with a
+post published through the composer, and an About page over the site
+footer. Its `site.config.js` and `site.css` are those of a complete site.
+
+The engine's suite runs that website before every commit. Beside it, the
+suite runs Greenline Mowing, a fictional lawn care site kept with the
+suite: three pages, one of them a folder down, a gallery, no blog, and a
+light green theme in its own `site.css`. It holds no engine file. The
+suite serves both sites on one origin and checks the load order, the pin,
+an edit, a shared edit, a photo on the nested page, a gallery tile, both
+delivery routes, and the storage names.

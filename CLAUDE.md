@@ -176,7 +176,7 @@ each month page carries a copy that the composer takes from `blog.html`.
 | `blog/YYMM.html` | Generated month pages. Do not edit these by hand. |
 | `img/seed/`, `img/work/` | Placeholder images and real project images. |
 | `addendum.ini` | Dated notes about this repository that are not rules, one section per note. |
-| `.localonly/` | Local only. Git ignores it, so the suites and tools stay out of the public repository. `tools/e2e/` is the test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. `tools/engine_upgrade.py` takes a release of the engine in, `tools/engine_same.py` proves two copies of the engine are the same, and `tools/gen_placeholders.py` makes the seed images. |
+| `.localonly/` | Local only. Git ignores it, so the suites and tools stay out of the public repository. `tools/e2e/` is the test harness and its fixtures. `fixtures/media/` holds real media files that `make.py` makes once, with their hashes in `manifest.json`; `media_matrix.mjs` reports what each installed browser does with them. `tools/engine_upgrade.py` takes a release of the engine in, `tools/rebuild_blog.mjs` runs the blog's rebuild headlessly and unpacks its bundle into the site, `tools/engine_same.py` proves two copies of the engine are the same, and `tools/gen_placeholders.py` makes the seed images. |
 
 In `libraries/harrisxrwebengine/`:
 

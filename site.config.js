@@ -28,7 +28,7 @@
 window.AMH = window.AMH || {};
 AMH.config = {
   siteId: "amh",
-  engineVersion: "1.1.0",
+  engineVersion: "1.1.1",
   siteName: "Aaron M. Harris",
   brand: "AARON M. HARRIS",
   description: "Thoughts, musings, and fun new developments from Aaron M. Harris",
